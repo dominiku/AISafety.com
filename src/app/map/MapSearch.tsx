@@ -421,7 +421,9 @@ export default function MapSearch({
             >
               {row.kind === 'area' ? (
                 <>
-                  <span className={styles['map-search-area-icon']}>
+                  <span
+                    className={`${styles['map-search-logo']} ${styles['map-search-area-icon']}`}
+                  >
                     <Icon
                       src="/images/icons/map.svg"
                       size={16}

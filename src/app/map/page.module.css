@@ -196,17 +196,10 @@
   object-fit: contain;
 }
 
-/* An area row ("Blog Beach") has no logo: same footprint as the logo disc so
-   the names line up, tinted like the row hover instead of white. */
+/* An area row ("Blog Beach") has no logo: the same disc holds an icon, tinted
+   like the row hover instead of white. Must come after .map-search-logo. */
 .map-search-area-icon {
-  flex: none;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
   background-color: color-mix(in srgb, var(--bright-teal-500) 10%, transparent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
 .map-search-text {
