@@ -33,8 +33,8 @@ export interface MapArea {
   y: number
 }
 
-// Every area label drawn on /map. 'Research Range' is a landmark with no
-// category of its own, so no pin is placed by it.
+// Every area label drawn on /map. 'Research Range' has no category of its
+// own: it is the umbrella over the research areas (UMBRELLA_AREAS below).
 export const MAP_AREAS: MapArea[] = [
   { label: 'Conceptual Cliffs', x: 46, y: 5.5 },
   { label: 'Resource Rock', x: 3.5, y: 8 },
@@ -63,9 +63,27 @@ const CATEGORY_BY_MAP_AREA: Record<string, string> = Object.fromEntries(
   ])
 )
 
-/** The category whose pins are drawn in an area, or null for a landmark. */
+/** The one category whose pins are drawn in an area, or null for an umbrella
+ *  area, which has none of its own. */
 export function categoryForMapArea(label: string): string | null {
   return CATEGORY_BY_MAP_AREA[label] ?? null
+}
+
+// An umbrella area spans other areas: its listings are theirs, and a search
+// pick frames them all together.
+const UMBRELLA_AREAS: Record<string, string[]> = {
+  'Research Range': [
+    'Conceptual research',
+    'Empirical research',
+    'Capabilities research',
+  ],
+}
+
+/** Every category whose pins count as inside an area: its own, or for an
+ *  umbrella area the categories it spans. */
+export function categoriesForMapArea(label: string): string[] {
+  const own = categoryForMapArea(label)
+  return own ? [own] : (UMBRELLA_AREAS[label] ?? [])
 }
 
 // Words people type for an area that neither its name nor its category holds.

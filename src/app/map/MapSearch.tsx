@@ -13,6 +13,7 @@ import {
   type MapSearchOpenMethod,
 } from '@/lib/analytics'
 import {
+  categoriesForMapArea,
   categoryForMapArea,
   primaryCategory,
   searchMapAreas,
@@ -205,12 +206,15 @@ export default function MapSearch({
     const areas = searchMapAreas(q)
       .slice(0, MAX_AREA_RESULTS)
       .map((area): SearchRow => {
-        const category = categoryForMapArea(area.label)
         return {
           kind: 'area',
           area,
-          category,
-          listings: category ? (listingsByCategory.get(category) ?? 0) : 0,
+          // Analytics slices by one category; an umbrella area has none.
+          category: categoryForMapArea(area.label),
+          listings: categoriesForMapArea(area.label).reduce(
+            (sum, category) => sum + (listingsByCategory.get(category) ?? 0),
+            0
+          ),
         }
       })
     // Same ranking as the admin map editor's search: a field starting with
@@ -429,11 +433,9 @@ export default function MapSearch({
                       {row.area.label}
                     </span>
                     <span className={styles['map-search-category']}>
-                      {row.category
-                        ? `Area · ${row.listings} ${
-                            row.listings === 1 ? 'listing' : 'listings'
-                          }`
-                        : 'Area'}
+                      {`Area · ${row.listings} ${
+                        row.listings === 1 ? 'listing' : 'listings'
+                      }`}
                     </span>
                   </span>
                 </>

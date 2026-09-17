@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   MAP_AREAS,
   MAP_AREA_BY_CATEGORY,
+  categoriesForMapArea,
   categoryForMapArea,
   mapAreaBounds,
   searchMapAreas,
@@ -24,8 +25,37 @@ describe('categoryForMapArea', () => {
     expect(categoryForMapArea('Support Shoreline')).toBe('Research support')
   })
 
-  it('has no category for a landmark', () => {
+  it('has no single category for an umbrella area', () => {
     expect(categoryForMapArea('Research Range')).toBeNull()
+  })
+})
+
+describe('categoriesForMapArea', () => {
+  it('is the one category of an ordinary area', () => {
+    expect(categoriesForMapArea('Blog Beach')).toEqual(['Blog'])
+  })
+
+  it('is the spanned categories of an umbrella area', () => {
+    expect(categoriesForMapArea('Research Range')).toEqual([
+      'Conceptual research',
+      'Empirical research',
+      'Capabilities research',
+    ])
+  })
+
+  it('gives every drawn area at least one category, so each has listings to count', () => {
+    for (const area of MAP_AREAS) {
+      expect(
+        categoriesForMapArea(area.label).length,
+        area.label
+      ).toBeGreaterThan(0)
+    }
+  })
+
+  it('only spans categories that exist', () => {
+    for (const category of categoriesForMapArea('Research Range')) {
+      expect(MAP_AREA_BY_CATEGORY[category], category).toBeDefined()
+    }
   })
 })
 

@@ -13,7 +13,7 @@ import { positionTooltip } from '@/lib/mapTooltip'
 import { MAP_BACKGROUND_URL } from '@/lib/map-images'
 import {
   MAP_AREAS,
-  categoryForMapArea,
+  categoriesForMapArea,
   mapAreaBounds,
   primaryCategory,
   type MapArea,
@@ -62,7 +62,7 @@ const LOGO_GLOBAL_SCALE = 1.0
 
 // Grid units of breathing room around an area framed from the search, so
 // edge pins and their name labels are not cut off. A landmark with no pins of
-// its own ('Research Range') gets a wider frame, to show what surrounds it.
+// its own gets a wider frame, to show what surrounds it.
 const AREA_FRAME_MARGIN = 2
 const LANDMARK_FRAME_MARGIN = 6
 
@@ -606,14 +606,13 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
         clearHighlight()
         // The area's pins: the same first-category rule that names the area
         // an org is drawn in. Decorations are not part of any area.
-        const category = categoryForMapArea(area.label)
+        const categories = categoriesForMapArea(area.label)
         const pins: { x: number; y: number }[] = []
-        if (category) {
-          for (const org of orgs) {
-            if (org.isMagic || org.x === null || org.y === null) continue
-            if (primaryCategory(org.category) !== category) continue
-            pins.push({ x: org.x, y: org.y })
-          }
+        for (const org of orgs) {
+          if (org.isMagic || org.x === null || org.y === null) continue
+          const primary = primaryCategory(org.category)
+          if (!primary || !categories.includes(primary)) continue
+          pins.push({ x: org.x, y: org.y })
         }
         const bounds = mapAreaBounds(area, pins)
         const margin =
