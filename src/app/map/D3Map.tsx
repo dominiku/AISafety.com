@@ -11,6 +11,13 @@ import { trackListingClick, trackListingHover } from '@/lib/analytics'
 import { withUtm } from '@/lib/utm'
 import { positionTooltip } from '@/lib/mapTooltip'
 import { MAP_BACKGROUND_URL } from '@/lib/map-images'
+import {
+  MAP_AREAS,
+  categoryForMapArea,
+  mapAreaBounds,
+  primaryCategory,
+  type MapArea,
+} from '@/lib/data/map-areas'
 import styles from './page.module.css'
 
 interface MapOrg {
@@ -53,27 +60,11 @@ const SIZE_TO_SCALE: Record<string, number> = {
 const BASE_LOGO_SIZE = 64
 const LOGO_GLOBAL_SCALE = 1.0
 
-// Area labels from WebFlow
-const AREA_LABELS = [
-  { label: 'Conceptual Cliffs', x: 46, y: 5.5 },
-  { label: 'Resource Rock', x: 3.5, y: 8 },
-  { label: 'Support Shoreline', x: 13, y: 6.7 },
-  { label: 'Newsletter Nook', x: 15.8, y: 14.5 },
-  { label: 'Video Vista', x: 23, y: 5.6 },
-  { label: 'Funding Forest', x: 29.2, y: 7 },
-  { label: 'Governance Grove', x: 37.7, y: 5.5 },
-  { label: 'Strategy Summit', x: 34.8, y: 19 },
-  { label: 'Research Range', x: 45.3, y: 15.9 },
-  { label: 'Training Town', x: 22.2, y: 17.2 },
-  { label: 'Empirical Escarpment', x: 53.5, y: 16 },
-  { label: 'Podcast Port', x: 9.5, y: 20.5 },
-  { label: 'Blog Beach', x: 15, y: 25.8 },
-  { label: 'Forecasting Falls', x: 39.2, y: 23.8 },
-  { label: 'Career Castle', x: 30.5, y: 29.4 },
-  { label: 'Advocacy Anchorage', x: 8, y: 31 },
-  { label: 'Capabilities Cove', x: 45, y: 27.1 },
-  { label: 'Gone Graveyard', x: 56, y: 30 },
-]
+// Grid units of breathing room around an area framed from the search, so
+// edge pins and their name labels are not cut off. A landmark with no pins of
+// its own ('Research Range') gets a wider frame, to show what surrounds it.
+const AREA_FRAME_MARGIN = 2
+const LANDMARK_FRAME_MARGIN = 6
 
 export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -96,9 +87,11 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
       y: number | null
       scale: string | null
     }) => void
+    flyToArea: (area: MapArea) => void
     clearHighlight: () => void
   }>({
     flyTo: () => {},
+    flyToArea: () => {},
     clearHighlight: () => {},
   })
   // Magic-map decorations and unlinked furniture rows (e.g. "Last updated")
@@ -278,7 +271,13 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
     const finalPadX = basePadX * labelScale
     const finalPadY = basePadY * labelScale
 
-    AREA_LABELS.forEach(({ label, x, y }) => {
+    // Each label's pill in map pixels, kept so a search pick can pulse it.
+    const areaPills = new Map<
+      string,
+      { x: number; y: number; width: number; height: number }
+    >()
+
+    MAP_AREAS.forEach(({ label, x, y }) => {
       const xPos = x * GRID_SIZE
       const yPos = y * GRID_SIZE
 
@@ -311,6 +310,12 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
           .attr('rx', (bbox.height + finalPadY * 2) / 2)
           .attr('ry', (bbox.height + finalPadY * 2) / 2)
           .attr('fill', 'rgba(27, 43, 62, 0.6)')
+        areaPills.set(label, {
+          x: xPos + bbox.x - finalPadX,
+          y: yPos + bbox.y - finalPadY,
+          width: bbox.width + finalPadX * 2,
+          height: bbox.height + finalPadY * 2,
+        })
       }
     })
 
@@ -567,45 +572,120 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
       reset: resetView,
     }
 
-    // Search: fly the viewport to a pin and pulse a ring around it. The ring
-    // sits inside svgGroup so it pans/zooms with the map; non-scaling-stroke
-    // keeps its line width constant at any zoom.
-    let highlightRing: d3.Selection<
-      SVGCircleElement,
-      unknown,
-      null,
-      undefined
-    > | null = null
+    // Search: fly the viewport to a pin and pulse a ring around it — or, for
+    // an area, frame it and pulse its label. The highlight sits inside
+    // svgGroup so it pans/zooms with the map; non-scaling-stroke keeps its
+    // line width constant at any zoom.
+    let removeHighlight: (() => void) | null = null
     const clearHighlight = () => {
-      if (highlightRing) {
-        highlightRing.interrupt()
-        highlightRing.remove()
-        highlightRing = null
-      }
+      removeHighlight?.()
+      removeHighlight = null
+    }
+    // Mobile pins are tiny at rest, so land closer in.
+    const pinZoom = () => (isMobile() ? 8 : 3.5)
+    // Centers map point (px, py) in the rendered viewBox area at zoom k: the
+    // group transform places map point p at viewBox coordinate
+    // t + offset + k*p.
+    const flyToPoint = (px: number, py: number, k: number) => {
+      svg
+        .transition()
+        .duration(800)
+        .call(
+          zoom.transform,
+          d3.zoomIdentity
+            .translate(
+              PADDED_WIDTH / 2 - offsetX - k * px,
+              PADDED_HEIGHT / 2 - offsetY - k * py
+            )
+            .scale(k)
+        )
     }
     searchRef.current = {
       clearHighlight,
+      flyToArea: area => {
+        clearHighlight()
+        // The area's pins: the same first-category rule that names the area
+        // an org is drawn in. Decorations are not part of any area.
+        const category = categoryForMapArea(area.label)
+        const pins: { x: number; y: number }[] = []
+        if (category) {
+          for (const org of orgs) {
+            if (org.isMagic || org.x === null || org.y === null) continue
+            if (primaryCategory(org.category) !== category) continue
+            pins.push({ x: org.x, y: org.y })
+          }
+        }
+        const bounds = mapAreaBounds(area, pins)
+        const margin =
+          pins.length > 0 ? AREA_FRAME_MARGIN : LANDMARK_FRAME_MARGIN
+        const width = (bounds.maxX - bounds.minX + margin * 2) * GRID_SIZE
+        const height = (bounds.maxY - bounds.minY + margin * 2) * GRID_SIZE
+        // Fit the frame in view, never closer than a pin pick lands and never
+        // further out than the resting view.
+        const k = Math.max(
+          1,
+          Math.min(PADDED_WIDTH / width, PADDED_HEIGHT / height, pinZoom())
+        )
+        flyToPoint(
+          ((bounds.minX + bounds.maxX) / 2) * GRID_SIZE,
+          ((bounds.minY + bounds.maxY) / 2) * GRID_SIZE,
+          k
+        )
+        const pill = areaPills.get(area.label)
+        if (!pill) return
+        // The pulse is an outline that swells away from the label's pill.
+        const outline = svgGroup
+          .append('rect')
+          .attr('fill', 'none')
+          .attr('stroke', 'var(--white)')
+          .attr('stroke-width', 3.5)
+          .attr('vector-effect', 'non-scaling-stroke')
+          .style('pointer-events', 'none')
+        const outlineAt = (by: number) => ({
+          x: pill.x - by,
+          y: pill.y - by,
+          width: pill.width + by * 2,
+          height: pill.height + by * 2,
+          rx: pill.height / 2 + by,
+        })
+        const resting = outlineAt(4)
+        const swollen = outlineAt(18)
+        outline
+          .attr('x', resting.x)
+          .attr('y', resting.y)
+          .attr('width', resting.width)
+          .attr('height', resting.height)
+          .attr('rx', resting.rx)
+        removeHighlight = () => {
+          outline.interrupt()
+          outline.remove()
+        }
+        let growing = true
+        const pulse = () => {
+          const to = growing ? swollen : resting
+          outline
+            .transition()
+            .duration(600)
+            .ease(d3.easeSinInOut)
+            .attr('x', to.x)
+            .attr('y', to.y)
+            .attr('width', to.width)
+            .attr('height', to.height)
+            .attr('rx', to.rx)
+            .attr('stroke-opacity', growing ? 0.3 : 0.9)
+            .on('end', () => {
+              growing = !growing
+              pulse()
+            })
+        }
+        pulse()
+      },
       flyTo: org => {
         if (org.x === null || org.y === null) return
         clearHighlight()
         const px = org.x * GRID_SIZE
         const py = org.y * GRID_SIZE
-        // Mobile pins are tiny at rest, so land closer in.
-        const k = isMobile() ? 8 : 3.5
-        // Centers the pin in the rendered viewBox area: the group transform
-        // places map point p at viewBox coordinate t + offset + k*p.
-        svg
-          .transition()
-          .duration(800)
-          .call(
-            zoom.transform,
-            d3.zoomIdentity
-              .translate(
-                PADDED_WIDTH / 2 - offsetX - k * px,
-                PADDED_HEIGHT / 2 - offsetY - k * py
-              )
-              .scale(k)
-          )
+        flyToPoint(px, py, pinZoom())
         const rawScale = SIZE_TO_SCALE[org.scale || 'Medium'] || 0.6
         const r = (BASE_LOGO_SIZE * rawScale) / 2 + 10
         const ring = svgGroup
@@ -618,7 +698,10 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
           .attr('stroke-width', 3.5)
           .attr('vector-effect', 'non-scaling-stroke')
           .style('pointer-events', 'none')
-        highlightRing = ring
+        removeHighlight = () => {
+          ring.interrupt()
+          ring.remove()
+        }
         let growing = true
         const pulse = () => {
           ring
@@ -703,7 +786,11 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
       cancelHoverTimer()
       // The ring is removed with the SVG; the fns must not outlive the zoom
       // behavior they close over.
-      searchRef.current = { flyTo: () => {}, clearHighlight: () => {} }
+      searchRef.current = {
+        flyTo: () => {},
+        flyToArea: () => {},
+        clearHighlight: () => {},
+      }
       svgNode.removeEventListener('wheel', preventPageZoom)
       if (tooltipEl) tooltipEl.removeEventListener('click', handleTooltipClick)
       document.removeEventListener('click', handleDocumentClick)
@@ -731,6 +818,7 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
         suggestEntryUrl={suggestEntryUrl}
         controlRef={searchControlRef}
         onPick={org => searchRef.current.flyTo(org)}
+        onPickArea={area => searchRef.current.flyToArea(area)}
         onClear={() => searchRef.current.clearHighlight()}
       />
 
