@@ -96,9 +96,9 @@ export const MAP_35_SPEC: RealmMapSpec = {
     'Governments and multi-stakeholder bodies': [39, 13.5],
     'Standards, assurance and verification': [50, 17.5],
     'Policy advocacy and lobbying': [53, 11.5],
-    'Conceptual and foundations research': [35, 25],
+    'Conceptual and foundations research': [35, 26],
     'Alignment and control': [37, 22],
-    'Interpretability and model understanding': [45.5, 26.5],
+    'Interpretability and model understanding': [40.5, 26],
     'Evaluations and threat research': [45, 20.5],
     'Capabilities research': [49, 24],
   },
@@ -139,8 +139,8 @@ export const MAP_35_SPEC: RealmMapSpec = {
     },
     // South-east into Technical research, along the crest of the Control Dam
     // (Alignment and control lies across the road there), with threats and
-    // capabilities to its north-east and theory to its south-west.
-    // Interpretability lies across its far end, on the south-east shore.
+    // capabilities to its north-east and theory and interpretability to its
+    // south-west.
     {
       realm: 'Technical research',
       from: [33, 18.5],
@@ -148,7 +148,10 @@ export const MAP_35_SPEC: RealmMapSpec = {
       toShore: true,
       settleTo: true,
       left: ['Evaluations and threat research', 'Capabilities research'],
-      right: ['Conceptual and foundations research'],
+      right: [
+        'Conceptual and foundations research',
+        'Interpretability and model understanding',
+      ],
     },
   ],
   blocks: {
@@ -158,9 +161,6 @@ export const MAP_35_SPEC: RealmMapSpec = {
     // The Forum: four entries, one built landmark in the corner of Media
     // between the south coast and the border with Conceptual research.
     'Forums and online communities': { seed: [32.4, 30.5] },
-    // Small and on an open stretch of shore, where a share of the open land
-    // comes out as a strip along the coast: a village at the end of the road.
-    'Interpretability and model understanding': { seed: [45.5, 26.5] },
   },
   coastFeatures: [
     // The arrival bay on the west shore, between two capes.

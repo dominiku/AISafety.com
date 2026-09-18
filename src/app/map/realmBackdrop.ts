@@ -1,9 +1,9 @@
 // PROTOTYPE Map 3.5: a schematic backdrop for the realm and district layout,
 // drawn in place of the island art, which was painted for the classic
 // positions and does not line up with the new ones. An abstract version of the
-// classic map: an island in flat colors, with borders that run straight and
-// then turn, heavier between realms than between districts and around a
-// town. The roads are borders too, drawn over them. The Advocacy anchorage is marked out
+// classic map, in a tube map's hand: flat colors, and every line (the coast
+// too) straight or at 45°. Borders are heavier between realms than between
+// districts. The roads are borders too, drawn over them. The Advocacy anchorage is marked out
 // on the water, and the newcomer's road runs from the arrival harbour to the
 // crossroads and on toward each of the three realms it leads to. The colors
 // follow the Map 3.5 schematic and are placeholders for the real art.
@@ -91,7 +91,7 @@ export function drawRealmBackdrop(
         .attr('d', district.pieces.map(outline).join(''))
         .attr('fill', fill)
         .attr('stroke', realm.water ? SEA : LINE)
-        .attr('stroke-width', realm.water ? 3 : district.block ? 5 : 2.5)
+        .attr('stroke-width', realm.water ? 3 : 2.5)
         .attr('stroke-dasharray', realm.water ? '10 8' : null)
     }
     if (realm.water) {

@@ -1,8 +1,9 @@
 // PROTOTYPE Map 3.5: works out the island, the district borders and every
 // pin's position, so the map has the same density of logos everywhere and
 // each region's size shows how much goes on in it. The look it aims for is
-// the classic map's: an angular coast and chunky regions whose borders run
-// straight for a stretch and then turn.
+// the classic map's, and a tube map's: every line, the coast included, runs
+// along an axis or at 45° and turns at a corner, so the regions are the
+// chunky angular shapes the art for them will take.
 //
 // The arrangement is given (map-realm-spec.ts): where the realm borders run
 // from the middle of the island, the Advocacy anchorage off the north-east
@@ -14,9 +15,10 @@
 //      more than its land and pulled in along one holding less, until every
 //      realm's land is in proportion to its logos (a large logo counts as
 //      four small ones, a medium as two). Bays, capes and coves from the
-//      spec, slow swells and finer roughness on top make it an island off a
-//      fantasy map and not an oval. Closed orgs and map furniture stay where
-//      Airtable puts them, and the coast keeps clear of them.
+//      spec and slow swells give it the outline of an island, and that
+//      outline is then drawn angular like everything else. Closed orgs and
+//      map furniture stay where Airtable puts them, and the coast keeps
+//      clear of them.
 //   2. The towns. A district the spec makes a block (Career support, the
 //      castle town at the crossroads) grows outward from its seed as a
 //      square until it holds its share of the realm. Whatever border or
@@ -32,11 +34,14 @@
 //   5. The roads. A road is always a border: the districts of the realm it
 //      runs through keep to their own side of it, and one may lie across its
 //      end. All of them meet at the crossroads.
-//   6. The lie of the land. All of the above is worked out with ruler-straight
-//      borders, then the whole map (borders, coast, roads, pins) is put
-//      through one gentle warp. Lines are bent only where they cross a coarse
-//      lattice or meet another line, so a border runs straight for a stretch
-//      and then turns, and lines that met still meet.
+//   6. The drawing. All of the above is worked out with ruler-straight
+//      borders at whatever angle they fall, which gets the sizes right. Then
+//      every line is redrawn in the map's angular hand: its corners moved
+//      onto a grid, and each stretch between two corners run straight, at
+//      45°, and straight again. Lines turn only at their corners, where they
+//      meet another line and where they cross a coarse lattice, so two
+//      regions sharing a border draw the same line. The pins are placed on
+//      the regions as drawn.
 //
 // Everything is deterministic: the same records give the same map. Pure
 // module with no dependencies, so it can be unit tested.
@@ -103,7 +108,7 @@ export interface RealmMapSpec {
 
 export interface RealmLayout {
   positions: Map<string, { x: number; y: number }>
-  // Everything below is in map grid units, warped and ready to draw.
+  // Everything below is in map grid units, ready to draw.
   coast: Point[]
   // A realm's polygon runs out past the coast. A water realm lies off it.
   realms: { realm: string; polygon: Point[]; water: boolean }[]
@@ -144,9 +149,13 @@ const SHIP_MARGIN = 1.5
 // How strongly a district is held to its anchor, against settling in the
 // middle of its own land. Lower makes chunkier districts.
 const HOME_PULL = 0.3
-// Lines are bent where they cross this lattice (grid units) and nowhere
-// between, so they run straight for about this far.
-const LATTICE = 3.5
+// Corners of borders and roads sit on a grid this fine (grid units), and the
+// coast's corners on a coarser one, for longer straight runs.
+const SNAP = 0.5
+const SHORE_SNAP = 1
+// A long line also turns where it crosses this lattice (grid units), so it
+// steps along its way in several places and not in one big dogleg.
+const LATTICE = 5
 
 /** Land a logo takes, relative to a small one. Matches the pin sizes on the
  *  map: a Large logo is twice as wide as a Small one. */
@@ -155,39 +164,54 @@ export function pinFootprint(scale: string | null): number {
   return size === 'large' ? 4 : size === 'small' ? 1 : 2
 }
 
-/** Where a point of the ruler-straight layout lies on the drawn map. A sum of
- *  slow waves, gentle enough (its slope stays well under 1) that the map is
- *  never folded over: whatever was inside a border stays inside it. */
-function warp([x, y]: Point): Point {
-  return [
-    x +
-      0.75 * Math.sin(0.43 * y + 0.21 * x + 1.3) +
-      0.3 * Math.sin(1.05 * y - 0.5 * x + 4.1),
-    y +
-      0.6 * Math.sin(0.4 * x - 0.17 * y + 2.2) +
-      0.26 * Math.sin(0.95 * x + 0.6 * y + 0.4),
+const snapTo = (value: number, grid: number) => Math.round(value / grid) * grid
+
+/**
+ * The way from one grid point to another in the map's own hand: straight
+ * along an axis, one 45° stretch in the middle, straight again. Returns the
+ * two turning points (none when the way is already straight or at 45°). The
+ * same whichever end it is asked from, so two regions sharing a border draw
+ * the same line.
+ */
+function dogleg(a: Point, b: Point): Point[] {
+  const flipped = a[0] > b[0] || (a[0] === b[0] && a[1] > b[1])
+  const [from, to] = flipped ? [b, a] : [a, b]
+  const dx = to[0] - from[0]
+  const dy = to[1] - from[1]
+  const diagonal = Math.min(Math.abs(dx), Math.abs(dy))
+  if (diagonal === 0 || Math.abs(dx) === Math.abs(dy)) return []
+  const alongX = Math.abs(dx) > Math.abs(dy)
+  const lead = snapTo((Math.abs(alongX ? dx : dy) - diagonal) / 2, SNAP)
+  const first: Point = alongX
+    ? [from[0] + lead * Math.sign(dx), from[1]]
+    : [from[0], from[1] + lead * Math.sign(dy)]
+  const second: Point = [
+    first[0] + diagonal * Math.sign(dx),
+    first[1] + diagonal * Math.sign(dy),
   ]
+  return flipped ? [second, first] : [first, second]
 }
 
-/** The point of the straight layout that the warp puts at (x, y). */
-function unwarp([x, y]: Point): Point {
-  let at: Point = [x, y]
-  for (let round = 0; round < 8; round++) {
-    const [wx, wy] = warp(at)
-    at = [at[0] - (wx - x), at[1] - (wy - y)]
+/** A line through these grid points, in the map's hand (see dogleg). */
+function angular(points: Point[], closed: boolean): Point[] {
+  const line: Point[] = []
+  const last = closed ? points.length : points.length - 1
+  for (let i = 0; i < last; i++) {
+    line.push(points[i], ...dogleg(points[i], points[(i + 1) % points.length]))
   }
-  return at
+  if (!closed) line.push(points[points.length - 1])
+  return line
 }
 
 /**
- * Draws lines of the layout: see step 6 at the top of the file. A line is
- * bent where it crosses the lattice and at every corner (of any line) that
- * lies on it, so two lines along the same stretch bend at the same places
+ * Draws lines of the layout: see step 6 at the top of the file. A line turns
+ * only where it crosses the lattice and at every corner (of any line) that
+ * lies on it, so two lines along the same stretch turn at the same places
  * whatever their own ends are.
  */
 function tracer(corners: Point[]) {
   return (line: Point[], closed: boolean): Point[] => {
-    const traced: Point[] = []
+    const turns: Point[] = []
     const last = closed ? line.length : line.length - 1
     for (let i = 0; i < last; i++) {
       const from = line[i]
@@ -216,15 +240,24 @@ function tracer(corners: Point[]) {
         if (offX * offX + offY * offY < 1e-6) cuts.push(t)
       }
       cuts.sort((a, b) => a - b)
-      let before = -1
       for (const t of cuts) {
-        if (t - before < 1e-6 || t > 1 - 1e-6) continue
-        before = t
-        traced.push(warp([from[0] + dx * t, from[1] + dy * t]))
+        if (t > 1 - 1e-6) continue
+        turns.push([
+          snapTo(from[0] + dx * t, SNAP),
+          snapTo(from[1] + dy * t, SNAP),
+        ])
       }
     }
-    if (!closed) traced.push(warp(line[line.length - 1]))
-    return traced
+    if (!closed) {
+      const end = line[line.length - 1]
+      turns.push([snapTo(end[0], SNAP), snapTo(end[1], SNAP)])
+    }
+    // Snapping can land neighbors on the same grid point.
+    const apart = turns.filter((p, i) => {
+      const before = turns[(i + turns.length - 1) % turns.length]
+      return (i === 0 && !closed) || p[0] !== before[0] || p[1] !== before[1]
+    })
+    return angular(apart, closed)
   }
 }
 
@@ -395,9 +428,6 @@ const COAST_WAVES = [
   [12, 0.02, 1.7],
   [16, 0.015, 3.3],
   [21, 0.012, 0.8],
-  [29, 0.009, 2.9],
-  [41, 0.007, 5.6],
-  [58, 0.005, 1.4],
 ]
 
 // How much of a district lying across the road is counted as left of it when
@@ -661,6 +691,49 @@ function groupBy<T>(items: T[], key: (item: T) => string): Map<string, T[]> {
 }
 
 /**
+ * The shore as it is drawn: the shaped coast kept at a corner every few
+ * bearings, the corners moved onto a coarse grid and joined in the map's
+ * angular hand. This polygon, not the smooth coast behind it, is the land.
+ */
+function angularShore(coast: Coast): Point[] {
+  const corners: Point[] = []
+  for (let at = 0, k = 0; at < COAST_POINTS - 3; at += 5 + ((k * 7) % 4), k++) {
+    const [x, y] = coast.pointAt(at)
+    const corner: Point = [snapTo(x, SHORE_SNAP), snapTo(y, SHORE_SNAP)]
+    const before = corners[corners.length - 1]
+    if (!before || before[0] !== corner[0] || before[1] !== corner[1]) {
+      corners.push(corner)
+    }
+  }
+  return angular(corners, true)
+}
+
+/** The grid point on a line of the map (its turns are grid points and it runs
+ *  along axes and diagonals, so it passes through many) nearest to `to`. */
+function nearestOn(line: Point[], to: Point): Point {
+  let best = line[0]
+  let bestDistance = Infinity
+  line.forEach((from, i) => {
+    const next = line[(i + 1) % line.length]
+    const steps = Math.round(
+      Math.max(Math.abs(next[0] - from[0]), Math.abs(next[1] - from[1])) / SNAP
+    )
+    for (let step = 0; step < Math.max(steps, 1); step++) {
+      const at: Point = [
+        from[0] + ((next[0] - from[0]) * step) / Math.max(steps, 1),
+        from[1] + ((next[1] - from[1]) * step) / Math.max(steps, 1),
+      ]
+      const distance = Math.hypot(at[0] - to[0], at[1] - to[1])
+      if (distance < bestDistance) {
+        bestDistance = distance
+        best = at
+      }
+    }
+  })
+  return best
+}
+
+/**
  * @param pins      the orgs to lay out
  * @param keepClear pins that stay where they are (closed orgs, map furniture)
  */
@@ -683,20 +756,19 @@ export function layoutRealmMap(
     wanted.set(realm, footprintOf(inRealm) / footprintOf(onLand))
   }
   const coast = shapeCoast(spec, wanted, keepClear)
-  const toShore = ([x, y]: Point) => coast.shoreToward(x, y)
+  const shore = angularShore(coast)
+  const toShore = ([x, y]: Point) => nearestOn(shore, coast.shoreToward(x, y))
 
   const cols = Math.ceil(GRID_WIDTH / STEP)
   const rows = Math.ceil(GRID_HEIGHT / STEP)
   const xs = new Float32Array(cols * rows)
   const ys = new Float32Array(cols * rows)
   const isLand = new Uint8Array(cols * rows)
-  // Per sample: index into `districts` below, or -1.
-  const owner = new Int16Array(cols * rows).fill(-1)
   let landSamples = 0
   for (let index = 0; index < cols * rows; index++) {
     xs[index] = ((index % cols) + 0.5) * STEP
     ys[index] = (Math.floor(index / cols) + 0.5) * STEP
-    if (coast.contains(xs[index], ys[index])) {
+    if (insidePolygon(xs[index], ys[index], shore)) {
       isLand[index] = 1
       landSamples++
     }
@@ -716,11 +788,29 @@ export function layoutRealmMap(
     }
     return true
   }
-  const middleOfRoom = (samples: number[]): Point => [
-    samples.reduce((sum, i) => sum + xs[i], 0) / samples.length,
-    samples.reduce((sum, i) => sum + ys[i], 0) / samples.length,
-  ]
   const everySample = Array.from({ length: cols * rows }, (_, i) => i)
+  // Where a realm's districts may be: its land, or for the anchorage the sea
+  // clear of the coast and of whatever else is out there.
+  const roomOf = (polygon: Point[], water: boolean) => {
+    const x0 = Math.min(...polygon.map(p => p[0]))
+    const x1 = Math.max(...polygon.map(p => p[0]))
+    const y0 = Math.min(...polygon.map(p => p[1]))
+    const y1 = Math.max(...polygon.map(p => p[1]))
+    return everySample.filter(
+      i =>
+        isLand[i] === (water ? 0 : 1) &&
+        xs[i] >= x0 &&
+        xs[i] <= x1 &&
+        ys[i] >= y0 &&
+        ys[i] <= y1 &&
+        insidePolygon(xs[i], ys[i], polygon) &&
+        (!water ||
+          (clearOf(i, SHIP_MARGIN, 0) &&
+            !keepClear.some(
+              p => Math.hypot(p.x - xs[i], p.y - ys[i]) < KEEP_CLEAR_RADIUS
+            )))
+    )
+  }
   // District cells are cut out of this: the frame and a little over.
   const frame: Point[] = [
     [-6, -6],
@@ -729,19 +819,17 @@ export function layoutRealmMap(
     [-6, GRID_HEIGHT + 6],
   ]
 
-  // The straight layout, gathered here and drawn (traced) at the end, once
-  // every corner is known.
+  // First the layout with ruler-straight borders, which gets the sizes
+  // right. It is drawn in the map's angular hand further down, once every
+  // corner is known, and the pins are placed on the regions as drawn.
   const realms: { realm: string; polygon: Point[]; water: boolean }[] = []
-  const districts: {
+  const planned: {
     district: string
     realm: string
+    pins: LayoutPin[]
     pieces: Point[][]
     block: boolean
-    middle: Point
   }[] = []
-  const placed = new Map<string, Point>()
-  const landShare = new Map<string, number>()
-  const realmShare = new Map<string, number>()
   const { crossroads, controlDam } = spec.landmarks
   // Each road as it came out, by the realm it runs through.
   const laid = new Map<string, [Point, Point]>()
@@ -756,83 +844,19 @@ export function layoutRealmMap(
       continue
     }
     realms.push({ realm, polygon, water })
-    const room = everySample.filter(
-      i =>
-        isLand[i] === (water ? 0 : 1) &&
-        insidePolygon(xs[i], ys[i], polygon) &&
-        (!water ||
-          (clearOf(i, SHIP_MARGIN, 0) &&
-            !keepClear.some(
-              p => Math.hypot(p.x - xs[i], p.y - ys[i]) < KEEP_CLEAR_RADIUS
-            )))
-    )
-    if (!water) landShare.set(realm, room.length / landSamples)
+    const room = roomOf(polygon, water)
     if (room.length === 0) {
       console.warn(`[map-realm-layout] No room for realm "${realm}"`)
       continue
     }
-
     const byDistrict = groupBy(inRealm, pin => pin.district)
     const realmFootprint = footprintOf(inRealm)
 
-    // Pins settle over a district's room, and the district is on record.
-    const settle = (
-      district: string,
-      inDistrict: LayoutPin[],
-      districtRoom: number[],
-      pieces: Point[][],
-      block: boolean
-    ) => {
-      realmShare.set(district, districtRoom.length / room.length)
-      // Borders that cannot move (the road, the coast) can leave a district
-      // short of room or with too much: say so, the map will look uneven.
-      const fit =
-        districtRoom.length /
-        room.length /
-        (footprintOf(inDistrict) / realmFootprint)
-      if (fit < 0.9 || fit > 1.1) {
-        console.warn(
-          `[map-realm-layout] "${district}" has ${Math.round(fit * 100)}% of the room its logos call for`
-        )
-      }
-      if (districtRoom.length === 0) {
-        console.warn(`[map-realm-layout] No room left for "${district}"`)
-        districts.push({ district, realm, pieces, block, middle: crossroads })
-        return
-      }
-      for (const sample of districtRoom) owner[sample] = districts.length
-      const middle = middleOfRoom(districtRoom)
-      districts.push({ district, realm, pieces, block, middle })
-
-      // Start each pin where the draft has it relative to its neighbors,
-      // carried over to where the district ended up. A sliver of offset
-      // keeps pins drafted on the same spot from staying stuck together.
-      const from = middleOf(inDistrict)
-      const moving = inDistrict.map((pin, i) => ({
-        x: middle[0] + (pin.x - from.x) + Math.cos(i * 2.4) * 0.01 * (i + 1),
-        y: middle[1] + (pin.y - from.y) + Math.sin(i * 2.4) * 0.01 * (i + 1),
-        footprint: pinFootprint(pin.scale),
-      }))
-      const standing = water
-        ? districtRoom
-        : districtRoom.filter(i => clearOf(i, COAST_MARGIN, 1))
-      spreadPins(
-        standing.length >= moving.length ? standing : districtRoom,
-        xs,
-        ys,
-        moving,
-        60
-      )
-      inDistrict.forEach((pin, i) => {
-        placed.set(pin.id, [moving[i].x, moving[i].y])
-      })
-    }
-
-    // The towns first: each a square grown from its fixed point until it
-    // holds the district's share of the realm. What they take is no longer
-    // open to the other districts, and they are drawn over them.
+    // The towns first: each a square grown around its seed until it holds
+    // the district's share of the realm. What they take is no longer open to
+    // the other districts, and they are drawn over them.
     let open = room
-    const towns: (() => void)[] = []
+    const towns: typeof planned = []
     for (const [district, inDistrict] of byDistrict) {
       const block = spec.blocks?.[district]
       if (!block) continue
@@ -858,13 +882,20 @@ export function layoutRealmMap(
       const { x0, y0, x1, y1 } = squareOf(high)
       const taken = new Set(inSquare(high))
       open = open.filter(i => !taken.has(i))
-      const square: Point[] = [
-        [x0, y0],
-        [x1, y0],
-        [x1, y1],
-        [x0, y1],
-      ]
-      towns.push(() => settle(district, inDistrict, [...taken], [square], true))
+      towns.push({
+        district,
+        realm,
+        pins: inDistrict,
+        block: true,
+        pieces: [
+          [
+            [x0, y0],
+            [x1, y0],
+            [x1, y1],
+            [x0, y1],
+          ],
+        ],
+      })
     }
 
     // The coast moves with the data, and an anchor left at sea or right on
@@ -923,16 +954,19 @@ export function layoutRealmMap(
               .filter((_, i) => sideOfSite[i] === side)
               .flatMap(([, of]) => of)
           )
-        const settled = settleRoadEnd(
-          spec,
-          coast,
-          open.map(i => [xs[i], ys[i]]),
-          polygon,
-          (footprintOn(-1) + ACROSS_LEFT * footprintOn(0)) /
-            Math.max(sharedFootprint, 1),
-          road.settleFrom ? road.from : road.to,
-          road.settleFrom ? roadEnd : roadStart,
-          road.settleFrom === true
+        const settled = nearestOn(
+          shore,
+          settleRoadEnd(
+            spec,
+            coast,
+            open.map(i => [xs[i], ys[i]]),
+            polygon,
+            (footprintOn(-1) + ACROSS_LEFT * footprintOn(0)) /
+              Math.max(sharedFootprint, 1),
+            road.settleFrom ? road.from : road.to,
+            road.settleFrom ? roadEnd : roadStart,
+            road.settleFrom === true
+          )
         )
         if (road.settleFrom) roadStart = settled
         else roadEnd = settled
@@ -943,7 +977,7 @@ export function layoutRealmMap(
     const roadA = -(roadEnd[1] - roadStart[1])
     const roadB = roadEnd[0] - roadStart[0]
     const roadC = roadA * roadStart[0] + roadB * roadStart[1]
-    const districtOf = shareOut(
+    shareOut(
       open,
       xs,
       ys,
@@ -969,22 +1003,21 @@ export function layoutRealmMap(
         ? cell
         : clipTo(cell, -side * roadA, -side * roadB, -side * roadC)
     }
-
     shared.forEach(([district, inDistrict], index) => {
-      settle(
+      planned.push({
         district,
-        inDistrict,
-        open.filter((_, s) => districtOf[s] === index),
-        road
+        realm,
+        pins: inDistrict,
+        block: false,
+        pieces: road
           ? ([-1, 1] as const)
               .filter(side => [0, side].includes(sideOfSite[index]))
               .map(side => pieceOn(index, side))
               .filter(piece => piece.length > 0)
           : [cellOf(sites, index, frame)],
-        false
-      )
+      })
     })
-    for (const town of towns) town()
+    planned.push(...towns)
   }
 
   const roads: Point[][] = (spec.roads ?? []).flatMap(road => {
@@ -998,47 +1031,128 @@ export function layoutRealmMap(
     if (!road || !ends) return toShore(fallback)
     return road.fromShore ? ends[0] : ends[1]
   }
-  const arrival = shoreEnd(0, spec.landmarks.arrivalHarbour)
-  const departure = shoreEnd(1, spec.landmarks.departureHarbour)
 
+  // Now the drawing, and the pins on the regions as drawn.
   const trace = tracer([
     ...realms.flatMap(r => r.polygon),
-    ...districts.flatMap(d => d.pieces.flat()),
+    ...planned.flatMap(d => d.pieces.flat()),
     ...roads.flat(),
   ])
-  // The harbours are corners of the drawn coast, so they sit right on it.
-  const corners = [...coast.outline(), arrival, departure].sort(
-    (a, b) => coast.bearingOf(a[0], a[1]) - coast.bearingOf(b[0], b[1])
+  const drawnRealms = realms.map(r => ({
+    ...r,
+    polygon: trace(r.polygon, true),
+  }))
+  const districts = planned.map(d => ({
+    district: d.district,
+    realm: d.realm,
+    block: d.block,
+    pieces: d.pieces.map(piece => trace(piece, true)),
+  }))
+
+  // Per sample: index into `districts`, or -1. A town lies over the open
+  // districts around it, so it is asked first.
+  const owner = new Int16Array(cols * rows).fill(-1)
+  const townsFirst = districts
+    .map((_, index) => index)
+    .sort((a, b) => Number(districts[b].block) - Number(districts[a].block))
+  // Each piece's bounding box [x0, x1, y0, y1], to rule most of them out fast.
+  const boxes = districts.map(d =>
+    d.pieces.map(piece => [
+      Math.min(...piece.map(p => p[0])),
+      Math.max(...piece.map(p => p[0])),
+      Math.min(...piece.map(p => p[1])),
+      Math.max(...piece.map(p => p[1])),
+    ])
   )
-  const positions = new Map<string, { x: number; y: number }>()
-  for (const [id, at] of placed) {
-    const [x, y] = warp(at)
-    positions.set(id, {
-      x: Math.round(x * 10) / 10,
-      y: Math.round(y * 10) / 10,
-    })
+  const roomOfRealm = new Map<string, number>()
+  for (const { realm, polygon, water } of drawnRealms) {
+    const room = roomOf(polygon, water)
+    roomOfRealm.set(realm, room.length)
+    const inRealm = townsFirst.filter(index => districts[index].realm === realm)
+    for (const sample of room) {
+      const holder = inRealm.find(index =>
+        districts[index].pieces.some(
+          (piece, n) =>
+            xs[sample] >= boxes[index][n][0] &&
+            xs[sample] <= boxes[index][n][1] &&
+            ys[sample] >= boxes[index][n][2] &&
+            ys[sample] <= boxes[index][n][3] &&
+            insidePolygon(xs[sample], ys[sample], piece)
+        )
+      )
+      if (holder !== undefined) owner[sample] = holder
+    }
   }
+
+  const positions = new Map<string, { x: number; y: number }>()
+  const landShare = new Map<string, number>()
+  const realmShare = new Map<string, number>()
+  for (const { realm, water } of drawnRealms) {
+    if (!water)
+      landShare.set(realm, (roomOfRealm.get(realm) ?? 0) / landSamples)
+  }
+  planned.forEach(({ district, realm, pins: inDistrict }, index) => {
+    const room = everySample.filter(i => owner[i] === index)
+    const realmRoom = roomOfRealm.get(realm) ?? 0
+    const realmFootprint = footprintOf(byRealm.get(realm) ?? [])
+    realmShare.set(district, room.length / Math.max(realmRoom, 1))
+    // Borders that cannot move (a road, the coast) can leave a district short
+    // of room or with too much: say so, the map will look uneven.
+    const fit =
+      room.length /
+      Math.max(realmRoom, 1) /
+      (footprintOf(inDistrict) / realmFootprint)
+    if (fit < 0.85 || fit > 1.15) {
+      console.warn(
+        `[map-realm-layout] "${district}" has ${Math.round(fit * 100)}% of the room its logos call for`
+      )
+    }
+    if (room.length === 0) return
+
+    // Start each pin where the draft has it relative to its neighbors,
+    // carried over to where the district ended up. A sliver of offset keeps
+    // pins drafted on the same spot from staying stuck together.
+    const from = middleOf(inDistrict)
+    const middleX = room.reduce((sum, i) => sum + xs[i], 0) / room.length
+    const middleY = room.reduce((sum, i) => sum + ys[i], 0) / room.length
+    const moving = inDistrict.map((pin, i) => ({
+      x: middleX + (pin.x - from.x) + Math.cos(i * 2.4) * 0.01 * (i + 1),
+      y: middleY + (pin.y - from.y) + Math.sin(i * 2.4) * 0.01 * (i + 1),
+      footprint: pinFootprint(pin.scale),
+    }))
+    const standing = isWater(realm)
+      ? room
+      : room.filter(i => clearOf(i, COAST_MARGIN, 1))
+    spreadPins(
+      standing.length >= moving.length ? standing : room,
+      xs,
+      ys,
+      moving,
+      60
+    )
+    inDistrict.forEach((pin, i) => {
+      positions.set(pin.id, {
+        x: Math.round(moving[i].x * 10) / 10,
+        y: Math.round(moving[i].y * 10) / 10,
+      })
+    })
+  })
+
   return {
     positions,
-    coast: corners.map(warp),
-    realms: realms.map(r => ({ ...r, polygon: trace(r.polygon, true) })),
-    districts: districts.map(({ district, realm, pieces, block }) => ({
-      district,
-      realm,
-      block,
-      pieces: pieces.map(piece => trace(piece, true)),
-    })),
+    coast: shore,
+    realms: drawnRealms,
+    districts,
     landmarks: {
-      arrivalHarbour: warp(arrival),
-      crossroads: warp(crossroads),
-      departureHarbour: warp(departure),
-      controlDam: warp(controlDam),
+      arrivalHarbour: shoreEnd(0, spec.landmarks.arrivalHarbour),
+      crossroads: [snapTo(crossroads[0], SNAP), snapTo(crossroads[1], SNAP)],
+      departureHarbour: shoreEnd(1, spec.landmarks.departureHarbour),
+      controlDam,
     },
     roads: roads.map(road => trace(road, false)),
     districtAt: (x, y) => {
-      const [ux, uy] = unwarp([x, y])
-      const col = Math.floor(ux / STEP)
-      const row = Math.floor(uy / STEP)
+      const col = Math.floor(x / STEP)
+      const row = Math.floor(y / STEP)
       if (col < 0 || col >= cols || row < 0 || row >= rows) return null
       const index = owner[row * cols + col]
       return index === -1 ? null : districts[index].district

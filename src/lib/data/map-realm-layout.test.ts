@@ -135,10 +135,10 @@ describe('layoutRealmMap', () => {
 
   it('shapes the coast so each realm has land in proportion to its logos', () => {
     // West holds 80 of the 130 footprint on land, East 50.
-    expect(layout.landShare.get('West')! / (80 / 130)).toBeGreaterThan(0.93)
-    expect(layout.landShare.get('West')! / (80 / 130)).toBeLessThan(1.07)
-    expect(layout.landShare.get('East')! / (50 / 130)).toBeGreaterThan(0.93)
-    expect(layout.landShare.get('East')! / (50 / 130)).toBeLessThan(1.07)
+    expect(layout.landShare.get('West')! / (80 / 130)).toBeGreaterThan(0.9)
+    expect(layout.landShare.get('West')! / (80 / 130)).toBeLessThan(1.1)
+    expect(layout.landShare.get('East')! / (50 / 130)).toBeGreaterThan(0.9)
+    expect(layout.landShare.get('East')! / (50 / 130)).toBeLessThan(1.1)
   })
 
   it('gives each district room in proportion to its logos', () => {
@@ -149,9 +149,10 @@ describe('layoutRealmMap', () => {
         footprint(pins.filter(p => p.district === district)) /
         footprint(pins.filter(p => p.realm === realm))
       const got = layout.realmShare.get(district)! / wanted
-      // A town grows a whole row of samples at a time, so it is less exact.
-      expect(got, district).toBeGreaterThan(0.92)
-      expect(got, district).toBeLessThan(1.08)
+      // Sizes are settled with straight borders and then drawn angular, on
+      // a grid, which moves them a little.
+      expect(got, district).toBeGreaterThan(0.85)
+      expect(got, district).toBeLessThan(1.15)
     }
   })
 
@@ -175,13 +176,13 @@ describe('layoutRealmMap', () => {
     const [cx, cy] = layout.landmarks.crossroads
     const southOfRoad = ([x, y]: Point) =>
       (cx - hx) * (y - hy) - (cy - hy) * (x - hx) > 0
-    // The drawn road bends a little, so pins right on it are left out.
+    // The drawn road steps along its way, so pins near it are left out.
     const clear = (pin: LayoutPin) => {
       const [x, y] = at(pin)
       const off =
         Math.abs((cx - hx) * (y - hy) - (cy - hy) * (x - hx)) /
         Math.hypot(cx - hx, cy - hy)
-      return off > 1.5
+      return off > 3
     }
     for (const pin of pins.filter(clear)) {
       if (pin.district === 'West two') expect(southOfRoad(at(pin))).toBe(false)
@@ -248,6 +249,24 @@ describe('MAP_35_SPEC', () => {
         regions.filter(polygon => inside(anchor, polygon)).length,
         district
       ).toBe(1)
+    }
+  })
+})
+
+describe('the drawn map', () => {
+  it('runs every line along an axis or at 45 degrees', () => {
+    const lines = [
+      layout.coast,
+      ...layout.realms.map(r => r.polygon),
+      ...layout.districts.flatMap(d => d.pieces),
+    ]
+    for (const line of lines) {
+      line.forEach((from, i) => {
+        const to = line[(i + 1) % line.length]
+        const dx = Math.abs(to[0] - from[0])
+        const dy = Math.abs(to[1] - from[1])
+        expect(dx === 0 || dy === 0 || Math.abs(dx - dy) < 1e-9).toBe(true)
+      })
     }
   })
 })
