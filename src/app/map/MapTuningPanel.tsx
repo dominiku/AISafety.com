@@ -22,6 +22,7 @@ const TODAY_CONFIG: ZoomTierConfig = {
   mediumZoom: 0,
   smallZoom: 0,
   minPerArea: 0,
+  mediumShare: 0,
   avoidOverlaps: false,
 }
 
@@ -31,6 +32,7 @@ type SliderKey =
   | 'mediumZoom'
   | 'smallZoom'
   | 'minPerArea'
+  | 'mediumShare'
   | 'maxShift'
 
 const SLIDERS: {
@@ -80,6 +82,14 @@ const SLIDERS: {
     min: 0,
     max: 6,
     step: 1,
+  },
+  {
+    key: 'mediumShare',
+    label: 'Share of each area showing at the Medium zoom',
+    hint: 'topped up from Small orgs; 0 = size tiers only',
+    min: 0,
+    max: 1,
+    step: 0.05,
   },
   {
     key: 'maxShift',

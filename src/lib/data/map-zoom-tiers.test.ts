@@ -22,6 +22,7 @@ const config: ZoomTierConfig = {
   mediumZoom: 2,
   smallZoom: 4,
   minPerArea: 0,
+  mediumShare: 0,
   avoidOverlaps: true,
   maxShift: 0,
   showAllZoom: 6,
@@ -124,6 +125,24 @@ describe('layoutPins: which pins show', () => {
     expect(atRest.sort()).toEqual(['A', 'B'])
   })
 
+  it('fills an area with few Medium orgs part-way at the Medium zoom', () => {
+    // Like Advocacy Anchorage: mostly Small, so without this nearly all of
+    // it would arrive at once at the Small zoom.
+    const pins = [
+      pin('Large', 0, 0, 'Advocacy', 'L'),
+      pin('Medium', 1000, 0, 'Advocacy', 'M'),
+      ...['A', 'B', 'C', 'D', 'E', 'F'].map((t, i) =>
+        pin('Small', 2000 + i * 1000, 0, 'Advocacy', t)
+      ),
+    ]
+    const { reveal } = layoutPins(pins, [], { ...config, mediumShare: 0.5 }, 1)
+    const byMedium = pins.filter(p => reveal.get(p.id)! <= 2).map(p => p.title)
+    // Half of eight: the Large, the Medium, then Small orgs by name.
+    expect(byMedium.sort()).toEqual(['A', 'B', 'L', 'M'])
+    expect(reveal.get(pins[2].id)).toBe(2)
+    expect(reveal.get(pins[7].id)).toBe(4)
+  })
+
   it('counts Large orgs toward the minimum', () => {
     const pins = [
       pin('Large', 0, 0, 'Funding'),
@@ -134,11 +153,22 @@ describe('layoutPins: which pins show', () => {
     expect(reveal.get(pins[2].id)).toBe(2)
   })
 
-  it('shows every pin of a focused area from the start, and no others', () => {
-    const picked = pin('Small', 0, 0, 'Blog')
+  it('shows a focused area early, from the focus zoom, and no other', () => {
+    const pickedSmall = pin('Small', 0, 0, 'Blog')
+    const pickedMedium = pin('Medium', 500, 0, 'Blog')
     const other = pin('Small', 1000, 0, 'Video')
-    const { reveal } = layoutPins([picked, other], [], config, 1, ['Blog'])
-    expect(reveal.get(picked.id)).toBe(0)
+    const focus = { areas: ['Blog'], fromZoom: 2.5 }
+    const { reveal } = layoutPins(
+      [pickedSmall, pickedMedium, other],
+      [],
+      config,
+      1,
+      focus
+    )
+    expect(reveal.get(pickedSmall.id)).toBe(2.5)
+    // Already due earlier than the focus zoom: left as it was, so zooming
+    // out from a picked area thins it exactly like any other.
+    expect(reveal.get(pickedMedium.id)).toBe(2)
     expect(reveal.get(other.id)).toBe(4)
   })
 

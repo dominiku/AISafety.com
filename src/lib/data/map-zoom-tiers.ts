@@ -39,6 +39,10 @@ export interface ZoomTierConfig {
   /** Each area's most important pins, this many, show from the start
    *  whatever their size, so no area is empty zoomed out. */
   minPerArea: number
+  /** The share of each area's pins (0 to 1) showing by mediumZoom, topped up
+   *  from its Small orgs, so an area with few Medium orgs still fills in
+   *  step by step and not all at once at smallZoom. */
+  mediumShare: number
   /** Keep overlapping pins apart: by sliding them (maxShift) and, where that
    *  is not enough, by holding the less important one back until it fits. */
   avoidOverlaps: boolean
@@ -57,6 +61,7 @@ export const DEFAULT_ZOOM_TIER_CONFIG: ZoomTierConfig = {
   mediumZoom: 1.8,
   smallZoom: 3,
   minPerArea: 3,
+  mediumShare: 0.5,
   avoidOverlaps: true,
   maxShift: 60,
   showAllZoom: 6,
@@ -156,6 +161,15 @@ function boxesOverlap(a: Box, b: Box): boolean {
   return o.x > 0 && o.y > 0
 }
 
+/** The area picked from the search. Its pins are due from `fromZoom` (the
+ *  zoom the pick frames it at) if their own tier would show them later, so
+ *  the framed area shows all it has. Further out than that it thins like
+ *  every other area; a pick never changes what the zoomed-out map shows. */
+export interface MapFocus {
+  areas: string[]
+  fromZoom: number
+}
+
 export interface PinLayout {
   /** The zoom levels the layout was worked out at, zoomed-out first. */
   levels: number[]
@@ -165,14 +179,20 @@ export interface PinLayout {
   reveal: Map<string, number>
 }
 
-function zoomLevels(config: ZoomTierConfig, restingZoom: number): number[] {
+function zoomLevels(
+  config: ZoomTierConfig,
+  restingZoom: number,
+  focus: MapFocus | null
+): number[] {
   const levels = new Set<number>([config.showAllZoom])
   for (let z = MIN_LEVEL_ZOOM; z < config.showAllZoom; z *= LEVEL_RATIO) {
     levels.add(z)
   }
   // The thresholds people set, and the view the map opens at, are levels of
   // their own so the layout is exact there, not interpolated.
-  for (const z of [config.mediumZoom, config.smallZoom, restingZoom]) {
+  const exact = [config.mediumZoom, config.smallZoom, restingZoom]
+  if (focus) exact.push(focus.fromZoom)
+  for (const z of exact) {
     if (z > 0 && z < config.showAllZoom) levels.add(z)
   }
   return [...levels].sort((a, b) => a - b)
@@ -181,10 +201,10 @@ function zoomLevels(config: ZoomTierConfig, restingZoom: number): number[] {
 /**
  * Where every pin sits and from which z it shows.
  *
- * A pin is due from its size tier's threshold; each area's minPerArea most
- * important pins, and map furniture, are due from the start, and so is every
- * pin of a focusAreas area (the one picked from the search, which should show
- * all it has). Level by level
+ * A pin is due from its size tier's threshold; each area's mediumShare most
+ * important pins are due by mediumZoom; each area's minPerArea most
+ * important pins, and map furniture, are due from the start. A focused area's
+ * pins are due from the focus zoom at the latest. Level by level
  * from fully zoomed in to fully zoomed out, the pins due at that level slide
  * apart (and off the obstacles) by up to maxShift, heavier for bigger orgs so
  * a Large pin moves least. A pin still overlapping a more important one after
@@ -196,23 +216,36 @@ export function layoutPins(
   obstacles: MapObstacle[],
   config: ZoomTierConfig,
   restingZoom: number,
-  focusAreas: string[] = []
+  focus: MapFocus | null = null
 ): PinLayout {
   const ordered = [...pins].sort(byPriority)
   const n = ordered.length
-  const levels = zoomLevels(config, restingZoom)
+  const levels = zoomLevels(config, restingZoom, focus)
   const obstacleBoxes = obstacles.map(obstacleBox)
 
   const due = ordered.map(pin => {
-    if (pin.area === null || focusAreas.includes(pin.area)) return 0
+    if (pin.area === null) return 0
     const rank = scaleRank(pin.scale)
-    return rank === 0 ? 0 : rank === 1 ? config.mediumZoom : config.smallZoom
+    const tier =
+      rank === 0 ? 0 : rank === 1 ? config.mediumZoom : config.smallZoom
+    return focus?.areas.includes(pin.area)
+      ? Math.min(tier, focus.fromZoom)
+      : tier
   })
+  const sizeOfArea = new Map<string, number>()
+  for (const pin of ordered) {
+    if (pin.area === null) continue
+    sizeOfArea.set(pin.area, (sizeOfArea.get(pin.area) ?? 0) + 1)
+  }
+  // `ordered` is most important first, so the first few of an area seen here
+  // are its most important.
   const seenInArea = new Map<string, number>()
   ordered.forEach((pin, i) => {
     if (pin.area === null) return
     const seen = seenInArea.get(pin.area) ?? 0
+    const byMedium = Math.ceil(config.mediumShare * sizeOfArea.get(pin.area)!)
     if (seen < config.minPerArea) due[i] = 0
+    else if (seen < byMedium) due[i] = Math.min(due[i], config.mediumZoom)
     seenInArea.set(pin.area, seen + 1)
   })
 

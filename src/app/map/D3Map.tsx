@@ -26,6 +26,7 @@ import {
   layoutPins,
   pinMapScale,
   pinPositionAt,
+  type MapFocus,
   type MapObstacle,
   type PinLayout,
   type TierPin,
@@ -76,6 +77,9 @@ const LOGO_GLOBAL_SCALE = 1.0
 // edge pins and their name labels are not cut off. A landmark with no pins of
 // its own gets a wider frame, to show what surrounds it.
 const AREA_FRAME_MARGIN = 2
+// PROTOTYPE zoom tiers: a picked area's pins show from this share of the zoom
+// it is framed at.
+const FOCUS_MARGIN = 0.85
 const LANDMARK_FRAME_MARGIN = 6
 
 export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
@@ -646,8 +650,8 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
     let layout: PinLayout | null = null
     // A pin picked from the search shows even if its tier is still hidden.
     let forcedPinId: string | null = null
-    // An area picked from the search shows all its pins: its categories.
-    let focusAreas: string[] = []
+    // An area picked from the search shows all its pins once framed.
+    let focus: MapFocus | null = null
     applyPins = (k: number) => {
       appliedK = k
       if (!layout) return
@@ -691,7 +695,7 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
         obstacles,
         tierConfigRef.current,
         zoomOf(1),
-        focusAreas
+        focus
       )
       applyPins(d3.zoomTransform(svgNode).k)
     }
@@ -732,8 +736,8 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
         forcedPinId = null
         applyPins(appliedK)
       }
-      if (focusAreas.length > 0) {
-        focusAreas = []
+      if (focus !== null) {
+        focus = null
         scheduleTiers()
       }
     }
@@ -782,9 +786,12 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
           Math.min(PADDED_WIDTH / width, PADDED_HEIGHT / height, pinZoom())
         )
         // PROTOTYPE zoom tiers: a picked area shows all its pins. They are
-        // laid out as due from the start; any that still cannot fit at the
-        // framing zoom pull the view in to the zoom where they can.
-        focusAreas = categories
+        // due from just short of the framing zoom, so a small zoom out does
+        // not drop them at once but a real one thins the area like any
+        // other. Any that still cannot fit at the framing zoom pull the view
+        // in to the zoom where they can.
+        measureScreenScale()
+        focus = { areas: categories, fromZoom: zoomOf(fitK) * FOCUS_MARGIN }
         applyTiers()
         let revealZ = 0
         for (const { tier } of pins) {
