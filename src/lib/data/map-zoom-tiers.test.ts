@@ -2,13 +2,17 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_ZOOM_TIER_CONFIG,
   countOverlaps,
+  layoutPins,
   pinMapScale,
-  pinRevealZooms,
+  pinPositionAt,
   pinScreenScale,
+  type MapObstacle,
+  type PinLayout,
   type TierPin,
   type ZoomTierConfig,
 } from './map-zoom-tiers'
 
+// maxShift 0: pins never slide, only wait. The sliding tests turn it on.
 const config: ZoomTierConfig = {
   ...DEFAULT_ZOOM_TIER_CONFIG,
   overviewBoost: 1.5,
@@ -19,6 +23,7 @@ const config: ZoomTierConfig = {
   smallZoom: 4,
   minPerArea: 0,
   avoidOverlaps: true,
+  maxShift: 0,
   showAllZoom: 6,
 }
 
@@ -42,6 +47,13 @@ function pin(
     top: -20,
     bottom: 40,
   }
+}
+
+/** The pins showing at zoom z, where they are drawn, for countOverlaps. */
+function drawnAt(pins: TierPin[], layout: PinLayout, z: number): TierPin[] {
+  return pins
+    .filter(p => layout.reveal.get(p.id)! <= z)
+    .map(p => ({ ...p, ...pinPositionAt(layout, p.id, z) }))
 }
 
 describe('pinScreenScale', () => {
@@ -74,99 +86,195 @@ describe('pinMapScale', () => {
   })
 })
 
-describe('pinRevealZooms', () => {
+describe('layoutPins: which pins show', () => {
   it('shows Large at once, Medium and Small from their thresholds', () => {
     const large = pin('Large', 0, 0)
     const medium = pin('Medium', 1000, 0)
     const small = pin('Small', 2000, 0)
     const unknown = pin(null, 3000, 0)
-    const zooms = pinRevealZooms([small, medium, large, unknown], config, 1)
-    expect(zooms.get(large.id)).toBe(0)
-    expect(zooms.get(medium.id)).toBe(2)
-    expect(zooms.get(small.id)).toBe(4)
+    const { reveal } = layoutPins(
+      [small, medium, large, unknown],
+      [],
+      config,
+      1
+    )
+    expect(reveal.get(large.id)).toBe(0)
+    expect(reveal.get(medium.id)).toBe(2)
+    expect(reveal.get(small.id)).toBe(4)
     // No Scale set: the map draws it Medium, so it appears with the Mediums.
-    expect(zooms.get(unknown.id)).toBe(2)
+    expect(reveal.get(unknown.id)).toBe(2)
   })
 
   it('always shows map furniture, which has no area', () => {
     const furniture = pin('Small', 0, 0, null)
-    expect(pinRevealZooms([furniture], config, 1).get(furniture.id)).toBe(0)
+    const { reveal } = layoutPins([furniture], [], config, 1)
+    expect(reveal.get(furniture.id)).toBe(0)
   })
 
-  it('tops an area with no Large orgs up to the minimum', () => {
+  it('shows the most important pins of an area with no Large orgs', () => {
     const pins = [
       pin('Small', 0, 0, 'Forecasting', 'Small one'),
       pin('Medium', 1000, 0, 'Forecasting', 'B'),
       pin('Medium', 2000, 0, 'Forecasting', 'A'),
       pin('Medium', 3000, 0, 'Forecasting', 'C'),
     ]
-    const zooms = pinRevealZooms(pins, { ...config, minPerArea: 2 }, 1)
-    const atRest = pins.filter(p => zooms.get(p.id)! <= 1).map(p => p.title)
+    const { reveal } = layoutPins(pins, [], { ...config, minPerArea: 2 }, 1)
+    const atRest = pins.filter(p => reveal.get(p.id)! <= 1).map(p => p.title)
     // Medium before Small, then by name.
     expect(atRest.sort()).toEqual(['A', 'B'])
   })
 
-  it('leaves an area that already meets the minimum alone', () => {
+  it('counts Large orgs toward the minimum', () => {
     const pins = [
       pin('Large', 0, 0, 'Funding'),
       pin('Large', 1000, 0, 'Funding'),
       pin('Medium', 2000, 0, 'Funding'),
     ]
-    const zooms = pinRevealZooms(pins, { ...config, minPerArea: 2 }, 1)
-    expect(zooms.get(pins[2].id)).toBe(2)
-  })
-
-  it('holds a pin back until it clears a more important one', () => {
-    const large = pin('Large', 0, 0)
-    // 30px apart with 20px half-widths: overlapping until pins have shrunk
-    // to under 0.75 of their map size.
-    const medium = pin('Medium', 30, 0)
-    const zooms = pinRevealZooms([large, medium], config, 1)
-    const z = zooms.get(medium.id)!
-    expect(z).toBeGreaterThan(config.mediumZoom)
-    expect(z).toBeLessThan(config.showAllZoom)
-    expect(countOverlaps([large, medium], z, config)).toBe(0)
-    expect(countOverlaps([large, medium], z * 0.95, config)).toBe(1)
-  })
-
-  it('ignores a clash that is over before the other pin appears', () => {
-    // The two only overlap below z ≈ 1.8; the Medium is not showing until 2,
-    // so the Small is not held past its own threshold.
-    const medium = pin('Medium', 0, 0)
-    const small = pin('Small', 44, 0)
-    expect(countOverlaps([medium, small], 1, config)).toBe(1)
-    expect(countOverlaps([medium, small], 2, config)).toBe(0)
-    expect(pinRevealZooms([medium, small], config, 1).get(small.id)).toBe(4)
-  })
-
-  it('shows every pin by showAllZoom, even ones that still overlap', () => {
-    const large = pin('Large', 0, 0)
-    const stacked = pin('Small', 1, 0)
-    const zooms = pinRevealZooms([large, stacked], config, 1)
-    expect(zooms.get(stacked.id)).toBe(config.showAllZoom)
+    const { reveal } = layoutPins(pins, [], { ...config, minPerArea: 2 }, 1)
+    expect(reveal.get(pins[2].id)).toBe(2)
   })
 
   it('applies the size tiers alone when overlap avoidance is off', () => {
     const large = pin('Large', 0, 0)
     const medium = pin('Medium', 1, 0)
-    const zooms = pinRevealZooms(
+    const layout = layoutPins(
       [large, medium],
-      { ...config, avoidOverlaps: false },
+      [],
+      { ...config, avoidOverlaps: false, maxShift: 60 },
       1
     )
-    expect(zooms.get(medium.id)).toBe(2)
+    expect(layout.reveal.get(medium.id)).toBe(2)
+    expect(pinPositionAt(layout, medium.id, 1)).toEqual({ x: 1, y: 0 })
+  })
+})
+
+describe('layoutPins: holding pins back (maxShift 0)', () => {
+  it('holds a pin back until it clears a more important one', () => {
+    const large = pin('Large', 0, 0)
+    // 30px apart with 20px half-widths: overlapping until pins have shrunk
+    // to under 0.75 of their map size, which is at z = 4.
+    const medium = pin('Medium', 30, 0)
+    const layout = layoutPins([large, medium], [], config, 1)
+    const z = layout.reveal.get(medium.id)!
+    expect(z).toBeGreaterThanOrEqual(4)
+    expect(z).toBeLessThan(config.showAllZoom)
+    const drawn = drawnAt([large, medium], layout, z)
+    expect(drawn).toHaveLength(2)
+    expect(countOverlaps(drawn, [], z, config).pairs).toBe(0)
+    expect(pinPositionAt(layout, medium.id, z)).toEqual({ x: 30, y: 0 })
   })
 
-  it('does not top up with a pin that has no room at the resting view', () => {
-    const large = pin('Large', 0, 0, 'Podcast')
-    const crowded = pin('Medium', 5, 0, 'Podcast', 'A')
-    const free = pin('Medium', 1000, 0, 'Podcast', 'B')
-    const zooms = pinRevealZooms(
-      [large, crowded, free],
-      { ...config, minPerArea: 2 },
+  it('shows every pin by showAllZoom, even ones that still overlap', () => {
+    const large = pin('Large', 0, 0)
+    const stacked = pin('Small', 1, 0)
+    const { reveal } = layoutPins([large, stacked], [], config, 1)
+    expect(reveal.get(stacked.id)).toBe(config.showAllZoom)
+  })
+
+  it('never hides a pin again as the zoom grows', () => {
+    const pins = [
+      pin('Large', 0, 0),
+      pin('Large', 25, 10),
+      pin('Medium', 50, 0),
+      pin('Medium', 60, 30),
+      pin('Small', 20, 40),
+    ]
+    const layout = layoutPins(pins, [], { ...config, maxShift: 15 }, 1)
+    // reveal is a single threshold per pin, so showing is monotonic as long
+    // as every pin has one inside the ladder.
+    for (const p of pins) {
+      const from = layout.reveal.get(p.id)!
+      expect(from).toBeGreaterThanOrEqual(0)
+      expect(from).toBeLessThanOrEqual(config.showAllZoom)
+    }
+    // And whatever shows at a level does not overlap there, short of the
+    // level where everything shows regardless.
+    for (const z of layout.levels.filter(l => l < config.showAllZoom)) {
+      expect(countOverlaps(drawnAt(pins, layout, z), [], z, config).pairs).toBe(
+        0
+      )
+    }
+  })
+})
+
+describe('layoutPins: sliding pins apart', () => {
+  const sliding = { ...config, maxShift: 60 }
+
+  it('slides two Large pins apart rather than hiding one', () => {
+    const a = pin('Large', 0, 0, 'Area', 'A')
+    const b = pin('Large', 30, 0, 'Area', 'B')
+    const layout = layoutPins([a, b], [], sliding, 1)
+    const drawn = drawnAt([a, b], layout, 1)
+    expect(drawn).toHaveLength(2)
+    expect(countOverlaps(drawn, [], 1, sliding).pairs).toBe(0)
+  })
+
+  it('brings pins home again once zooming in has made room', () => {
+    const a = pin('Large', 0, 0, 'Area', 'A')
+    const b = pin('Large', 30, 0, 'Area', 'B')
+    const layout = layoutPins([a, b], [], sliding, 1)
+    const apartAt = (z: number) =>
+      pinPositionAt(layout, b.id, z).x - pinPositionAt(layout, a.id, z).x
+    expect(apartAt(0.5)).toBeGreaterThan(apartAt(3))
+    // From z = 4 they fit where they are, bar the gap kept between pins.
+    expect(apartAt(6)).toBeLessThan(32)
+  })
+
+  it('moves the smaller org further than the bigger one', () => {
+    const large = pin('Large', 0, 0)
+    const small = pin('Small', 30, 0)
+    const layout = layoutPins(
+      [large, small],
+      [],
+      { ...sliding, smallZoom: 0 },
       1
     )
-    expect(zooms.get(free.id)).toBe(0)
-    expect(zooms.get(crowded.id)!).toBeGreaterThan(1)
+    const largeMoved = Math.abs(pinPositionAt(layout, large.id, 1).x)
+    const smallMoved = Math.abs(pinPositionAt(layout, small.id, 1).x - 30)
+    expect(smallMoved).toBeGreaterThan(largeMoved)
+  })
+
+  const crowd = () =>
+    Array.from({ length: 8 }, (_, i) => pin('Large', i * 3, 0, 'Area', `P${i}`))
+
+  it('never slides a pin further than maxShift', () => {
+    const pins = crowd()
+    const layout = layoutPins(pins, [], { ...sliding, maxShift: 25 }, 1)
+    for (const p of pins) {
+      for (const z of layout.levels) {
+        const at = pinPositionAt(layout, p.id, z)
+        expect(Math.hypot(at.x - p.x, at.y - p.y)).toBeLessThanOrEqual(25.001)
+      }
+    }
+  })
+
+  it('holds a pin back when sliding cannot make room', () => {
+    const pins = crowd()
+    const { reveal } = layoutPins(pins, [], { ...sliding, maxShift: 25 }, 1)
+    const atRest = pins.filter(p => reveal.get(p.id)! <= 1)
+    expect(atRest.length).toBeGreaterThan(0)
+    expect(atRest.length).toBeLessThan(pins.length)
+  })
+
+  it('slides a pin off an area name, and never hides it for one', () => {
+    const label: MapObstacle = { x: -50, y: -10, width: 100, height: 20 }
+    const onLabel = pin('Large', 0, 0)
+    const layout = layoutPins([onLabel], [label], sliding, 1)
+    expect(layout.reveal.get(onLabel.id)).toBe(0)
+    const drawn = drawnAt([onLabel], layout, 1)
+    expect(countOverlaps(drawn, [label], 1, sliding).onObstacles).toBe(0)
+
+    // With no sliding allowed it stays put, on the name, and still shows.
+    const fixed = layoutPins([onLabel], [label], config, 1)
+    expect(fixed.reveal.get(onLabel.id)).toBe(0)
+    const stuck = drawnAt([onLabel], fixed, 1)
+    expect(countOverlaps(stuck, [label], 1, config).onObstacles).toBe(1)
+  })
+})
+
+describe('pinPositionAt', () => {
+  it('throws for a pin the layout does not know', () => {
+    const layout = layoutPins([pin('Large', 0, 0)], [], config, 1)
+    expect(() => pinPositionAt(layout, 'nope', 1)).toThrow('nope')
   })
 })

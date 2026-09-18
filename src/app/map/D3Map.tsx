@@ -23,8 +23,11 @@ import {
   DEFAULT_ZOOM_TIER_CONFIG,
   REFERENCE_SCREEN_SCALE,
   countOverlaps,
+  layoutPins,
   pinMapScale,
-  pinRevealZooms,
+  pinPositionAt,
+  type MapObstacle,
+  type PinLayout,
   type TierPin,
 } from '@/lib/data/map-zoom-tiers'
 import styles from './page.module.css'
@@ -638,43 +641,64 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
     }
     const zoomOf = (k: number) =>
       (k * screenScaleAtRest) / REFERENCE_SCREEN_SCALE
-    let revealZooms = new Map<string, number>()
+    // Pins slide off the area names; the names themselves never move.
+    const obstacles: MapObstacle[] = [...areaPills.values()]
+    let layout: PinLayout | null = null
     // A pin picked from the search shows even if its tier is still hidden.
     let forcedPinId: string | null = null
     applyPins = (k: number) => {
       appliedK = k
+      if (!layout) return
       const config = tierConfigRef.current
       const z = zoomOf(k)
       const s = pinMapScale(z, config)
+      // The pins on screen, where they are drawn, for the panel's readout.
       const showing: TierPin[] = []
+      let largeHeldBack = 0
       for (const { tier, group } of pins) {
-        const show =
-          tier.id === forcedPinId || (revealZooms.get(tier.id) ?? 0) <= z
-        if (show) showing.push(tier)
+        const revealed = (layout.reveal.get(tier.id) ?? 0) <= z
+        const at = pinPositionAt(layout, tier.id, z)
+        if (revealed) showing.push({ ...tier, ...at })
+        else if (tier.scale === 'Large') largeHeldBack++
         group
-          .attr('transform', `translate(${tier.x}, ${tier.y}) scale(${s})`)
-          .classed('mapPinHidden', !show)
+          .attr('transform', `translate(${at.x}, ${at.y}) scale(${s})`)
+          .classed('mapPinHidden', !revealed && tier.id !== forcedPinId)
       }
       if (tierReadoutRef.current) {
+        const { pairs, onObstacles } = countOverlaps(
+          showing,
+          obstacles,
+          z,
+          config
+        )
         tierReadoutRef.current.textContent =
           `Zoom ${z.toFixed(2)} · ${showing.length} of ${pins.length} pins · ` +
-          `${countOverlaps(showing, z, config)} overlapping pairs`
+          `${largeHeldBack} Large held back · ${pairs} overlapping pairs · ` +
+          `${onObstacles} on an area name`
       }
     }
     const applyTiers = () => {
       measureScreenScale()
-      revealZooms = pinRevealZooms(
+      layout = layoutPins(
         pins.map(pin => pin.tier),
+        obstacles,
         tierConfigRef.current,
         zoomOf(1)
       )
       applyPins(d3.zoomTransform(svgNode).k)
     }
     applyTiers()
-    applyTiersRef.current = applyTiers
-    // The resting zoom depends on the map's size on screen, and the top-up
+    // Working the layout out takes a few hundred milliseconds, so a slider
+    // being dragged or a window being resized waits for a pause.
+    let tierTimer: ReturnType<typeof setTimeout> | null = null
+    const scheduleTiers = () => {
+      if (tierTimer !== null) clearTimeout(tierTimer)
+      tierTimer = setTimeout(applyTiers, 120)
+    }
+    applyTiersRef.current = scheduleTiers
+    // The resting zoom depends on the map's size on screen, and the layout
     // depends on the resting zoom.
-    const tierResizeObserver = new ResizeObserver(applyTiers)
+    const tierResizeObserver = new ResizeObserver(scheduleTiers)
     tierResizeObserver.observe(svgNode)
 
     // Setup zoom controls
@@ -920,6 +944,7 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
       }
       svgNode.removeEventListener('wheel', preventPageZoom)
       tierResizeObserver.disconnect()
+      if (tierTimer !== null) clearTimeout(tierTimer)
       applyTiersRef.current = () => {}
       if (tooltipEl) tooltipEl.removeEventListener('click', handleTooltipClick)
       document.removeEventListener('click', handleDocumentClick)

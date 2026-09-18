@@ -31,6 +31,7 @@ type SliderKey =
   | 'mediumZoom'
   | 'smallZoom'
   | 'minPerArea'
+  | 'maxShift'
 
 const SLIDERS: {
   key: SliderKey
@@ -79,6 +80,14 @@ const SLIDERS: {
     min: 0,
     max: 6,
     step: 1,
+  },
+  {
+    key: 'maxShift',
+    label: 'How far a pin may slide',
+    hint: 'map pixels; a grid square is 41. 0 = never move, only hold back',
+    min: 0,
+    max: 160,
+    step: 5,
   },
 ]
 
@@ -152,7 +161,7 @@ export default function MapTuningPanel({
               onChange({ ...config, avoidOverlaps: e.target.checked })
             }
           />
-          Hold a pin back while it overlaps a bigger one
+          Keep pins from overlapping (slide, then hold back)
         </label>
 
         <label className="flex items-center gap-8px paragraph-xs color-white">
