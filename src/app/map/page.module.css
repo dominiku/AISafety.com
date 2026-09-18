@@ -336,6 +336,17 @@
   position: relative;
 }
 
+/* PROTOTYPE: UI_work / IA_work data-source toggle, top center. Same z-index
+   reasoning as .map-controls/.map-search — stay below the assistant
+   scrim/panel/pill (96-100). */
+.map-data-toggle {
+  position: absolute;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 95;
+}
+
 /* View cards button - matches WebFlow style */
 .scroll-button {
   position: absolute;

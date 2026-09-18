@@ -15,6 +15,17 @@ export function hasAirtableCredentials(): boolean {
   return Boolean(process.env.AIRTABLE_TOKEN && process.env.AIRTABLE_BASE_ID)
 }
 
+/** Whether a named override credential set (AIRTABLE_<name>_TOKEN/BASE_ID)
+ *  is configured — for optional, non-default data sources like the /map
+ *  IA_work toggle, so an environment without that set falls back gracefully
+ *  instead of throwing. */
+export function hasCredentialSet(name: string): boolean {
+  return Boolean(
+    process.env[`AIRTABLE_${name}_TOKEN`] &&
+    process.env[`AIRTABLE_${name}_BASE_ID`]
+  )
+}
+
 let noticeLogged = false
 
 export async function fetchPublicData<T>(slug: string): Promise<T[]> {

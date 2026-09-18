@@ -25,6 +25,27 @@ interface FetchOptions {
   fields?: string[]
   /** Key record fields by permanent field ID instead of name (rename-proof). */
   returnFieldsByFieldId?: boolean
+  /** Read a different Airtable base than the deployment's default, via
+   *  AIRTABLE_<SET>_TOKEN / AIRTABLE_<SET>_BASE_ID instead of AIRTABLE_TOKEN /
+   *  AIRTABLE_BASE_ID. For routes that must always read one specific base
+   *  regardless of the deployment's default (e.g. the /map IA_work toggle). */
+  credentialSet?: string
+}
+
+function resolveCredentials(credentialSet?: string): {
+  token: string | undefined
+  baseId: string | undefined
+} {
+  if (!credentialSet) {
+    return {
+      token: process.env.AIRTABLE_TOKEN,
+      baseId: process.env.AIRTABLE_BASE_ID,
+    }
+  }
+  return {
+    token: process.env[`AIRTABLE_${credentialSet}_TOKEN`],
+    baseId: process.env[`AIRTABLE_${credentialSet}_BASE_ID`],
+  }
 }
 
 // ---- Field-value helpers ---------------------------------------------
@@ -470,19 +491,24 @@ function parseRetryAfter(header: string | null): number | null {
 async function fetchAirtableRecordsImpl(
   options: FetchOptions
 ): Promise<AirtableRawRecord[]> {
-  const token = process.env.AIRTABLE_TOKEN
-  const baseId = process.env.AIRTABLE_BASE_ID
+  const { token, baseId } = resolveCredentials(options.credentialSet)
 
   if (!token || !baseId) {
+    const [tokenVar, baseIdVar] = options.credentialSet
+      ? [
+          `AIRTABLE_${options.credentialSet}_TOKEN`,
+          `AIRTABLE_${options.credentialSet}_BASE_ID`,
+        ]
+      : ['AIRTABLE_TOKEN', 'AIRTABLE_BASE_ID']
     // Every data module checks hasAirtableCredentials() and falls back to the
     // public Data API before reaching this point, so landing here means a code
     // path is missing its contributor-mode fallback. Fail loudly rather than
     // silently rendering an empty page.
     throw new Error(
-      'Airtable credentials not configured and this code path has no ' +
-        'contributor-mode fallback (see src/lib/data/public-api.ts). Add ' +
-        'AIRTABLE_TOKEN and AIRTABLE_BASE_ID to .env.local, or add a ' +
-        'fetchPublicData() fallback to the calling data module.'
+      `Airtable credentials not configured and this code path has no ` +
+        `contributor-mode fallback (see src/lib/data/public-api.ts). Add ` +
+        `${tokenVar} and ${baseIdVar} to .env.local, or add a ` +
+        `fetchPublicData() fallback to the calling data module.`
     )
   }
 

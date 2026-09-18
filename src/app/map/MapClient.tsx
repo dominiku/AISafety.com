@@ -7,6 +7,7 @@ import FilterGroup from '@/components/FilterGroup'
 import FilterSidebar from '@/components/FilterSidebar'
 import ContributeButtons from '@/components/ContributeButtons'
 import RelativeDate from '@/components/RelativeDate'
+import ModeToggle from '@/components/ModeToggle'
 import MapOrgCard from './MapOrgCard'
 import SearchBar from '@/components/SearchBar'
 import { trackCardsButtonClick } from '@/lib/analytics'
@@ -69,19 +70,35 @@ interface MapOrg {
   isMagic: boolean
 }
 
-interface MapClientProps {
+interface MapDataset {
   orgs: MapOrg[]
-  lastUpdatedIso: string | null
   suggestEntryLink: string
   suggestCorrectionLink: string
 }
 
+interface MapClientProps {
+  // The site's real data — what everyone but the two people prototyping the
+  // map actually sees.
+  production: MapDataset
+  // A collaborator's forked Airtable base, for experimenting with the map's
+  // structure without touching production. Null when AIRTABLE_IA_FORK_TOKEN/
+  // BASE_ID aren't configured in this environment — the toggle below just
+  // doesn't render, and the page behaves exactly like the single-dataset map.
+  iaWork: MapDataset | null
+  lastUpdatedIso: string | null
+}
+
 export default function MapClient({
-  orgs,
+  production,
+  iaWork,
   lastUpdatedIso,
-  suggestEntryLink,
-  suggestCorrectionLink,
 }: MapClientProps) {
+  const [dataSource, setDataSource] = useState<'production' | 'ia'>(
+    'production'
+  )
+  const { orgs, suggestEntryLink, suggestCorrectionLink } =
+    dataSource === 'ia' && iaWork ? iaWork : production
+
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedCategories, setSelectedCategories] = useState<string[]>([])
   const [showActive, setShowActive] = useState(true)
@@ -222,6 +239,27 @@ export default function MapClient({
       <div className="padding-bottom-24px">
         <div ref={mapWrapperRef} className={styles['map-wrapper']}>
           <D3Map orgs={mapOrgs} suggestEntryUrl={suggestEntryLink} />
+          {iaWork && (
+            <div className={styles['map-data-toggle']}>
+              <ModeToggle
+                mode={dataSource}
+                onChange={setDataSource}
+                ariaLabel="Map data source"
+                tabs={[
+                  {
+                    value: 'production',
+                    icon: '/images/icons/map.svg',
+                    label: 'UI work',
+                  },
+                  {
+                    value: 'ia',
+                    icon: '/images/icons/table.svg',
+                    label: 'IA work',
+                  },
+                ]}
+              />
+            </div>
+          )}
           <button
             onClick={() => {
               trackCardsButtonClick('Map', 'View cards')

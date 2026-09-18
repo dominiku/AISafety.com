@@ -186,8 +186,14 @@ export function mapOrgFromRecord(record: AirtableRawRecord): MapOrg | null {
   }
 }
 
-export async function getMapData(): Promise<MapData> {
-  if (!hasAirtableCredentials()) {
+export async function getMapData(opts?: {
+  /** Read a named credential set (AIRTABLE_<SET>_TOKEN/BASE_ID) instead of
+   *  the deployment default — for the /map page's IA_work toggle, which must
+   *  always read the forked base regardless of the deployment's default. */
+  credentialSet?: string
+}): Promise<MapData> {
+  const credentialSet = opts?.credentialSet
+  if (!credentialSet && !hasAirtableCredentials()) {
     // The public collection excludes the magic control rows (Merch, Last
     // updated, Suggest entry/correction), so those cards don't appear in
     // contributor mode and the suggest links use the defaults below.
@@ -209,6 +215,7 @@ export async function getMapData(): Promise<MapData> {
     filterByFormula: publishedFormula(FIELD.publish, FIELD.hide),
     returnFieldsByFieldId: true,
     fields: FIELD_LIST,
+    credentialSet,
   })
 
   const allRecords: MapOrg[] = []
