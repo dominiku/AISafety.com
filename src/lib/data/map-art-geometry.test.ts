@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { cliffFaces, roundCorners } from './map-art-geometry'
+import {
+  cliffFaces,
+  coastStretches,
+  deltaChannels,
+  roundCorners,
+} from './map-art-geometry'
 import type { Point } from './map-realm-layout'
 
 // Clockwise on the page (y downward): top-left, top-right, bottom-right,
@@ -56,5 +61,39 @@ describe('cliffFaces', () => {
     const faces = cliffFaces([...SQUARE].reverse(), 2)
     expect(faces).toHaveLength(1)
     expect(faces[0].inland[1]).toBeLessThan(10)
+  })
+})
+
+describe('coastStretches', () => {
+  it('points out to sea whichever way round the polygon runs', () => {
+    for (const polygon of [SQUARE, [...SQUARE].reverse()]) {
+      for (const { middle, outward } of coastStretches(polygon)) {
+        const [x, y] = [middle[0] + outward[0], middle[1] + outward[1]]
+        expect(x < 0 || x > 10 || y < 0 || y > 10).toBe(true)
+      }
+    }
+  })
+})
+
+describe('deltaChannels', () => {
+  it('runs one stream that forks to every mouth', () => {
+    const mouths: Point[] = [
+      [0, 10],
+      [5, 12],
+      [10, 10],
+    ]
+    const channels = deltaChannels([5, 0], mouths)
+    const [stream, ...arms] = channels
+    expect(stream[0]).toEqual([5, 0])
+    const fork = stream[stream.length - 1]
+    expect(arms).toHaveLength(3)
+    arms.forEach((arm, i) => {
+      expect(arm[0]).toEqual(fork)
+      expect(arm[arm.length - 1]).toEqual(mouths[i])
+    })
+  })
+
+  it('is empty with no mouths', () => {
+    expect(deltaChannels([0, 0], [])).toEqual([])
   })
 })

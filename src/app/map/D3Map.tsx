@@ -39,6 +39,7 @@ import {
   type PinLayout,
   type TierPin,
 } from '@/lib/data/map-zoom-tiers'
+import { pinFootprint } from '@/lib/data/map-realm-layout'
 import { drawRealmArtBackdrop } from './realmArtBackdrop'
 import { drawRealmBackdrop, type RealmBackdrop } from './realmBackdrop'
 import styles from './page.module.css'
@@ -317,7 +318,14 @@ export default function D3Map({
         orgs.flatMap(org =>
           org.x === null || org.y === null
             ? []
-            : [{ x: org.x, y: org.y, furniture: org.isMagic === true }]
+            : [
+                {
+                  x: org.x,
+                  y: org.y,
+                  radius: Math.sqrt(pinFootprint(org.scale)) * 0.42,
+                  furniture: org.isMagic === true,
+                },
+              ]
         )
       )
     } else if (realmBackdrop) {

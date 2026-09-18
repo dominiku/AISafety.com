@@ -58,6 +58,40 @@ export function roundCorners(
   return out
 }
 
+export interface CoastStretch {
+  from: Point
+  to: Point
+  middle: Point
+  // Unit vector pointing out to sea.
+  outward: Point
+}
+
+/** Every stretch of the coast with the direction the sea lies in. */
+export function coastStretches(polygon: Point[]): CoastStretch[] {
+  const stretches: CoastStretch[] = []
+  // With y downward a positive area means the polygon runs clockwise on the
+  // page, which puts the sea on the left of each stretch.
+  const clockwise = signedArea(polygon) > 0
+  for (let i = 0; i < polygon.length; i++) {
+    const from = polygon[i]
+    const to = polygon[(i + 1) % polygon.length]
+    const dx = to[0] - from[0]
+    const dy = to[1] - from[1]
+    const length = Math.hypot(dx, dy)
+    if (length === 0) continue
+    stretches.push({
+      from,
+      to,
+      middle: [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2],
+      outward: [
+        ((clockwise ? 1 : -1) * dy) / length,
+        ((clockwise ? -1 : 1) * dx) / length,
+      ],
+    })
+  }
+  return stretches
+}
+
 export interface CliffFace {
   // The face itself: the stretch of coast, and the same stretch `height` lower.
   quad: [Point, Point, Point, Point]
@@ -73,25 +107,46 @@ export interface CliffFace {
  */
 export function cliffFaces(polygon: Point[], height: number): CliffFace[] {
   const faces: CliffFace[] = []
-  // With y downward a positive area means the polygon runs clockwise on the
-  // page, which puts the sea on the left of each stretch.
-  const clockwise = signedArea(polygon) > 0
-  for (let i = 0; i < polygon.length; i++) {
-    const a = polygon[i]
-    const b = polygon[(i + 1) % polygon.length]
-    const dx = b[0] - a[0]
-    const dy = b[1] - a[1]
-    const length = Math.hypot(dx, dy)
-    if (length === 0) continue
-    // Outward normal.
-    const nx = ((clockwise ? 1 : -1) * dy) / length
-    const ny = ((clockwise ? -1 : 1) * dx) / length
-    if (ny <= 0.05) continue
+  for (const { from: a, to: b, middle, outward } of coastStretches(polygon)) {
+    if (outward[1] <= 0.05) continue
     const inset = Math.min(0.4, height)
     faces.push({
       quad: [a, b, [b[0], b[1] + height], [a[0], a[1] + height]],
-      inland: [(a[0] + b[0]) / 2 - nx * inset, (a[1] + b[1]) / 2 - ny * inset],
+      inland: [middle[0] - outward[0] * inset, middle[1] - outward[1] * inset],
     })
   }
   return faces
+}
+
+/**
+ * A river delta: one stream from `source` that forks part of the way to the
+ * sea and reaches each of the `mouths`, every arm bowing a little its own
+ * way. The first channel is the stream down to the fork, the rest the arms
+ * from the fork; each is a list of points to draw one curve through.
+ */
+export function deltaChannels(
+  source: Point,
+  mouths: Point[],
+  bow = 0.12
+): Point[][] {
+  if (mouths.length === 0) return []
+  const toward: Point = [
+    mouths.reduce((sum, m) => sum + m[0], 0) / mouths.length,
+    mouths.reduce((sum, m) => sum + m[1], 0) / mouths.length,
+  ]
+  const fork: Point = [
+    source[0] + (toward[0] - source[0]) * 0.3,
+    source[1] + (toward[1] - source[1]) * 0.3,
+  ]
+  const arms = mouths.map((mouth, i): Point[] => {
+    const dx = mouth[0] - fork[0]
+    const dy = mouth[1] - fork[1]
+    const side = i % 2 === 0 ? 1 : -1
+    const bend: Point = [
+      fork[0] + dx * 0.55 - dy * bow * side,
+      fork[1] + dy * 0.55 + dx * bow * side,
+    ]
+    return [fork, bend, mouth]
+  })
+  return [[source, fork], ...arms]
 }
