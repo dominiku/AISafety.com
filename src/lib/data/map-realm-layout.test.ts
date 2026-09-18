@@ -43,9 +43,19 @@ const spec: RealmMapSpec = {
   },
   landmarks: MAP_35_SPEC.landmarks,
   // The road from the west shore to (33, 18.5) splits the West realm.
-  roadside: { realm: 'West', north: ['West two'], south: ['West one'] },
+  roads: [
+    {
+      realm: 'West',
+      from: [12, 8],
+      fromShore: true,
+      settleFrom: true,
+      to: [33, 18.5],
+      left: ['West two'],
+      right: ['West one'],
+    },
+  ],
   // A town in the East realm.
-  blocks: { 'East two': { at: [44, 22], align: [0, 0] } },
+  blocks: { 'East two': { seed: [44, 22] } },
 }
 
 // Every district is drafted as a tight clump, one pin far out to sea.

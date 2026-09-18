@@ -13,13 +13,15 @@
 //      far out its shore lies: the coast is pushed out along a realm holding
 //      more than its land and pulled in along one holding less, until every
 //      realm's land is in proportion to its logos (a large logo counts as
-//      four small ones, a medium as two). With slow swells and a bay at each
-//      harbour, then cut into facets, the island is an island and not an
-//      oval. Closed orgs and map furniture stay where Airtable puts them, and
-//      the coast keeps clear of them.
+//      four small ones, a medium as two). Bays, capes and coves from the
+//      spec, slow swells and finer roughness on top make it an island off a
+//      fantasy map and not an oval. Closed orgs and map furniture stay where
+//      Airtable puts them, and the coast keeps clear of them.
 //   2. The towns. A district the spec makes a block (Career support, the
-//      castle town at the crossroads) is a square, grown until it holds its
-//      share of the realm.
+//      castle town at the crossroads) grows outward from its seed as a
+//      square until it holds its share of the realm. Whatever border or
+//      shore it meets on the way it runs right up to, so it leaves no sliver
+//      of a neighbor behind it.
 //   3. The districts. The rest of each realm is shared out among its other
 //      districts in the same proportion, as the cells of a power diagram
 //      around their anchors: compact regions, no spikes. Where the road runs
@@ -27,10 +29,9 @@
 //   4. The pins. Inside a district they push apart until each has its own
 //      share of it, again in proportion to its size. On land they keep back
 //      from the coast; ships in the anchorage keep off it.
-//   5. The roads. The main road is a border all the way: between districts
-//      from the arrival harbour to the crossroads, then between the two
-//      realms east of it to the departure harbour. A spur ends at the dam,
-//      and one runs through the middle of districts to the anchorage shore.
+//   5. The roads. A road is always a border: the districts of the realm it
+//      runs through keep to their own side of it, and one may lie across its
+//      end. All of them meet at the crossroads.
 //   6. The lie of the land. All of the above is worked out with ruler-straight
 //      borders, then the whole map (borders, coast, roads, pins) is put
 //      through one gentle warp. Lines are bent only where they cross a coarse
@@ -73,21 +74,31 @@ export interface RealmMapSpec {
   districtAnchors: Record<string, Point>
   // Roughly where; the harbours end up on the coast as it comes out.
   landmarks: RealmLandmarks
-  // A realm the road runs through, where the road is itself a border: the
-  // districts listed lie wholly to its north or south (walking the road from
-  // the arrival harbour to the crossroads). Any other district of that realm
-  // may lie across the road.
-  roadside?: { realm: string; north: string[]; south: string[] }
-  // Districts that are a town: a square block, not a share of the open land.
-  // `at` fixes one point of the square and `align` says which: [-1, 0] puts
-  // `at` in the middle of its east side (the square lies to the west), [0, 0]
-  // in its middle, and so on.
-  blocks?: Record<string, { at: Point; align: [number, number] }>
-  // Past the crossroads the main road runs toward this point, along the
-  // border it lies on, and the departure harbour is where it meets the coast.
-  eastRoadToward?: Point
-  // The districts the road to the anchorage shore runs through, in order.
-  shipsRoadVia?: string[]
+  // The roads, each a border through one realm. Its districts listed `left`
+  // or `right` (walking from `from` to `to`; left of a road heading east is
+  // north) lie wholly on that side; any other may lie across the road. An end
+  // marked as a shore is moved onto the coast. With `settleFrom` or
+  // `settleTo`, that end also slides along the shore until both sides have
+  // the room they need.
+  roads?: {
+    realm: string
+    from: Point
+    to: Point
+    fromShore?: boolean
+    toShore?: boolean
+    settleFrom?: boolean
+    settleTo?: boolean
+    left: string[]
+    right: string[]
+  }[]
+  // Districts that are a town: a block, not a share of the open land. It
+  // grows as a square around `seed`. Put the seed on a corner or an edge of
+  // the realm and the town fills that corner or end of it.
+  blocks?: Record<string, { seed: Point }>
+  // What shapes the coast besides the realms: a bay (depth below 0) or a
+  // cape (above 0) on the bearing of `toward`, as a share of the island's
+  // reach there, `width` bearings wide (there are 240 around the island).
+  coastFeatures?: { toward: Point; depth: number; width: number }[]
 }
 
 export interface RealmLayout {
@@ -120,9 +131,9 @@ const GRID_WIDTH = 60
 const GRID_HEIGHT = 32.7
 const STEP = 0.25
 
-const COAST_POINTS = 180
+const COAST_POINTS = 240
 // How far a realm's shore may move in or out to fit what the realm holds.
-const SHORE_RANGE: [number, number] = [0.8, 1.25]
+const SHORE_RANGE: [number, number] = [0.8, 1.3]
 // Grid units of sea kept around every pin that is not on the land.
 const KEEP_CLEAR_RADIUS = 3
 // Grid units a pin's middle keeps from the coast, so its logo and the name
@@ -236,9 +247,6 @@ function insidePolygon(x: number, y: number, polygon: Point[]): boolean {
  */
 class Coast {
   readonly reach = new Array<number>(COAST_POINTS).fill(1)
-  // The bearings the coast turns at, once it is cut into facets.
-  corners: number[] = []
-
   private island: RealmMapSpec['island']
 
   constructor(island: RealmMapSpec['island']) {
@@ -278,43 +286,8 @@ class Coast {
     return Math.hypot(x - cx, y - cy) <= Math.hypot(sx - cx, sy - cy)
   }
 
-  /**
-   * Cuts the coast into straight facets of uneven length, like the classic
-   * map's: it keeps its place at a corner every 4 to 7 bearings (and at each
-   * bearing in `keep`), and runs straight from one corner to the next.
-   */
-  facet(keep: number[]) {
-    const corners = new Set(keep.map(k => Math.round(k) % COAST_POINTS))
-    for (
-      let at = 0, k = 0;
-      at < COAST_POINTS - 3;
-      at += 4 + ((k * 7) % 4), k++
-    ) {
-      if (![...corners].some(c => Math.abs(c - at) < 3)) corners.add(at)
-    }
-    this.corners = [...corners].sort((a, b) => a - b)
-    const { cx, cy, rx, ry } = this.island
-    this.corners.forEach((from, n) => {
-      const to = this.corners[(n + 1) % this.corners.length]
-      const [ax, ay] = this.pointAt(from)
-      const [bx, by] = this.pointAt(to)
-      const span = (to - from + COAST_POINTS) % COAST_POINTS
-      for (let step = 1; step < span; step++) {
-        const index = (from + step) % COAST_POINTS
-        const angle = (index / COAST_POINTS) * 2 * Math.PI
-        const dx = Math.cos(angle) * rx
-        const dy = Math.sin(angle) * ry
-        // Where the ray on this bearing crosses the facet.
-        const cross = dx * (by - ay) - dy * (bx - ax)
-        if (Math.abs(cross) < 1e-9) continue
-        this.reach[index] =
-          ((ax - cx) * (by - ay) - (ay - cy) * (bx - ax)) / cross
-      }
-    })
-  }
-
   outline(): Point[] {
-    return this.corners.map(index => this.pointAt(index))
+    return this.reach.map((_, index) => this.pointAt(index))
   }
 }
 
@@ -327,24 +300,21 @@ function shapeCoast(
   const coast = new Coast(spec.island)
   const realms = [...wanted.keys()]
 
-  // The lie of the coast before any realm moves it: slow swells, a little
-  // roughness, and a bay at each harbour.
-  const bays = [spec.landmarks.arrivalHarbour, spec.landmarks.departureHarbour]
+  // The lie of the coast before any realm moves it: slow swells, then finer
+  // and finer roughness, and the bays and capes the spec asks for.
   const swell = coast.reach.map((_, index) => {
     const angle = (index / COAST_POINTS) * 2 * Math.PI
-    let reach =
-      1 +
-      0.06 * Math.sin(2 * angle + 0.9) +
-      0.05 * Math.sin(3 * angle + 2.4) +
-      0.035 * Math.sin(5 * angle + 0.3) +
-      0.03 * Math.sin(7 * angle + 4.0) +
-      0.02 * Math.sin(11 * angle + 1.7)
-    for (const [x, y] of bays) {
+    let reach = 1
+    for (const [waves, height, phase] of COAST_WAVES) {
+      reach += height * Math.sin(waves * angle + phase)
+    }
+    for (const { toward, depth, width } of spec.coastFeatures ?? []) {
       const away = Math.abs(
-        ((index - coast.bearingOf(x, y) + COAST_POINTS * 1.5) % COAST_POINTS) -
+        ((index - coast.bearingOf(toward[0], toward[1]) + COAST_POINTS * 1.5) %
+          COAST_POINTS) -
           COAST_POINTS / 2
       )
-      reach -= 0.07 * Math.exp(-((away / 4) ** 2))
+      reach += depth * Math.exp(-((away / width) ** 2))
     }
     return reach
   })
@@ -365,7 +335,10 @@ function shapeCoast(
       if (realm !== -1) samples.push({ x, y, realm })
     }
   }
-  const landWanted = (Math.PI * spec.island.rx * spec.island.ry) / (0.5 * 0.5)
+  // A little less land than the spec's ellipse, so the island with its capes
+  // still fits the frame.
+  const landWanted =
+    (0.92 * Math.PI * spec.island.rx * spec.island.ry) / (0.5 * 0.5)
 
   const push = realms.map(() => 1)
   for (let round = 0; round < 40; round++) {
@@ -373,11 +346,11 @@ function shapeCoast(
     // two realms meet.
     const pushed = shoreOf.map((_, index) => {
       let sum = 0
-      for (let near = -5; near <= 5; near++) {
+      for (let near = -7; near <= 7; near++) {
         const at = shoreOf[(index + near + COAST_POINTS) % COAST_POINTS]
         sum += at === -1 ? 1 : push[at]
       }
-      return sum / 11
+      return sum / 15
     })
     coast.reach.forEach((_, index) => {
       coast.reach[index] = swell[index] * pushed[index]
@@ -408,38 +381,53 @@ function shapeCoast(
     while (times > 0.3 && tooNear()) times -= 0.01
     coast.reach[index] = reach * times
   })
-
-  // A corner at the back of each bay, so a harbour sits in one.
-  coast.facet(bays.map(([x, y]) => coast.bearingOf(x, y)))
   return coast
 }
 
-// How much of a district lying across the road is counted as north of it when
+// Waves along the coast: [how many around the island, height, phase].
+const COAST_WAVES = [
+  [2, 0.06, 0.9],
+  [3, 0.07, 2.4],
+  [4, 0.05, 5.1],
+  [5, 0.035, 0.3],
+  [7, 0.03, 4.0],
+  [9, 0.022, 1.1],
+  [12, 0.02, 1.7],
+  [16, 0.015, 3.3],
+  [21, 0.012, 0.8],
+  [29, 0.009, 2.9],
+  [41, 0.007, 5.6],
+  [58, 0.005, 1.4],
+]
+
+// How much of a district lying across the road is counted as left of it when
 // the road is laid.
-const ACROSS_NORTH = 0.3
+const ACROSS_LEFT = 0.3
 
 /**
- * Where on the coast the road starts. The road is a border (see
- * RealmMapSpec.roadside) and ends at the crossroads, so where it starts
- * decides how much of its realm lies to either side: the arrival harbour
- * slides along the shore from where the spec has it until the north side has
- * room for the districts that go there.
+ * Where on the coast a road meets it, for a road end the spec lets settle.
+ * The road is a border and its other end is fixed, so where this end lies
+ * decides how much of its realm is to either side: it slides along the shore
+ * from where the spec has it until the left side has room for its districts.
  *
- * @param open the realm's land that is not a town's, as [x, y] samples
+ * @param open    the realm's land that is not a town's, as [x, y] samples
+ * @param isStart whether the sliding end is the road's start (it matters for
+ *                which side is left)
  */
-function settleArrivalHarbour(
+function settleRoadEnd(
   spec: RealmMapSpec,
   coast: Coast,
   open: Point[],
   polygon: Point[],
-  wantedNorth: number
+  wantedLeft: number,
+  [hx, hy]: Point,
+  [ex, ey]: Point,
+  isStart: boolean
 ): Point {
-  const [hx, hy] = spec.landmarks.arrivalHarbour
-  const [ex, ey] = spec.landmarks.crossroads
   const from = coast.bearingOf(hx, hy)
   let best = coast.shoreToward(hx, hy)
   let bestMiss = Infinity
-  for (let slide = -16; slide <= 16; slide += 0.5) {
+  for (let slide = -12; slide <= 12; slide += 0.5) {
     const bearing = (from + slide + COAST_POINTS) % COAST_POINTS
     const angle = (bearing / COAST_POINTS) * 2 * Math.PI
     const start = coast.shoreToward(
@@ -456,13 +444,17 @@ function settleArrivalHarbour(
     ) {
       continue
     }
-    const northOfRoad = open.filter(
+    const turn = isStart ? 1 : -1
+    const leftOfRoad = open.filter(
       ([x, y]) =>
-        (ex - start[0]) * (y - start[1]) - (ey - start[1]) * (x - start[0]) <= 0
+        turn *
+          ((ex - start[0]) * (y - start[1]) -
+            (ey - start[1]) * (x - start[0])) <=
+        0
     ).length
     // Near enough is good enough: of those, the least slide wins.
     const miss =
-      Math.abs(northOfRoad / Math.max(open.length, 1) - wantedNorth) +
+      Math.abs(leftOfRoad / Math.max(open.length, 1) - wantedLeft) +
       Math.abs(slide) * 0.0005
     if (miss < bestMiss) {
       bestMiss = miss
@@ -541,8 +533,11 @@ function shareOut(
     if (round === rounds - 1) break
     sites.forEach((site, i) => {
       if (count[i] > 0) {
-        site.x = site.homeX * HOME_PULL + (sumX[i] / count[i]) * (1 - HOME_PULL)
-        site.y = site.homeY * HOME_PULL + (sumY[i] / count[i]) * (1 - HOME_PULL)
+        // A small district is held least: near a border or a shore, its
+        // anchor would otherwise leave it a sliver along it.
+        const pull = HOME_PULL * Math.min(1, site.share * 4)
+        site.x = site.homeX * pull + (sumX[i] / count[i]) * (1 - pull)
+        site.y = site.homeY * pull + (sumY[i] / count[i]) * (1 - pull)
       }
       // Too little land: weigh more, and the borders move outward.
       const shortfall = site.share - count[i] / samples.length
@@ -748,7 +743,8 @@ export function layoutRealmMap(
   const landShare = new Map<string, number>()
   const realmShare = new Map<string, number>()
   const { crossroads, controlDam } = spec.landmarks
-  let roadStart = toShore(spec.landmarks.arrivalHarbour)
+  // Each road as it came out, by the realm it runs through.
+  const laid = new Map<string, [Point, Point]>()
 
   for (const [realm, inRealm] of byRealm) {
     const water = isWater(realm)
@@ -842,8 +838,8 @@ export function layoutRealmMap(
       if (!block) continue
       const target = (footprintOf(inDistrict) / realmFootprint) * room.length
       const squareOf = (side: number) => {
-        const x0 = block.at[0] + ((block.align[0] - 1) / 2) * side
-        const y0 = block.at[1] + ((block.align[1] - 1) / 2) * side
+        const x0 = block.seed[0] - side / 2
+        const y0 = block.seed[1] - side / 2
         return { x0, y0, x1: x0 + side, y1: y0 + side }
       }
       const inSquare = (side: number) => {
@@ -853,7 +849,7 @@ export function layoutRealmMap(
         )
       }
       let low = 0
-      let high = 24
+      let high = 48
       for (let round = 0; round < 20; round++) {
         const side = (low + high) / 2
         if (inSquare(side).length < target) low = side
@@ -871,6 +867,24 @@ export function layoutRealmMap(
       towns.push(() => settle(district, inDistrict, [...taken], [square], true))
     }
 
+    // The coast moves with the data, and an anchor left at sea or right on
+    // the shore would give its district a thin strip of coast. Such an anchor
+    // comes ashore: to the nearest open land well clear of the water.
+    const inland = water ? open : open.filter(i => clearOf(i, 2, 1))
+    const ashore = (at: { x: number; y: number }) => {
+      const ground = inland.length > 0 ? inland : open
+      let best = ground[0]
+      let bestDistance = Infinity
+      for (const i of ground) {
+        const distance = (xs[i] - at.x) ** 2 + (ys[i] - at.y) ** 2
+        if (distance < bestDistance) {
+          bestDistance = distance
+          best = i
+        }
+      }
+      return bestDistance < STEP * STEP ? at : { x: xs[best], y: ys[best] }
+    }
+
     const shared = [...byDistrict.entries()].filter(
       ([district]) => !spec.blocks?.[district]
     )
@@ -883,39 +897,51 @@ export function layoutRealmMap(
         )
       }
       return siteAt(
-        anchor ? { x: anchor[0], y: anchor[1] } : middleOf(inDistrict),
+        ashore(anchor ? { x: anchor[0], y: anchor[1] } : middleOf(inDistrict)),
         footprintOf(inDistrict) / sharedFootprint
       )
     })
 
-    // The road as a border: see RealmMapSpec.roadside.
-    const roadside = spec.roadside?.realm === realm ? spec.roadside : null
+    // The road as a border: see RealmMapSpec.roads.
+    const road = spec.roads?.find(r => r.realm === realm) ?? null
     const sideOfSite = shared.map(([district]) =>
-      roadside?.north.includes(district)
+      road?.left.includes(district)
         ? -1
-        : roadside?.south.includes(district)
+        : road?.right.includes(district)
           ? 1
           : 0
     )
-    if (roadside) {
-      const footprintOn = (side: number) =>
-        footprintOf(
-          shared
-            .filter((_, i) => sideOfSite[i] === side)
-            .flatMap(([, of]) => of)
+    let roadStart: Point = crossroads
+    let roadEnd: Point = crossroads
+    if (road) {
+      roadEnd = road.toShore ? toShore(road.to) : road.to
+      roadStart = road.fromShore ? toShore(road.from) : road.from
+      if (road.settleFrom || road.settleTo) {
+        const footprintOn = (side: number) =>
+          footprintOf(
+            shared
+              .filter((_, i) => sideOfSite[i] === side)
+              .flatMap(([, of]) => of)
+          )
+        const settled = settleRoadEnd(
+          spec,
+          coast,
+          open.map(i => [xs[i], ys[i]]),
+          polygon,
+          (footprintOn(-1) + ACROSS_LEFT * footprintOn(0)) /
+            Math.max(sharedFootprint, 1),
+          road.settleFrom ? road.from : road.to,
+          road.settleFrom ? roadEnd : roadStart,
+          road.settleFrom === true
         )
-      roadStart = settleArrivalHarbour(
-        spec,
-        coast,
-        open.map(i => [xs[i], ys[i]]),
-        polygon,
-        (footprintOn(-1) + ACROSS_NORTH * footprintOn(0)) /
-          Math.max(sharedFootprint, 1)
-      )
+        if (road.settleFrom) roadStart = settled
+        else roadEnd = settled
+      }
+      laid.set(realm, [roadStart, roadEnd])
     }
-    // Inside is a·x + b·y <= c on the north side, the reverse on the south.
-    const roadA = -(crossroads[1] - roadStart[1])
-    const roadB = crossroads[0] - roadStart[0]
+    // Inside is a·x + b·y <= c on the left side, the reverse on the right.
+    const roadA = -(roadEnd[1] - roadStart[1])
+    const roadB = roadEnd[0] - roadStart[0]
     const roadC = roadA * roadStart[0] + roadB * roadStart[1]
     const districtOf = shareOut(
       open,
@@ -923,7 +949,7 @@ export function layoutRealmMap(
       ys,
       sites,
       300,
-      roadside
+      road
         ? {
             ofSample: Int8Array.from(open, i =>
               roadA * xs[i] + roadB * ys[i] <= roadC ? -1 : 1
@@ -949,7 +975,7 @@ export function layoutRealmMap(
         district,
         inDistrict,
         open.filter((_, s) => districtOf[s] === index),
-        roadside
+        road
           ? ([-1, 1] as const)
               .filter(side => [0, side].includes(sideOfSite[index]))
               .map(side => pieceOn(index, side))
@@ -961,36 +987,19 @@ export function layoutRealmMap(
     for (const town of towns) town()
   }
 
-  // The roads: see step 5 at the top of the file.
-  let roadEast = toShore(spec.landmarks.departureHarbour)
-  if (spec.eastRoadToward) {
-    const [tx, ty] = spec.eastRoadToward
-    const length = Math.hypot(tx - crossroads[0], ty - crossroads[1])
-    roadEast = crossroads
-    for (let gone = 0; gone < length; gone += 0.05) {
-      const next: Point = [
-        crossroads[0] + ((tx - crossroads[0]) * gone) / length,
-        crossroads[1] + ((ty - crossroads[1]) * gone) / length,
-      ]
-      if (!coast.contains(next[0], next[1])) break
-      roadEast = next
-    }
-  }
-  const box = spec.anchorage.box
-  const shipsShore = toShore([
-    box.reduce((sum, p) => sum + p[0], 0) / box.length,
-    box.reduce((sum, p) => sum + p[1], 0) / box.length,
-  ])
-  const via = (spec.shipsRoadVia ?? []).flatMap(name => {
-    const district = districts.find(d => d.district === name)
-    return district ? [district.middle] : []
+  const roads: Point[][] = (spec.roads ?? []).flatMap(road => {
+    const ends = laid.get(road.realm)
+    return ends ? [ends] : []
   })
-  const roads: Point[][] = [
-    [roadStart, crossroads],
-    [crossroads, roadEast],
-    [crossroads, controlDam],
-    [crossroads, ...via, shipsShore],
-  ]
+  // The harbours are where the first two roads of the spec meet the shore.
+  const shoreEnd = (n: number, fallback: Point): Point => {
+    const road = spec.roads?.[n]
+    const ends = road && laid.get(road.realm)
+    if (!road || !ends) return toShore(fallback)
+    return road.fromShore ? ends[0] : ends[1]
+  }
+  const arrival = shoreEnd(0, spec.landmarks.arrivalHarbour)
+  const departure = shoreEnd(1, spec.landmarks.departureHarbour)
 
   const trace = tracer([
     ...realms.flatMap(r => r.polygon),
@@ -998,7 +1007,7 @@ export function layoutRealmMap(
     ...roads.flat(),
   ])
   // The harbours are corners of the drawn coast, so they sit right on it.
-  const corners = [...coast.outline(), roadStart, roadEast].sort(
+  const corners = [...coast.outline(), arrival, departure].sort(
     (a, b) => coast.bearingOf(a[0], a[1]) - coast.bearingOf(b[0], b[1])
   )
   const positions = new Map<string, { x: number; y: number }>()
@@ -1020,9 +1029,9 @@ export function layoutRealmMap(
       pieces: pieces.map(piece => trace(piece, true)),
     })),
     landmarks: {
-      arrivalHarbour: warp(roadStart),
+      arrivalHarbour: warp(arrival),
       crossroads: warp(crossroads),
-      departureHarbour: warp(roadEast),
+      departureHarbour: warp(departure),
       controlDam: warp(controlDam),
     },
     roads: roads.map(road => trace(road, false)),
