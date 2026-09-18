@@ -104,7 +104,10 @@ describe('layoutRealmMap', () => {
     for (const pin of pins) {
       const district = layout.districts.find(d => d.district === pin.district)!
       const realm = layout.realms.find(r => r.realm === pin.realm)!
-      expect(inside(at(pin), district.polygon), pin.id).toBe(true)
+      expect(
+        district.pieces.some(piece => inside(at(pin), piece)),
+        pin.id
+      ).toBe(true)
       expect(inside(at(pin), realm.polygon), pin.id).toBe(true)
     }
   })

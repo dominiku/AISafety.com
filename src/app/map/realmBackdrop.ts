@@ -83,7 +83,7 @@ export function drawRealmBackdrop(
       if (district.realm !== realm.realm) continue
       inRealm
         .append('path')
-        .attr('d', outline(district.polygon))
+        .attr('d', district.pieces.map(outline).join(''))
         .attr('fill', fill)
         .attr('stroke', realm.water ? SEA : LINE)
         .attr('stroke-width', realm.water ? 3 : 2.5)

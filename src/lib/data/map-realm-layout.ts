@@ -17,7 +17,8 @@
 //      clear of them.
 //   2. The districts. Each realm is shared out among its districts in the
 //      same proportion, as the cells of a power diagram around their anchors:
-//      compact regions, no spikes.
+//      compact regions, no spikes. Where the road runs through a realm it is
+//      a border too: districts keep to their own side of it.
 //   3. The pins. Inside a district they push apart until each has its own
 //      share of it, again in proportion to its size. On land they keep back
 //      from the coast; ships in the anchorage keep off it.
@@ -61,6 +62,11 @@ export interface RealmMapSpec {
   // Where each district is centered, by its District name in Airtable.
   districtAnchors: Record<string, Point>
   landmarks: RealmLandmarks
+  // A realm the road runs through, where the road is itself a border: the
+  // districts listed lie wholly to its north or south (walking the road from
+  // the arrival harbour to the crossroads). Any other district of that realm
+  // may lie across the road.
+  roadside?: { realm: string; north: string[]; south: string[] }
 }
 
 export interface RealmLayout {
@@ -69,9 +75,10 @@ export interface RealmLayout {
   coast: Point[]
   // A realm's polygon runs out past the coast. A water realm lies off it.
   realms: { realm: string; polygon: Point[]; water: boolean }[]
-  // A district's polygon is its whole cell: draw it cut off by its realm's
-  // polygon, and by the coast (inside it for land, outside it for water).
-  districts: { district: string; realm: string; polygon: Point[] }[]
+  // A district's pieces are its whole cell (two pieces when it lies across
+  // the road): draw them cut off by the realm's polygon, and by the coast
+  // (inside it for land, outside it for water).
+  districts: { district: string; realm: string; pieces: Point[][] }[]
   // The harbours moved onto the coast as it came out.
   landmarks: RealmLandmarks
   // The newcomer's road: in from the arrival harbour to the crossroads, then
@@ -302,6 +309,73 @@ function shapeCoast(
   return coast
 }
 
+// How much of a district lying across the road is counted as north of it when
+// the road is laid.
+const ACROSS_NORTH = 0.3
+
+/**
+ * Where on the coast the road starts. The road is a border (see
+ * RealmMapSpec.roadside) and ends at the crossroads, so where it starts
+ * decides how much of its realm lies to either side: the arrival harbour
+ * slides along the shore from where the spec has it until the north side has
+ * room for the districts that go there.
+ */
+function settleArrivalHarbour(
+  spec: RealmMapSpec,
+  coast: Coast,
+  pins: LayoutPin[]
+): Point {
+  const [hx, hy] = spec.landmarks.arrivalHarbour
+  const roadside = spec.roadside
+  const polygon = roadside && spec.realms[roadside.realm]
+  if (!roadside || !polygon) return coast.shoreToward(hx, hy)
+
+  const inRealm = pins.filter(pin => pin.realm === roadside.realm)
+  const north = inRealm.filter(pin => roadside.north.includes(pin.district))
+  const across = inRealm.filter(
+    pin =>
+      !roadside.north.includes(pin.district) &&
+      !roadside.south.includes(pin.district)
+  )
+  const wantedNorth =
+    (footprintOf(north) + ACROSS_NORTH * footprintOf(across)) /
+    Math.max(footprintOf(inRealm), 1)
+
+  const land: Point[] = []
+  for (let x = 0.25; x < GRID_WIDTH; x += 0.5) {
+    for (let y = 0.25; y < GRID_HEIGHT; y += 0.5) {
+      if (insidePolygon(x, y, polygon) && coast.contains(x, y))
+        land.push([x, y])
+    }
+  }
+  const [ex, ey] = spec.landmarks.crossroads
+  const from = Math.round(coast.bearingOf(hx, hy))
+  let best = coast.shoreToward(hx, hy)
+  let bestMiss = Infinity
+  for (let slide = -14; slide <= 14; slide++) {
+    const start = coast.pointAt((from + slide + COAST_POINTS) % COAST_POINTS)
+    // Only along the realm the road runs through.
+    const justInland: Point = [
+      start[0] + (ex - start[0]) * 0.05,
+      start[1] + (ey - start[1]) * 0.05,
+    ]
+    if (!insidePolygon(justInland[0], justInland[1], polygon)) continue
+    const northOfRoad = land.filter(
+      ([x, y]) =>
+        (ex - start[0]) * (y - start[1]) - (ey - start[1]) * (x - start[0]) <= 0
+    ).length
+    // Near enough is good enough: of those, the least slide wins.
+    const miss =
+      Math.abs(northOfRoad / Math.max(land.length, 1) - wantedNorth) +
+      Math.abs(slide) * 0.0005
+    if (miss < bestMiss) {
+      bestMiss = miss
+      best = start
+    }
+  }
+  return best
+}
+
 interface Site {
   x: number
   y: number
@@ -334,7 +408,11 @@ function shareOut(
   xs: Float32Array,
   ys: Float32Array,
   sites: Site[],
-  rounds: number
+  rounds: number,
+  // Which side of the road each sample and each site is on: -1 north, 1
+  // south, 0 for a site that may hold land on both. A site never holds a
+  // sample on the other side.
+  sides?: { ofSample: Int8Array; ofSite: number[] }
 ): Int16Array {
   const held = new Int16Array(samples.length)
   if (sites.length === 1) return held
@@ -349,6 +427,8 @@ function shareOut(
       let best = 0
       let bestDistance = Infinity
       for (let i = 0; i < sites.length; i++) {
+        const side = sides?.ofSite[i] ?? 0
+        if (side !== 0 && side !== sides?.ofSample[s]) continue
         const dx = x - sites[i].x
         const dy = y - sites[i].y
         const distance = dx * dx + dy * dy - sites[i].weight
@@ -376,6 +456,27 @@ function shareOut(
   return held
 }
 
+/** The part of a convex polygon where a·x + b·y <= c. */
+function clipTo(polygon: Point[], a: number, b: number, c: number): Point[] {
+  const kept: Point[] = []
+  polygon.forEach((from, k) => {
+    const to = polygon[(k + 1) % polygon.length]
+    const fromIn = a * from[0] + b * from[1] <= c
+    const toIn = a * to[0] + b * to[1] <= c
+    if (fromIn) kept.push(from)
+    if (fromIn !== toIn) {
+      const t =
+        (c - a * from[0] - b * from[1]) /
+        (a * (to[0] - from[0]) + b * (to[1] - from[1]))
+      kept.push([
+        from[0] + t * (to[0] - from[0]),
+        from[1] + t * (to[1] - from[1]),
+      ])
+    }
+  })
+  return kept
+}
+
 /** Site i's cell of the power diagram, cut out of `within` (a convex
  *  polygon): everything nearer to it than to any other site. */
 function cellOf(sites: Site[], i: number, within: Point[]): Point[] {
@@ -383,31 +484,15 @@ function cellOf(sites: Site[], i: number, within: Point[]): Point[] {
   const me = sites[i]
   sites.forEach((other, j) => {
     if (j === i || cell.length === 0) return
-    // Inside is a·x + b·y <= c.
-    const a = 2 * (other.x - me.x)
-    const b = 2 * (other.y - me.y)
-    const c =
+    cell = clipTo(
+      cell,
+      2 * (other.x - me.x),
+      2 * (other.y - me.y),
       other.x ** 2 +
-      other.y ** 2 -
-      other.weight -
-      (me.x ** 2 + me.y ** 2 - me.weight)
-    const kept: Point[] = []
-    cell.forEach((from, k) => {
-      const to = cell[(k + 1) % cell.length]
-      const fromIn = a * from[0] + b * from[1] <= c
-      const toIn = a * to[0] + b * to[1] <= c
-      if (fromIn) kept.push(from)
-      if (fromIn !== toIn) {
-        const t =
-          (c - a * from[0] - b * from[1]) /
-          (a * (to[0] - from[0]) + b * (to[1] - from[1]))
-        kept.push([
-          from[0] + t * (to[0] - from[0]),
-          from[1] + t * (to[1] - from[1]),
-        ])
-      }
-    })
-    cell = kept
+        other.y ** 2 -
+        other.weight -
+        (me.x ** 2 + me.y ** 2 - me.weight)
+    )
   })
   return cell
 }
@@ -509,13 +594,14 @@ export function layoutRealmMap(
   const coast = shapeCoast(spec, wanted, keepClear)
 
   const toShore = ([x, y]: Point) => coast.shoreToward(x, y)
+  const roadStart = settleArrivalHarbour(spec, coast, pins)
   const layout: RealmLayout = {
     positions: new Map(),
     coast: trace(coast.outline(), true),
     realms: [],
     districts: [],
     landmarks: {
-      arrivalHarbour: warp(toShore(spec.landmarks.arrivalHarbour)),
+      arrivalHarbour: warp(roadStart),
       crossroads: warp(spec.landmarks.crossroads),
       departureHarbour: warp(toShore(spec.landmarks.departureHarbour)),
       controlDam: warp(spec.landmarks.controlDam),
@@ -526,8 +612,9 @@ export function layoutRealmMap(
   }
   const { crossroads, controlDam } = spec.landmarks
   const box = spec.anchorage.box
+  const roadEnd = crossroads
   layout.roads = [
-    [toShore(spec.landmarks.arrivalHarbour), crossroads],
+    [roadStart, roadEnd],
     [crossroads, toShore(spec.landmarks.departureHarbour)],
     [
       crossroads,
@@ -624,14 +711,59 @@ export function layoutRealmMap(
         footprintOf(inDistrict) / realmFootprint
       )
     })
-    const districtOf = shareOut(room, xs, ys, sites, 300)
+
+    // The road as a border: see RealmMapSpec.roadside.
+    const roadside = spec.roadside?.realm === realm ? spec.roadside : null
+    const sideOfSite = [...byDistrict.keys()].map(district =>
+      roadside?.north.includes(district)
+        ? -1
+        : roadside?.south.includes(district)
+          ? 1
+          : 0
+    )
+    // Inside is a·x + b·y <= c on the north side, the reverse on the south.
+    const roadA = -(roadEnd[1] - roadStart[1])
+    const roadB = roadEnd[0] - roadStart[0]
+    const roadC = roadA * roadStart[0] + roadB * roadStart[1]
+    const districtOf = shareOut(
+      room,
+      xs,
+      ys,
+      sites,
+      300,
+      roadside
+        ? {
+            ofSample: Int8Array.from(room, i =>
+              roadA * xs[i] + roadB * ys[i] <= roadC ? -1 : 1
+            ),
+            ofSite: sideOfSite,
+          }
+        : undefined
+    )
+    // A district's cell on one side of the road: everything nearer to it than
+    // to the other districts that may hold land there, up to the road.
+    const pieceOn = (index: number, side: -1 | 1): Point[] => {
+      const there = sites.filter(
+        (_, i) => sideOfSite[i] === 0 || sideOfSite[i] === side
+      )
+      const cell = cellOf(there, there.indexOf(sites[index]), frame)
+      return cell.length === 0
+        ? cell
+        : clipTo(cell, -side * roadA, -side * roadB, -side * roadC)
+    }
 
     ;[...byDistrict.entries()].forEach(([district, inDistrict], index) => {
       const districtRoom = room.filter((_, s) => districtOf[s] === index)
       layout.districts.push({
         district,
         realm,
-        polygon: trace(cellOf(sites, index, frame), true),
+        pieces: (roadside
+          ? ([-1, 1] as const)
+              .filter(side => [0, side].includes(sideOfSite[index]))
+              .map(side => pieceOn(index, side))
+              .filter(piece => piece.length > 0)
+          : [cellOf(sites, index, frame)]
+        ).map(piece => trace(piece, true)),
       })
       layout.realmShare.set(district, districtRoom.length / room.length)
       if (districtRoom.length === 0) {

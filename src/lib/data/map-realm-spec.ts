@@ -87,6 +87,15 @@ export const MAP_35_SPEC: RealmMapSpec = {
     'Evaluations and threat research': [45, 20.5],
     'Capabilities research': [49, 24],
   },
+  // Section 4 of the spec: Policy programs lie north of the road and
+  // Technical programs south of it. The two districts at the arrival harbour
+  // go on the side their anchor is on, and Career support, at the end of the
+  // road, lies across it.
+  roadside: {
+    realm: 'Talent pipeline',
+    north: ['Introductory learning', 'Policy and governance programs'],
+    south: ['Field-building and local groups', 'Technical research programs'],
+  },
   landmarks: {
     arrivalHarbour: [6, 11],
     crossroads: [33, 18.5],
