@@ -156,8 +156,6 @@ describe('layoutRealmMap', () => {
         footprint(pins.filter(p => p.district === district)) /
         footprint(pins.filter(p => p.realm === realm))
       const got = layout.realmShare.get(district)! / wanted
-      // Sizes are settled with straight borders and then drawn angular, on
-      // a grid, which moves them a little.
       expect(got, district).toBeGreaterThan(0.85)
       expect(got, district).toBeLessThan(1.15)
     }
@@ -175,7 +173,7 @@ describe('layoutRealmMap', () => {
       }
     }
     // Drafted 0.4 apart.
-    expect(closest).toBeGreaterThan(1)
+    expect(closest).toBeGreaterThan(0.8)
   })
 
   it('keeps districts to their own side of the road', () => {
@@ -183,13 +181,13 @@ describe('layoutRealmMap', () => {
     const [cx, cy] = layout.landmarks.crossroads
     const southOfRoad = ([x, y]: Point) =>
       (cx - hx) * (y - hy) - (cy - hy) * (x - hx) > 0
-    // The drawn road steps along its way, so pins near it are left out.
+    // Pins right by the road are left out: positions are rounded.
     const clear = (pin: LayoutPin) => {
       const [x, y] = at(pin)
       const off =
         Math.abs((cx - hx) * (y - hy) - (cy - hy) * (x - hx)) /
         Math.hypot(cx - hx, cy - hy)
-      return off > 3
+      return off > 0.5
     }
     for (const pin of pins.filter(clear)) {
       if (pin.district === 'West two') expect(southOfRoad(at(pin))).toBe(false)
@@ -251,24 +249,6 @@ describe('MAP_35_SPEC', () => {
         regions.filter(polygon => inside(anchor, polygon)).length,
         district
       ).toBe(1)
-    }
-  })
-})
-
-describe('the drawn map', () => {
-  it('runs every line along an axis or at 45 degrees', () => {
-    const lines = [
-      layout.coast,
-      ...layout.realms.map(r => r.polygon),
-      ...layout.districts.flatMap(d => d.pieces),
-    ]
-    for (const line of lines) {
-      line.forEach((from, i) => {
-        const to = line[(i + 1) % line.length]
-        const dx = Math.abs(to[0] - from[0])
-        const dy = Math.abs(to[1] - from[1])
-        expect(dx === 0 || dy === 0 || Math.abs(dx - dy) < 1e-9).toBe(true)
-      })
     }
   })
 })

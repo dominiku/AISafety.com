@@ -1,9 +1,8 @@
 // PROTOTYPE Map 3.5: works out the island, the district borders and every
 // pin's position, so the map has the same density of logos everywhere and
 // each region's size shows how much goes on in it. The look it aims for is
-// the classic map's, and a tube map's: every line, the coast included, runs
-// along an axis or at 45° and turns at a corner, so the regions are the
-// chunky angular shapes the art for them will take.
+// the classic map's: a coast cut into straight facets and chunky regions with
+// straight borders, at whatever angle they fall.
 //
 // The arrangement is given (map-realm-spec.ts): where the realm borders run
 // from the middle of the island, the Advocacy cove beside the castle town
@@ -33,16 +32,11 @@
 //      from the coast; ships in the anchorage keep off it.
 //   5. The ways. The road in from the arrival harbour is a border: the
 //      districts of the realm it runs through keep to their own side of it.
-//      East of the castle town there are only footpaths, which wander out
-//      through the districts, and a short boardwalk from the town to the cove.
-//   6. The drawing. All of the above is worked out with ruler-straight
-//      borders at whatever angle they fall, which gets the sizes right. Then
-//      every line is redrawn in the map's angular hand: its corners moved
-//      onto a grid, and each stretch between two corners run straight, at
-//      45°, and straight again. Lines turn only at their corners, where they
-//      meet another line and where they cross a coarse lattice, so two
-//      regions sharing a border draw the same line. The pins are placed on
-//      the regions as drawn.
+//      East of the castle town there are only footpaths. Each runs through the
+//      middle of one district after another, and crosses from one into the
+//      next halfway along the border they share. A short boardwalk joins the
+//      town to the cove.
+//   6. The pins are placed last, on the regions as they are drawn.
 //
 // Everything is deterministic: the same records give the same map. Pure
 // module with no dependencies, so it can be unit tested.
@@ -107,9 +101,9 @@ export interface RealmMapSpec {
   // grows as a square around `seed`. Put the seed on a corner or an edge of
   // the realm and the town fills that corner or end of it.
   blocks?: Record<string, { seed: Point }>
-  // Footpaths, each as the places it wanders through. They are drawn as one
-  // easy curve, not in the map's angular hand.
-  trails?: Point[][]
+  // Footpaths, each as the districts it calls at, in order. The first is
+  // where it sets out from, which it does not run through the middle of.
+  trails?: string[][]
   // The boardwalk from the castle town to the cove, end to end.
   boardwalk?: Point[]
   // What shapes the coast besides the realms: a bay (depth below 0) or a
@@ -179,17 +173,12 @@ const SHIP_MARGIN = 0.75
 // How strongly a district is held to its anchor, against settling in the
 // middle of its own land. Lower makes chunkier districts.
 const HOME_PULL = 0.3
-// Corners of borders and roads sit on a grid this fine (grid units), and the
-// coast's corners on a coarser one, for longer straight runs.
-const SNAP = 0.5
-const SHORE_SNAP = 1
-// The coast turns a corner with a short 45° cut this long each way, as on the
-// classic map, and no two of its corners are nearer than SHORE_RUN.
+// The coast's corners sit on a grid this fine (grid units), and no two of
+// them are nearer than SHORE_RUN. Where it turns into a harbour basin the
+// corner is cut by a short stretch SHORE_CHAMFER long each way.
+const SHORE_SNAP = 0.5
 const SHORE_CHAMFER = 1
 const SHORE_RUN = 3
-// A long line also turns where it crosses this lattice (grid units), so it
-// steps along its way in several places and not in one big dogleg.
-const LATTICE = 5
 
 /** Land a logo takes, relative to a small one. Matches the pin sizes on the
  *  map: a Large logo is twice as wide as a Small one. */
@@ -199,101 +188,6 @@ export function pinFootprint(scale: string | null): number {
 }
 
 const snapTo = (value: number, grid: number) => Math.round(value / grid) * grid
-
-/**
- * The way from one grid point to another in the map's own hand: straight
- * along an axis, one 45° stretch in the middle, straight again. Returns the
- * two turning points (none when the way is already straight or at 45°). The
- * same whichever end it is asked from, so two regions sharing a border draw
- * the same line.
- */
-function dogleg(a: Point, b: Point): Point[] {
-  const flipped = a[0] > b[0] || (a[0] === b[0] && a[1] > b[1])
-  const [from, to] = flipped ? [b, a] : [a, b]
-  const dx = to[0] - from[0]
-  const dy = to[1] - from[1]
-  const diagonal = Math.min(Math.abs(dx), Math.abs(dy))
-  if (diagonal === 0 || Math.abs(dx) === Math.abs(dy)) return []
-  const alongX = Math.abs(dx) > Math.abs(dy)
-  const lead = snapTo((Math.abs(alongX ? dx : dy) - diagonal) / 2, SNAP)
-  const first: Point = alongX
-    ? [from[0] + lead * Math.sign(dx), from[1]]
-    : [from[0], from[1] + lead * Math.sign(dy)]
-  const second: Point = [
-    first[0] + diagonal * Math.sign(dx),
-    first[1] + diagonal * Math.sign(dy),
-  ]
-  return flipped ? [second, first] : [first, second]
-}
-
-/** A line through these grid points, in the map's hand (see dogleg). */
-function angular(points: Point[], closed: boolean): Point[] {
-  const line: Point[] = []
-  const last = closed ? points.length : points.length - 1
-  for (let i = 0; i < last; i++) {
-    line.push(points[i], ...dogleg(points[i], points[(i + 1) % points.length]))
-  }
-  if (!closed) line.push(points[points.length - 1])
-  return line
-}
-
-/**
- * Draws lines of the layout: see step 6 at the top of the file. A line turns
- * only where it crosses the lattice and at every corner (of any line) that
- * lies on it, so two lines along the same stretch turn at the same places
- * whatever their own ends are.
- */
-function tracer(corners: Point[]) {
-  return (line: Point[], closed: boolean): Point[] => {
-    const turns: Point[] = []
-    const last = closed ? line.length : line.length - 1
-    for (let i = 0; i < last; i++) {
-      const from = line[i]
-      const to = line[(i + 1) % line.length]
-      const dx = to[0] - from[0]
-      const dy = to[1] - from[1]
-      const length2 = dx * dx + dy * dy
-      if (length2 < 1e-12) continue
-      const cuts = [0]
-      for (const [start, run] of [
-        [from[0], dx],
-        [from[1], dy],
-      ]) {
-        if (Math.abs(run) < 1e-9) continue
-        const low = Math.min(start, start + run)
-        const high = Math.max(start, start + run)
-        for (let k = Math.ceil(low / LATTICE); k * LATTICE <= high; k++) {
-          cuts.push((k * LATTICE - start) / run)
-        }
-      }
-      for (const [cx, cy] of corners) {
-        const t = ((cx - from[0]) * dx + (cy - from[1]) * dy) / length2
-        if (t <= 0 || t >= 1) continue
-        const offX = from[0] + dx * t - cx
-        const offY = from[1] + dy * t - cy
-        if (offX * offX + offY * offY < 1e-6) cuts.push(t)
-      }
-      cuts.sort((a, b) => a - b)
-      for (const t of cuts) {
-        if (t > 1 - 1e-6) continue
-        turns.push([
-          snapTo(from[0] + dx * t, SNAP),
-          snapTo(from[1] + dy * t, SNAP),
-        ])
-      }
-    }
-    if (!closed) {
-      const end = line[line.length - 1]
-      turns.push([snapTo(end[0], SNAP), snapTo(end[1], SNAP)])
-    }
-    // Snapping can land neighbors on the same grid point.
-    const apart = turns.filter((p, i) => {
-      const before = turns[(i + turns.length - 1) % turns.length]
-      return (i === 0 && !closed) || p[0] !== before[0] || p[1] !== before[1]
-    })
-    return angular(apart, closed)
-  }
-}
 
 function insidePolygon(x: number, y: number, polygon: Point[]): boolean {
   let inside = false
@@ -759,22 +653,21 @@ function groupBy<T>(items: T[], key: (item: T) => string): Map<string, T[]> {
 }
 
 /**
- * The shore as it is drawn, in the classic map's hand: long runs along the
- * axes, each corner cut by a short 45° stretch. The shaped coast is kept at a
- * corner every so many bearings (and at each bearing in `keep`), the corners
- * are moved onto a coarse grid, and each pair is joined by a run one way and
- * a run the other, whichever order keeps nearer the shaped coast. This
- * polygon, not the smooth coast behind it, is the land.
+ * The shore as it is drawn, in the classic map's hand: straight facets of
+ * uneven length, at whatever angle they fall. The shaped coast is kept at a
+ * corner every so many bearings (and at each bearing in `keep`), and the
+ * corners are joined up. This polygon, not the smooth coast behind it, is the
+ * land.
  */
-function angularShore(
+function facetedShore(
   coast: Coast,
   keep: number[],
   // Those of `keep` that are the back of a bay: the shore runs in to them
-  // square, so the bay is a basin and not a slit.
+  // square, so the bay is a basin and not a notch.
   backs: number[]
 ): Point[] {
   const bearings = new Set(keep)
-  for (let at = 0, k = 0; at < COAST_POINTS - 6; at += 9 + ((k * 5) % 5), k++) {
+  for (let at = 0, k = 0; at < COAST_POINTS - 6; at += 8 + ((k * 5) % 6), k++) {
     if (![...bearings].some(kept => Math.abs(kept - at) < 5)) bearings.add(at)
   }
   const corners: Point[] = []
@@ -791,11 +684,11 @@ function angularShore(
     ) {
       continue
     }
-    // Nearly level with the corner before: make it level, for one straight
-    // run and no little step.
+    // Nearly level with the corner before: make it level. The classic map's
+    // coast has many stretches that run dead straight along an axis.
     if (before && !kept) {
-      if (Math.abs(corner[0] - before[0]) <= 1) corner[0] = before[0]
-      else if (Math.abs(corner[1] - before[1]) <= 1) corner[1] = before[1]
+      if (Math.abs(corner[0] - before[0]) <= 0.5) corner[0] = before[0]
+      else if (Math.abs(corner[1] - before[1]) <= 0.5) corner[1] = before[1]
     }
     corners.push(corner)
     if (backs.includes(at)) basins.add(corner)
@@ -810,14 +703,26 @@ function angularShore(
     corners.pop()
   }
 
-  const middle = coast.pointAt(0, 0)
-  const off = ([x, y]: Point) => {
-    const [sx, sy] = coast.shoreToward(x, y)
-    return Math.abs(
-      Math.hypot(x - middle[0], y - middle[1]) -
-        Math.hypot(sx - middle[0], sy - middle[1])
-    )
+  // No sharp points: a corner turning through more than about 105 degrees is
+  // dropped, and its neighbors joined up, until none is left.
+  const sharp = (i: number) => {
+    const at = corners[i]
+    const before = corners[(i + corners.length - 1) % corners.length]
+    const after = corners[(i + 1) % corners.length]
+    const ax = before[0] - at[0]
+    const ay = before[1] - at[1]
+    const bx = after[0] - at[0]
+    const by = after[1] - at[1]
+    const cos = (ax * bx + ay * by) / (Math.hypot(ax, ay) * Math.hypot(bx, by))
+    return cos > Math.cos((75 * Math.PI) / 180)
   }
+  for (let pass = 0; pass < corners.length; pass++) {
+    const i = corners.findIndex((corner, n) => !basins.has(corner) && sharp(n))
+    if (i === -1 || corners.length <= 4) break
+    corners.splice(i, 1)
+  }
+
+  const middle = coast.pointAt(0, 0)
   const shore: Point[] = []
   corners.forEach((from, i) => {
     const to = corners[(i + 1) % corners.length]
@@ -825,18 +730,18 @@ function angularShore(
     const dx = to[0] - from[0]
     const dy = to[1] - from[1]
     if (dx === 0 || dy === 0) return
+    if (!basins.has(from) && !basins.has(to)) return
+    // In to a basin and out of it: along one axis, then the other, turning
+    // at whichever corner lies further inland, with the corner cut.
     const elbows: Point[] = [
       [to[0], from[1]],
       [from[0], to[1]],
     ]
     const inland = (p: Point) => Math.hypot(p[0] - middle[0], p[1] - middle[1])
-    const intoBasin = basins.has(from) || basins.has(to)
-    const measure = intoBasin ? inland : off
-    const elbow =
-      measure(elbows[0]) <= measure(elbows[1]) ? elbows[0] : elbows[1]
+    const elbow = inland(elbows[0]) <= inland(elbows[1]) ? elbows[0] : elbows[1]
     const cut = Math.min(
       SHORE_CHAMFER,
-      snapTo(Math.min(Math.abs(dx), Math.abs(dy)) / 2, SNAP)
+      snapTo(Math.min(Math.abs(dx), Math.abs(dy)) / 2, SHORE_SNAP)
     )
     const toward = (a: Point, b: Point): Point => {
       const length = Math.hypot(b[0] - a[0], b[1] - a[1])
@@ -851,26 +756,30 @@ function angularShore(
   return shore
 }
 
-/** The grid point on a line of the map (its turns are grid points and it runs
- *  along axes and diagonals, so it passes through many) nearest to `to`. */
+/** The point on a closed line nearest to `to`. */
 function nearestOn(line: Point[], to: Point): Point {
   let best = line[0]
   let bestDistance = Infinity
   line.forEach((from, i) => {
     const next = line[(i + 1) % line.length]
-    const steps = Math.round(
-      Math.max(Math.abs(next[0] - from[0]), Math.abs(next[1] - from[1])) / SNAP
-    )
-    for (let step = 0; step < Math.max(steps, 1); step++) {
-      const at: Point = [
-        from[0] + ((next[0] - from[0]) * step) / Math.max(steps, 1),
-        from[1] + ((next[1] - from[1]) * step) / Math.max(steps, 1),
-      ]
-      const distance = Math.hypot(at[0] - to[0], at[1] - to[1])
-      if (distance < bestDistance) {
-        bestDistance = distance
-        best = at
-      }
+    const dx = next[0] - from[0]
+    const dy = next[1] - from[1]
+    const length2 = dx * dx + dy * dy
+    const t =
+      length2 === 0
+        ? 0
+        : Math.max(
+            0,
+            Math.min(
+              1,
+              ((to[0] - from[0]) * dx + (to[1] - from[1]) * dy) / length2
+            )
+          )
+    const at: Point = [from[0] + dx * t, from[1] + dy * t]
+    const distance = Math.hypot(at[0] - to[0], at[1] - to[1])
+    if (distance < bestDistance) {
+      bestDistance = distance
+      best = at
     }
   })
   return best
@@ -926,7 +835,7 @@ export function layoutRealmMap(
         pointOfBay(at + width, 1),
       ]
     })
-  const shore = angularShore(
+  const shore = facetedShore(
     coast,
     harbourBearings,
     harbourBearings.filter((_, i) => i % 3 === 1)
@@ -993,9 +902,7 @@ export function layoutRealmMap(
     [-6, GRID_HEIGHT + 6],
   ]
 
-  // First the layout with ruler-straight borders, which gets the sizes
-  // right. It is drawn in the map's angular hand further down, once every
-  // corner is known, and the pins are placed on the regions as drawn.
+  // First the regions.
   const realms: { realm: string; polygon: Point[]; harbour: boolean }[] = []
   const planned: {
     district: string
@@ -1238,21 +1145,13 @@ export function layoutRealmMap(
     }
   }
 
-  // Now the drawing, and the pins on the regions as drawn.
-  const trace = tracer([
-    ...realms.flatMap(r => r.polygon),
-    ...planned.flatMap(d => d.pieces.flat()),
-    ...roads.flat(),
-  ])
-  const drawnRealms = realms.map(r => ({
-    ...r,
-    polygon: trace(r.polygon, true),
-  }))
-  const districts = planned.map(d => ({
-    district: d.district,
-    realm: d.realm,
-    block: d.block,
-    pieces: d.pieces.map(piece => trace(piece, true)),
+  // Now the pins, on the regions as they are drawn.
+  const drawnRealms = realms
+  const districts = planned.map(({ district, realm, block, pieces }) => ({
+    district,
+    realm,
+    block,
+    pieces,
   }))
 
   // Per sample: index into `districts`, or -1. A town lies over the open
@@ -1344,9 +1243,53 @@ export function layoutRealmMap(
     })
   })
 
+  // A footpath: out over the border of the district it starts from, halfway
+  // along it, then through the middle of each district in turn, crossing
+  // from one to the next halfway along the border they share.
+  const indexOf = (name: string) =>
+    districts.findIndex(d => d.district === name)
+  const meanOf = (samples: number[]): Point => [
+    samples.reduce((sum, i) => sum + xs[i], 0) / samples.length,
+    samples.reduce((sum, i) => sum + ys[i], 0) / samples.length,
+  ]
+  const borderBetween = (a: number, b: number): number[] =>
+    everySample.filter(i => {
+      if (owner[i] !== a) return false
+      const col = i % cols
+      const row = Math.floor(i / cols)
+      return (
+        (col > 0 && owner[i - 1] === b) ||
+        (col < cols - 1 && owner[i + 1] === b) ||
+        (row > 0 && owner[i - cols] === b) ||
+        (row < rows - 1 && owner[i + cols] === b)
+      )
+    })
+  const wayThrough = (names: string[]): Point[] => {
+    const way: Point[] = []
+    names.forEach((name, n) => {
+      const here = indexOf(name)
+      if (here === -1) return
+      if (n > 0) {
+        const room = everySample.filter(i => owner[i] === here)
+        if (room.length > 0) way.push(meanOf(room))
+      }
+      const next = names[n + 1] === undefined ? -1 : indexOf(names[n + 1])
+      if (next === -1) return
+      const border = borderBetween(here, next)
+      if (border.length === 0) {
+        console.warn(
+          `[map-realm-layout] The footpath goes from "${name}" to "${names[n + 1]}", which do not touch`
+        )
+        return
+      }
+      way.push(meanOf(border))
+    })
+    return way
+  }
+
   return {
     positions,
-    trails: spec.trails ?? [],
+    trails: (spec.trails ?? []).map(wayThrough).filter(way => way.length > 1),
     boardwalk: spec.boardwalk ?? [],
     coast: shore,
     cove,
@@ -1354,11 +1297,11 @@ export function layoutRealmMap(
     districts,
     landmarks: {
       arrivalHarbour: shoreEnd(0, spec.landmarks.arrivalHarbour),
-      crossroads: [snapTo(crossroads[0], SNAP), snapTo(crossroads[1], SNAP)],
+      crossroads,
       departureHarbour: shoreEnd(1, spec.landmarks.departureHarbour),
       controlDam,
     },
-    roads: roads.map(road => trace(road, false)),
+    roads,
     districtAt: (x, y) => {
       const col = Math.floor(x / STEP)
       const row = Math.floor(y / STEP)
