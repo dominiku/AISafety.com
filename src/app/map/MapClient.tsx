@@ -104,11 +104,13 @@ export default function MapClient({
   iaWork,
   lastUpdatedIso,
 }: MapClientProps) {
-  const [dataSource, setDataSource] = useState<'production' | 'ia'>(
+  // 'ia' and 'art' are the same forked data and the same computed layout;
+  // they differ only in how the backdrop is drawn (schematic or classic-style).
+  const [dataSource, setDataSource] = useState<'production' | 'ia' | 'art'>(
     'production'
   )
   const { orgs, suggestEntryLink, suggestCorrectionLink } =
-    dataSource === 'ia' && iaWork ? iaWork : production
+    dataSource !== 'production' && iaWork ? iaWork : production
 
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedCategories, setSelectedCategories] = useState<string[]>([])
@@ -211,7 +213,7 @@ export default function MapClient({
   // draft has it, off the land, and so do closed orgs, moved as one group. An org with no realm, district or
   // draft position yet keeps its classic spot. The cards below the map are
   // unchanged.
-  const isIaWork = dataSource === 'ia' && iaWork !== null
+  const isIaWork = dataSource !== 'production' && iaWork !== null
   const realmMap = useMemo(() => {
     if (!isIaWork) return null
     const placed: LayoutPin[] = []
@@ -320,6 +322,7 @@ export default function MapClient({
             orgs={realmMap?.orgs ?? mapOrgs}
             scheme={realmMap?.scheme ?? CLASSIC_MAP_SCHEME}
             realmBackdrop={realmMap?.backdrop}
+            realmBackdropStyle={dataSource === 'art' ? 'art' : 'schematic'}
             suggestEntryUrl={suggestEntryLink}
           />
           {iaWork && (
@@ -338,6 +341,11 @@ export default function MapClient({
                     value: 'ia',
                     icon: '/images/icons/table.svg',
                     label: 'IA work',
+                  },
+                  {
+                    value: 'art',
+                    icon: '/images/icons/map.svg',
+                    label: 'Art work',
                   },
                 ]}
               />

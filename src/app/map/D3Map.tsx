@@ -39,6 +39,7 @@ import {
   type PinLayout,
   type TierPin,
 } from '@/lib/data/map-zoom-tiers'
+import { drawRealmArtBackdrop } from './realmArtBackdrop'
 import { drawRealmBackdrop, type RealmBackdrop } from './realmBackdrop'
 import styles from './page.module.css'
 
@@ -66,6 +67,9 @@ interface D3MapProps {
   // PROTOTYPE Map 3.5: the island, realms and districts worked out for that
   // layout. When given, they are drawn in place of the island art.
   realmBackdrop?: RealmBackdrop
+  // PROTOTYPE Map 3.5: the schematic, or the same layout in the classic art's
+  // hand (realmArtBackdrop.ts).
+  realmBackdropStyle?: 'schematic' | 'art'
 }
 
 // Map constants from WebFlow
@@ -103,6 +107,7 @@ export default function D3Map({
   suggestEntryUrl,
   scheme = CLASSIC_MAP_SCHEME,
   realmBackdrop,
+  realmBackdropStyle = 'schematic',
 }: D3MapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const tooltipRef = useRef<HTMLDivElement>(null)
@@ -302,7 +307,15 @@ export default function D3Map({
 
     // Add background image. PROTOTYPE Map 3.5: the island art was painted for
     // the classic positions, so the realm layout brings its own schematic.
-    if (realmBackdrop) {
+    if (realmBackdrop && realmBackdropStyle === 'art') {
+      drawRealmArtBackdrop(
+        svgGroup,
+        realmBackdrop,
+        GRID_SIZE,
+        MAP_WIDTH,
+        MAP_HEIGHT
+      )
+    } else if (realmBackdrop) {
       drawRealmBackdrop(
         svgGroup,
         defs,
@@ -1080,7 +1093,7 @@ export default function D3Map({
         d3.select(container).select('svg').remove()
       }
     }
-  }, [orgs, showAreaCounts, scheme, realmBackdrop])
+  }, [orgs, showAreaCounts, scheme, realmBackdrop, realmBackdropStyle])
 
   return (
     <>
