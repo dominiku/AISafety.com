@@ -43,6 +43,25 @@ const FIELD = {
   lastModified: 'fld9nL9mSDBN0kaO4', // Last modified
 } as const
 
+// PROTOTYPE Map 3.5: draft fields that exist only in the forked base behind
+// the /map page's IA_work toggle. Asking the production base for them would
+// fail the request, so they are fetched with a credential set only.
+const DRAFT_FIELD = {
+  newX: 'fld6xcM2STFRQQWzL', // NewX
+  newY: 'fldZKw63bkTpmPOiW', // NewY
+  realm: 'fldi6QsDIBKXIj3n0', // Realm
+  district: 'fldY6iDCQjsmB2UOh', // District
+} as const
+
+/** An org's Map 3.5 draft placement. Any part may still be empty while the
+ *  curation is under way. */
+export interface MapOrgDraft {
+  x: number | null
+  y: number | null
+  realm: string | null
+  district: string | null
+}
+
 export interface MapOrg {
   id: string
   dateAdded: string | null
@@ -61,6 +80,8 @@ export interface MapOrg {
   y: number | null
   scale: string | null
   isMagic: boolean
+  /** Only on records read from the forked base (see DRAFT_FIELD). */
+  draft?: MapOrgDraft
 }
 
 export interface MapData {
@@ -214,7 +235,9 @@ export async function getMapData(opts?: {
     // etc.) are all published, so they pass this filter unaffected.
     filterByFormula: publishedFormula(FIELD.publish, FIELD.hide),
     returnFieldsByFieldId: true,
-    fields: FIELD_LIST,
+    fields: credentialSet
+      ? [...FIELD_LIST, ...Object.values(DRAFT_FIELD)]
+      : FIELD_LIST,
     credentialSet,
   })
 
@@ -225,6 +248,14 @@ export async function getMapData(opts?: {
   for (const record of raw) {
     const org = mapOrgFromRecord(record)
     if (!org) continue
+    if (credentialSet) {
+      org.draft = {
+        x: fieldNumber(record.fields[DRAFT_FIELD.newX]),
+        y: fieldNumber(record.fields[DRAFT_FIELD.newY]),
+        realm: fieldString(record.fields[DRAFT_FIELD.realm]),
+        district: fieldString(record.fields[DRAFT_FIELD.district]),
+      }
+    }
     if (org.title === 'Suggest entry' && org.link !== '#') {
       suggestEntryLink = org.link
     } else if (org.title === 'Suggest correction' && org.link !== '#') {

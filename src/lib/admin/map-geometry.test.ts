@@ -74,7 +74,7 @@ describe('map-geometry mirrors src/app/map/D3Map.tsx', () => {
   it('area labels', () => {
     // Not a copy: both renderers draw the one list in lib/data/map-areas.
     expect(AREA_LABELS).toBe(MAP_AREAS)
-    expect(d3MapSource).toContain('MAP_AREAS.forEach(({ label, x, y }) => {')
+    expect(d3MapSource).toContain('scheme.areas.forEach(({ label, x, y }) => {')
   })
 
   it('glyph metrics formulas', () => {

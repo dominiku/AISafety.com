@@ -15,6 +15,8 @@ import CardsViewTracker from '@/components/CardsViewTracker'
 import { placementsById } from '@/lib/placements'
 import { filterItems, optionCounts } from '@/lib/filter-counts'
 import { isPlacedOnMap } from '@/lib/map-images'
+import { CLASSIC_MAP_SCHEME } from '@/lib/data/map-areas'
+import { buildRealmScheme } from '@/lib/data/map-realms'
 import { SITE_PAGES } from '@/lib/site-pages'
 import styles from './page.module.css'
 
@@ -68,6 +70,13 @@ interface MapOrg {
   y: number | null
   scale: string | null
   isMagic: boolean
+  // PROTOTYPE Map 3.5: the draft placement, on IA_work records only.
+  draft?: {
+    x: number | null
+    y: number | null
+    realm: string | null
+    district: string | null
+  }
 }
 
 interface MapDataset {
@@ -193,6 +202,41 @@ export default function MapClient({
   // the logos drawn here.
   const mapOrgs = useMemo(() => orgs.filter(isPlacedOnMap), [orgs])
 
+  // PROTOTYPE Map 3.5: on IA_work the map draws each org at its draft position
+  // and places it by its District, in an area tree built from the Realm and
+  // District fields. An org the curation has not reached yet keeps its old
+  // position and belongs to no area, so it stays visible as still to do. The
+  // cards below the map are unchanged.
+  const isIaWork = dataSource === 'ia' && iaWork !== null
+  const drawnOrgs = useMemo(
+    () =>
+      isIaWork
+        ? mapOrgs.map(org => ({
+            ...org,
+            category: org.draft?.district ?? org.category,
+            x: org.draft?.x ?? org.x,
+            y: org.draft?.y ?? org.y,
+          }))
+        : mapOrgs,
+    [isIaWork, mapOrgs]
+  )
+  const areaScheme = useMemo(
+    () =>
+      isIaWork
+        ? buildRealmScheme(
+            mapOrgs
+              .filter(org => !org.isMagic)
+              .map(org => ({
+                realm: org.draft?.realm ?? null,
+                district: org.draft?.district ?? null,
+                x: org.draft?.x ?? null,
+                y: org.draft?.y ?? null,
+              }))
+          )
+        : CLASSIC_MAP_SCHEME,
+    [isIaWork, mapOrgs]
+  )
+
   const categoryCounts = useMemo(
     () =>
       optionCounts(
@@ -238,7 +282,11 @@ export default function MapClient({
       <h1 className="visually-hidden">{SITE_PAGES.map.title}</h1>
       <div className="padding-bottom-24px">
         <div ref={mapWrapperRef} className={styles['map-wrapper']}>
-          <D3Map orgs={mapOrgs} suggestEntryUrl={suggestEntryLink} />
+          <D3Map
+            orgs={drawnOrgs}
+            scheme={areaScheme}
+            suggestEntryUrl={suggestEntryLink}
+          />
           {iaWork && (
             <div className={styles['map-data-toggle']}>
               <ModeToggle

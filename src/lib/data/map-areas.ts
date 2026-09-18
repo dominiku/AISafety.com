@@ -64,58 +64,85 @@ export const MAP_AREAS: MapArea[] = [
   { label: 'Gone Graveyard', quiet: true, x: 56, y: 30 },
 ]
 
-const CATEGORY_BY_MAP_AREA: Record<string, string> = Object.fromEntries(
-  Object.entries(MAP_AREA_BY_CATEGORY).map(([category, area]) => [
-    area,
-    category,
-  ])
-)
+// A set of areas and the rule placing orgs in them. The live map has one,
+// CLASSIC_MAP_SCHEME; the Map 3.5 prototype builds another from its realms and
+// districts (map-realms.ts). Every function below takes the scheme last and
+// defaults to the classic one, so callers off the map page are unaffected.
+export interface MapAreaScheme {
+  areas: MapArea[]
+  // Which area an org is drawn in, keyed by its placing category (classic:
+  // its first Category; Map 3.5: its District).
+  areaByCategory: Record<string, string>
+}
+
+export const CLASSIC_MAP_SCHEME: MapAreaScheme = {
+  areas: MAP_AREAS,
+  areaByCategory: MAP_AREA_BY_CATEGORY,
+}
 
 /** The one category whose pins are drawn in an area, or null for an umbrella
  *  area, which has none of its own. */
-export function categoryForMapArea(label: string): string | null {
-  return CATEGORY_BY_MAP_AREA[label] ?? null
+export function categoryForMapArea(
+  label: string,
+  scheme: MapAreaScheme = CLASSIC_MAP_SCHEME
+): string | null {
+  for (const [category, area] of Object.entries(scheme.areaByCategory)) {
+    if (area === label) return category
+  }
+  return null
 }
 
 /** Every category whose pins count as inside an area: its own, and those of
  *  every area inside it. A parent's listings are its children's, and a search
  *  pick frames them all together. */
-export function categoriesForMapArea(label: string): string[] {
-  const own = categoryForMapArea(label)
-  const inside = MAP_AREAS.filter(area => area.parent === label).flatMap(area =>
-    categoriesForMapArea(area.label)
-  )
+export function categoriesForMapArea(
+  label: string,
+  scheme: MapAreaScheme = CLASSIC_MAP_SCHEME
+): string[] {
+  const own = categoryForMapArea(label, scheme)
+  const inside = scheme.areas
+    .filter(area => area.parent === label)
+    .flatMap(area => categoriesForMapArea(area.label, scheme))
   return own ? [own, ...inside] : inside
 }
 
-function mapAreaNamed(label: string): MapArea {
-  const area = MAP_AREAS.find(a => a.label === label)
+function mapAreaNamed(label: string, scheme: MapAreaScheme): MapArea {
+  const area = scheme.areas.find(a => a.label === label)
   if (!area) throw new Error(`[map-areas] No area named "${label}"`)
   return area
 }
 
 /** How deep an area sits in the tree: 0 for a top-level area. */
-export function mapAreaDepth(label: string): number {
-  const { parent } = mapAreaNamed(label)
-  return parent ? mapAreaDepth(parent) + 1 : 0
+export function mapAreaDepth(
+  label: string,
+  scheme: MapAreaScheme = CLASSIC_MAP_SCHEME
+): number {
+  const { parent } = mapAreaNamed(label, scheme)
+  return parent ? mapAreaDepth(parent, scheme) + 1 : 0
 }
 
 /** Whether other areas sit inside this one. */
-export function mapAreaHasChildren(label: string): boolean {
-  return MAP_AREAS.some(area => area.parent === label)
+export function mapAreaHasChildren(
+  label: string,
+  scheme: MapAreaScheme = CLASSIC_MAP_SCHEME
+): boolean {
+  return scheme.areas.some(area => area.parent === label)
 }
 
 /** The areas an org of this category belongs to, outermost first:
  *  'Conceptual research' is in ['Research Range', 'Conceptual Cliffs'].
  *  Empty for a category with no area. */
-export function mapAreaPath(category: string): string[] {
-  const label = MAP_AREA_BY_CATEGORY[category]
+export function mapAreaPath(
+  category: string,
+  scheme: MapAreaScheme = CLASSIC_MAP_SCHEME
+): string[] {
+  const label = scheme.areaByCategory[category]
   if (!label) return []
   const path: string[] = []
   for (
-    let area: MapArea | null = mapAreaNamed(label);
+    let area: MapArea | null = mapAreaNamed(label, scheme);
     area;
-    area = area.parent ? mapAreaNamed(area.parent) : null
+    area = area.parent ? mapAreaNamed(area.parent, scheme) : null
   ) {
     path.unshift(area.label)
   }
@@ -123,8 +150,13 @@ export function mapAreaPath(category: string): string[] {
 }
 
 /** Whether an org of this category sits in a quiet area, at any depth. */
-export function isInQuietMapArea(category: string): boolean {
-  return mapAreaPath(category).some(label => mapAreaNamed(label).quiet === true)
+export function isInQuietMapArea(
+  category: string,
+  scheme: MapAreaScheme = CLASSIC_MAP_SCHEME
+): boolean {
+  return mapAreaPath(category, scheme).some(
+    label => mapAreaNamed(label, scheme).quiet === true
+  )
 }
 
 // Words people type for an area that neither its name nor its category holds.
@@ -140,14 +172,17 @@ const EXTRA_SEARCH_WORDS: Record<string, string[]> = {
  * starting with the query outranks a mid-word match; within each, a match on
  * the name (what is printed on the map) outranks one on the category.
  */
-export function searchMapAreas(query: string): MapArea[] {
+export function searchMapAreas(
+  query: string,
+  scheme: MapAreaScheme = CLASSIC_MAP_SCHEME
+): MapArea[] {
   const q = query.trim().toLowerCase()
   if (!q) return []
   const ranked: MapArea[][] = [[], [], [], []]
-  for (const area of MAP_AREAS) {
+  for (const area of scheme.areas) {
     const name = area.label.toLowerCase()
     const others = [
-      categoryForMapArea(area.label) ?? '',
+      categoryForMapArea(area.label, scheme) ?? '',
       ...(EXTRA_SEARCH_WORDS[area.label] ?? []),
     ].map(f => f.toLowerCase())
     if (name.startsWith(q)) ranked[0].push(area)

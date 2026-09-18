@@ -13,7 +13,7 @@ import { withUtm } from '@/lib/utm'
 import { positionTooltip } from '@/lib/mapTooltip'
 import { MAP_BACKGROUND_URL } from '@/lib/map-images'
 import {
-  MAP_AREAS,
+  CLASSIC_MAP_SCHEME,
   categoriesForMapArea,
   isInQuietMapArea,
   mapAreaBounds,
@@ -22,6 +22,7 @@ import {
   mapAreaPath,
   primaryCategory,
   type MapArea,
+  type MapAreaScheme,
 } from '@/lib/data/map-areas'
 import {
   DEFAULT_ZOOM_TIER_CONFIG,
@@ -38,6 +39,7 @@ import {
   type PinLayout,
   type TierPin,
 } from '@/lib/data/map-zoom-tiers'
+import { drawRealmBackdrop, type BackdropPin } from './realmBackdrop'
 import styles from './page.module.css'
 
 interface MapOrg {
@@ -58,6 +60,9 @@ interface MapOrg {
 interface D3MapProps {
   orgs: MapOrg[]
   suggestEntryUrl: string
+  // The areas drawn and the rule placing orgs in them. The classic map unless
+  // the Map 3.5 prototype passes its realms and districts.
+  scheme?: MapAreaScheme
 }
 
 // Map constants from WebFlow
@@ -89,7 +94,11 @@ const AREA_FRAME_MARGIN = 2
 const FOCUS_MARGIN = 0.85
 const LANDMARK_FRAME_MARGIN = 6
 
-export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
+export default function D3Map({
+  orgs,
+  suggestEntryUrl,
+  scheme = CLASSIC_MAP_SCHEME,
+}: D3MapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const tooltipRef = useRef<HTMLDivElement>(null)
   // Zoom actions live in the d3 pipeline inside useEffect; the buttons reach
@@ -270,8 +279,8 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
     // Shared clip-path for all logo circles. Using objectBoundingBox units so
     // a single definition works for every logo regardless of its size.
     const LOGO_CLIP_ID = 'logo-circle-clip'
-    svg
-      .append('defs')
+    const defs = svg.append('defs')
+    defs
       .append('clipPath')
       .attr('id', LOGO_CLIP_ID)
       .attr('clipPathUnits', 'objectBoundingBox')
@@ -280,14 +289,33 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
       .attr('cy', 0.5)
       .attr('r', 0.5)
 
-    // Add background image
-    svgGroup
-      .append('image')
-      .attr('xlink:href', MAP_BACKGROUND_URL)
-      .attr('width', MAP_WIDTH)
-      .attr('height', MAP_HEIGHT)
-      .attr('x', 0)
-      .attr('y', 0)
+    // Add background image. PROTOTYPE Map 3.5: the island art was painted for
+    // the classic positions, so another scheme gets a schematic drawn from its
+    // own pins (closed orgs sit off the island and take no land).
+    if (scheme === CLASSIC_MAP_SCHEME) {
+      svgGroup
+        .append('image')
+        .attr('xlink:href', MAP_BACKGROUND_URL)
+        .attr('width', MAP_WIDTH)
+        .attr('height', MAP_HEIGHT)
+        .attr('x', 0)
+        .attr('y', 0)
+    } else {
+      const backdropPins: BackdropPin[] = []
+      for (const org of orgs) {
+        if (org.isMagic || org.x === null || org.y === null) continue
+        const district = primaryCategory(org.category) ?? ''
+        const [realm] = mapAreaPath(district, scheme)
+        if (!realm || isInQuietMapArea(district, scheme)) continue
+        backdropPins.push({
+          x: org.x * GRID_SIZE,
+          y: org.y * GRID_SIZE,
+          realm,
+          district,
+        })
+      }
+      drawRealmBackdrop(svgGroup, defs, backdropPins, MAP_WIDTH, MAP_HEIGHT)
+    }
 
     // Add main title
     const titleX = 30 * GRID_SIZE
@@ -334,7 +362,7 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
     // PROTOTYPE: with most pins hidden at the resting view, the count on an
     // area's label says how much there is to find by zooming in.
     const areaCount = (label: string) => {
-      const categories = categoriesForMapArea(label)
+      const categories = categoriesForMapArea(label, scheme)
       return orgs.filter(org => {
         if (org.isMagic || org.x === null || org.y === null) return false
         const primary = primaryCategory(org.category)
@@ -342,7 +370,7 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
       }).length
     }
 
-    MAP_AREAS.forEach(({ label, x, y }) => {
+    scheme.areas.forEach(({ label, x, y }) => {
       const count = showAreaCounts ? areaCount(label) : 0
       const xPos = x * GRID_SIZE
       const yPos = y * GRID_SIZE
@@ -381,8 +409,8 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
           group: labelGroup,
           anchorX: xPos,
           anchorY: yPos,
-          depth: mapAreaDepth(label),
-          isParent: mapAreaHasChildren(label),
+          depth: mapAreaDepth(label, scheme),
+          isParent: mapAreaHasChildren(label, scheme),
           x: bbox.x - finalPadX,
           y: bbox.y - finalPadY,
           width: bbox.width + finalPadX * 2,
@@ -597,8 +625,11 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
             // (Merch, Last updated) belongs to none.
             regions: org.isMagic
               ? []
-              : mapAreaPath(primaryCategory(org.category) ?? ''),
-            quiet: isInQuietMapArea(primaryCategory(org.category) ?? ''),
+              : mapAreaPath(primaryCategory(org.category) ?? '', scheme),
+            quiet: isInQuietMapArea(
+              primaryCategory(org.category) ?? '',
+              scheme
+            ),
             x: xPos,
             y: yPos,
             halfWidth: bridgeW / 2,
@@ -814,7 +845,7 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
         clearHighlight()
         // The area's pins: the same first-category rule that names the area
         // an org is drawn in. Decorations are not part of any area.
-        const categories = categoriesForMapArea(area.label)
+        const categories = categoriesForMapArea(area.label, scheme)
         const areaPins: { x: number; y: number }[] = []
         for (const org of orgs) {
           if (org.isMagic || org.x === null || org.y === null) continue
@@ -1032,7 +1063,7 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
         d3.select(container).select('svg').remove()
       }
     }
-  }, [orgs, showAreaCounts])
+  }, [orgs, showAreaCounts, scheme])
 
   return (
     <>
@@ -1057,6 +1088,7 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
       <MapSearch
         className={styles['map-search']}
         orgs={searchOrgs}
+        scheme={scheme}
         suggestEntryUrl={suggestEntryUrl}
         controlRef={searchControlRef}
         onPick={org => searchRef.current.flyTo(org)}

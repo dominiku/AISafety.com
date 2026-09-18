@@ -18,6 +18,7 @@ import {
   primaryCategory,
   searchMapAreas,
   type MapArea,
+  type MapAreaScheme,
 } from '@/lib/data/map-areas'
 import styles from './page.module.css'
 
@@ -62,6 +63,9 @@ interface MapSearchProps {
   // The map fills this in so it can shut the search, and so it knows to let
   // the search have ESC before falling back to resetting the view.
   controlRef?: MutableRefObject<MapSearchControl>
+  // The areas the search can find: the classic map's unless the Map 3.5
+  // prototype passes its own.
+  scheme: MapAreaScheme
 }
 
 const MAX_RESULTS = 5
@@ -89,6 +93,7 @@ export default function MapSearch({
   onPickArea,
   onClear,
   controlRef,
+  scheme,
 }: MapSearchProps) {
   const [query, setQuery] = useState('')
   // Starts as just a round icon button; the input only appears on demand so
@@ -203,15 +208,15 @@ export default function MapSearch({
   const results = useMemo((): SearchRow[] => {
     const q = query.trim().toLowerCase()
     if (!q) return []
-    const areas = searchMapAreas(q)
+    const areas = searchMapAreas(q, scheme)
       .slice(0, MAX_AREA_RESULTS)
       .map((area): SearchRow => {
         return {
           kind: 'area',
           area,
           // Analytics slices by one category; an umbrella area has none.
-          category: categoryForMapArea(area.label),
-          listings: categoriesForMapArea(area.label).reduce(
+          category: categoryForMapArea(area.label, scheme),
+          listings: categoriesForMapArea(area.label, scheme).reduce(
             (sum, category) => sum + (listingsByCategory.get(category) ?? 0),
             0
           ),
@@ -234,7 +239,7 @@ export default function MapSearch({
       .slice(0, MAX_RESULTS)
       .map((org): SearchRow => ({ kind: 'org', org }))
     return [...areas, ...listings]
-  }, [orgs, query, listingsByCategory])
+  }, [orgs, query, listingsByCategory, scheme])
 
   useEffect(() => {
     expandedRef.current = expanded
