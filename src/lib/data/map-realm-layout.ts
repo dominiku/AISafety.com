@@ -6,9 +6,9 @@
 // chunky angular shapes the art for them will take.
 //
 // The arrangement is given (map-realm-spec.ts): where the realm borders run
-// from the middle of the island, the Advocacy anchorage off the north-east
-// coast, an anchor for each district, the towns and the landmarks. This
-// module settles the rest:
+// from the middle of the island, the Advocacy cove beside the castle town
+// with the bit of land around it, an anchor for each district, the towns and
+// the landmarks. This module settles the rest:
 //
 //   1. The coast. A realm's border lines are fixed, so its size is set by how
 //      far out its shore lies: the coast is pushed out along a realm holding
@@ -31,9 +31,11 @@
 //   4. The pins. Inside a district they push apart until each has its own
 //      share of it, again in proportion to its size. On land they keep back
 //      from the coast; ships in the anchorage keep off it.
-//   5. The roads. A road is always a border: the districts of the realm it
-//      runs through keep to their own side of it, and one may lie across its
-//      end. All of them meet at the crossroads.
+//   5. The ways. The road in from the arrival harbour is a border: the
+//      districts of the realm it runs through keep to their own side of it.
+//      East of the crossroads there is only a footpath, which calls at the
+//      middle of each district in turn, and a short boardwalk from the castle
+//      town to the cove.
 //   6. The drawing. All of the above is worked out with ruler-straight
 //      borders at whatever angle they fall, which gets the sizes right. Then
 //      every line is redrawn in the map's angular hand: its corners moved
@@ -72,9 +74,11 @@ export interface RealmMapSpec {
   // Land realms by their Realm name in Airtable. The polygons overshoot the
   // island and are cut off by its coast.
   realms: Record<string, Point[]>
-  // The one realm that is water: ships at anchor in the part of this box that
-  // lies off the island. Matched on the start of the Realm name.
-  anchorage: { realmStartsWith: string; box: Point[] }
+  // The harbour realm, matched on the start of the Realm name: `water` is a
+  // cove inside the coast (run it out past the coast where its mouth is) and
+  // `box` is the whole realm, the cove and the land around it. Its pins stand
+  // on either.
+  anchorage: { realmStartsWith: string; box: Point[]; water: Point[] }
   // Where each district is centered, by its District name in Airtable.
   districtAnchors: Record<string, Point>
   // Roughly where; the harbours end up on the coast as it comes out.
@@ -100,21 +104,35 @@ export interface RealmMapSpec {
   // grows as a square around `seed`. Put the seed on a corner or an edge of
   // the realm and the town fills that corner or end of it.
   blocks?: Record<string, { seed: Point }>
+  // The districts the footpath calls at, in order, leaving the crossroads and
+  // coming back to it.
+  trail?: string[]
+  // The boardwalk from the castle town to the cove, end to end.
+  boardwalk?: Point[]
   // What shapes the coast besides the realms: a bay (depth below 0) or a
   // cape (above 0) on the bearing of `toward`, as a share of the island's
   // reach there, `width` bearings wide (there are 240 around the island).
-  coastFeatures?: { toward: Point; depth: number; width: number }[]
+  // One marked `atArrival` is the arrival bay: it moves to wherever the road
+  // ends up meeting the shore.
+  coastFeatures?: {
+    toward: Point
+    depth: number
+    width: number
+    atArrival?: boolean
+  }[]
 }
 
 export interface RealmLayout {
   positions: Map<string, { x: number; y: number }>
   // Everything below is in map grid units, ready to draw.
   coast: Point[]
-  // A realm's polygon runs out past the coast. A water realm lies off it.
-  realms: { realm: string; polygon: Point[]; water: boolean }[]
+  // The cove: water inside the coast, drawn over the land.
+  cove: Point[]
+  // A realm's polygon runs out past the coast.
+  realms: { realm: string; polygon: Point[] }[]
   // A district's pieces are its whole cell (two pieces when it lies across
-  // the road): draw them cut off by the realm's polygon, and by the coast
-  // (inside it for land, outside it for water). A block is a town: it lies
+  // the road): draw them cut off by the realm's polygon and by the coast. The
+  // harbour realm's run on under the cove. A block is a town: it lies
   // over its neighbors' cells, so draw it after them.
   districts: {
     district: string
@@ -124,6 +142,10 @@ export interface RealmLayout {
   }[]
   landmarks: RealmLandmarks
   roads: Point[][]
+  // The places the footpath and the boardwalk call at, to be joined by a
+  // curve: these two wander, unlike everything else on the map.
+  trail: Point[]
+  boardwalk: Point[]
   /** The district a point of the drawn map lies in, or null at sea. */
   districtAt: (x: number, y: number) => string | null
   // Share of the land each land realm ended up with, by realm name.
@@ -139,13 +161,17 @@ const STEP = 0.25
 const COAST_POINTS = 240
 // How far a realm's shore may move in or out to fit what the realm holds.
 const SHORE_RANGE: [number, number] = [0.8, 1.3]
+// Grid units of sea the coast leaves to the edges of the frame, and how far
+// down the title reaches.
+const FRAME_MARGIN = 1.5
+const FRAME_TOP = 3.4
 // Grid units of sea kept around every pin that is not on the land.
 const KEEP_CLEAR_RADIUS = 3
 // Grid units a pin's middle keeps from the coast, so its logo and the name
 // under it stay on the land.
 const COAST_MARGIN = 1.2
 // Grid units a ship in the anchorage keeps from the coast.
-const SHIP_MARGIN = 1.5
+const SHIP_MARGIN = 0.75
 // How strongly a district is held to its anchor, against settling in the
 // middle of its own land. Lower makes chunkier districts.
 const HOME_PULL = 0.3
@@ -368,10 +394,14 @@ function shapeCoast(
       if (realm !== -1) samples.push({ x, y, realm })
     }
   }
-  // A little less land than the spec's ellipse, so the island with its capes
-  // still fits the frame.
-  const landWanted =
-    (0.92 * Math.PI * spec.island.rx * spec.island.ry) / (0.5 * 0.5)
+  // As much land as the spec's ellipse has.
+  const landWanted = samples.filter(
+    ({ x, y }) =>
+      Math.hypot(
+        (x - spec.island.cx) / spec.island.rx,
+        (y - spec.island.cy) / spec.island.ry
+      ) <= 1
+  ).length
 
   const push = realms.map(() => 1)
   for (let round = 0; round < 40; round++) {
@@ -387,6 +417,19 @@ function shapeCoast(
     })
     coast.reach.forEach((_, index) => {
       coast.reach[index] = swell[index] * pushed[index]
+      // The island has to fit the frame, under the title.
+      while (coast.reach[index] > 0.5) {
+        const [x, y] = coast.pointAt(index)
+        if (
+          x >= FRAME_MARGIN &&
+          x <= GRID_WIDTH - FRAME_MARGIN &&
+          y >= FRAME_TOP &&
+          y <= GRID_HEIGHT - FRAME_MARGIN / 2
+        ) {
+          break
+        }
+        coast.reach[index] -= 0.01
+      }
     })
     const land = realms.map(() => 0)
     for (const sample of samples) {
@@ -696,8 +739,12 @@ function groupBy<T>(items: T[], key: (item: T) => string): Map<string, T[]> {
  * angular hand. This polygon, not the smooth coast behind it, is the land.
  */
 function angularShore(coast: Coast): Point[] {
-  const corners: Point[] = []
+  const bearings = new Set<number>()
   for (let at = 0, k = 0; at < COAST_POINTS - 3; at += 5 + ((k * 7) % 4), k++) {
+    if (![...bearings].some(kept => Math.abs(kept - at) < 3)) bearings.add(at)
+  }
+  const corners: Point[] = []
+  for (const at of [...bearings].sort((a, b) => a - b)) {
     const [x, y] = coast.pointAt(at)
     const corner: Point = [snapTo(x, SHORE_SNAP), snapTo(y, SHORE_SNAP)]
     const before = corners[corners.length - 1]
@@ -740,38 +787,44 @@ function nearestOn(line: Point[], to: Point): Point {
 export function layoutRealmMap(
   pins: LayoutPin[],
   keepClear: { x: number; y: number }[],
-  spec: RealmMapSpec
+  spec: RealmMapSpec,
+  // Set on the second go: see the end of the function.
+  bayMoved = false
 ): RealmLayout {
   const byRealm = groupBy(pins, pin => pin.realm)
-  const isWater = (realm: string) =>
+  const isHarbour = (realm: string) =>
     realm.startsWith(spec.anchorage.realmStartsWith)
 
   // What share of the land each land realm should have.
   const onLand = pins.filter(
-    pin => spec.realms[pin.realm] && !isWater(pin.realm)
+    pin => spec.realms[pin.realm] && !isHarbour(pin.realm)
   )
   const wanted = new Map<string, number>()
   for (const [realm, inRealm] of byRealm) {
-    if (!spec.realms[realm] || isWater(realm)) continue
+    if (!spec.realms[realm] || isHarbour(realm)) continue
     wanted.set(realm, footprintOf(inRealm) / footprintOf(onLand))
   }
   const coast = shapeCoast(spec, wanted, keepClear)
   const shore = angularShore(coast)
+  const cove = spec.anchorage.water
   const toShore = ([x, y]: Point) => nearestOn(shore, coast.shoreToward(x, y))
 
   const cols = Math.ceil(GRID_WIDTH / STEP)
   const rows = Math.ceil(GRID_HEIGHT / STEP)
   const xs = new Float32Array(cols * rows)
   const ys = new Float32Array(cols * rows)
+  // Inside the coast; and of that, what is not the cove.
+  const inShore = new Uint8Array(cols * rows)
   const isLand = new Uint8Array(cols * rows)
   let landSamples = 0
   for (let index = 0; index < cols * rows; index++) {
     xs[index] = ((index % cols) + 0.5) * STEP
     ys[index] = (Math.floor(index / cols) + 0.5) * STEP
-    if (insidePolygon(xs[index], ys[index], shore)) {
-      isLand[index] = 1
-      landSamples++
-    }
+    if (!insidePolygon(xs[index], ys[index], shore)) continue
+    inShore[index] = 1
+    if (insidePolygon(xs[index], ys[index], cove)) continue
+    isLand[index] = 1
+    landSamples++
   }
   // Whether everything `margin` grid units around a sample is land (or, for
   // a ship, sea).
@@ -789,26 +842,22 @@ export function layoutRealmMap(
     return true
   }
   const everySample = Array.from({ length: cols * rows }, (_, i) => i)
-  // Where a realm's districts may be: its land, or for the anchorage the sea
-  // clear of the coast and of whatever else is out there.
-  const roomOf = (polygon: Point[], water: boolean) => {
+  // Where a realm's districts may be: its land, and for the harbour realm
+  // the water of the cove too, a little off its shores.
+  const roomOf = (polygon: Point[], harbour: boolean) => {
     const x0 = Math.min(...polygon.map(p => p[0]))
     const x1 = Math.max(...polygon.map(p => p[0]))
     const y0 = Math.min(...polygon.map(p => p[1]))
     const y1 = Math.max(...polygon.map(p => p[1]))
     return everySample.filter(
       i =>
-        isLand[i] === (water ? 0 : 1) &&
+        inShore[i] === 1 &&
         xs[i] >= x0 &&
         xs[i] <= x1 &&
         ys[i] >= y0 &&
         ys[i] <= y1 &&
         insidePolygon(xs[i], ys[i], polygon) &&
-        (!water ||
-          (clearOf(i, SHIP_MARGIN, 0) &&
-            !keepClear.some(
-              p => Math.hypot(p.x - xs[i], p.y - ys[i]) < KEEP_CLEAR_RADIUS
-            )))
+        (isLand[i] === 1 || (harbour && clearOf(i, SHIP_MARGIN, 0)))
     )
   }
   // District cells are cut out of this: the frame and a little over.
@@ -822,7 +871,7 @@ export function layoutRealmMap(
   // First the layout with ruler-straight borders, which gets the sizes
   // right. It is drawn in the map's angular hand further down, once every
   // corner is known, and the pins are placed on the regions as drawn.
-  const realms: { realm: string; polygon: Point[]; water: boolean }[] = []
+  const realms: { realm: string; polygon: Point[]; harbour: boolean }[] = []
   const planned: {
     district: string
     realm: string
@@ -835,16 +884,16 @@ export function layoutRealmMap(
   const laid = new Map<string, [Point, Point]>()
 
   for (const [realm, inRealm] of byRealm) {
-    const water = isWater(realm)
-    const polygon = water ? spec.anchorage.box : spec.realms[realm]
+    const harbour = isHarbour(realm)
+    const polygon = harbour ? spec.anchorage.box : spec.realms[realm]
     if (!polygon) {
       console.warn(
         `[map-realm-layout] No borders for realm "${realm}"; its pins keep their draft positions`
       )
       continue
     }
-    realms.push({ realm, polygon, water })
-    const room = roomOf(polygon, water)
+    realms.push({ realm, polygon, harbour })
+    const room = roomOf(polygon, harbour)
     if (room.length === 0) {
       console.warn(`[map-realm-layout] No room for realm "${realm}"`)
       continue
@@ -901,7 +950,7 @@ export function layoutRealmMap(
     // The coast moves with the data, and an anchor left at sea or right on
     // the shore would give its district a thin strip of coast. Such an anchor
     // comes ashore: to the nearest open land well clear of the water.
-    const inland = water ? open : open.filter(i => clearOf(i, 2, 1))
+    const inland = harbour ? open : open.filter(i => clearOf(i, 2, 1))
     const ashore = (at: { x: number; y: number }) => {
       const ground = inland.length > 0 ? inland : open
       let best = ground[0]
@@ -1032,6 +1081,38 @@ export function layoutRealmMap(
     return road.fromShore ? ends[0] : ends[1]
   }
 
+  // The arrival bay belongs where the road meets the shore, and the road's end
+  // slides along the shore to balance its two sides. If it has slid out of
+  // the bay, lay the map out once more with the bay moved to it. Once is
+  // enough: the bay is small next to the realm, so the road barely moves.
+  const arrivalBay = spec.coastFeatures?.find(feature => feature.atArrival)
+  const arrivalRoad = spec.roads?.[0]
+  const arrivalEnds = arrivalRoad && laid.get(arrivalRoad.realm)
+  if (!bayMoved && arrivalBay && arrivalRoad?.settleFrom && arrivalEnds) {
+    const [x, y] = arrivalEnds[0]
+    if (Math.hypot(x - arrivalBay.toward[0], y - arrivalBay.toward[1]) > 1.5) {
+      // Aim from the middle of the island, out past the shore.
+      const toward: Point = [
+        spec.island.cx + (x - spec.island.cx) * 1.3,
+        spec.island.cy + (y - spec.island.cy) * 1.3,
+      ]
+      return layoutRealmMap(
+        pins,
+        keepClear,
+        {
+          ...spec,
+          coastFeatures: spec.coastFeatures?.map(feature =>
+            feature === arrivalBay ? { ...feature, toward } : feature
+          ),
+          roads: spec.roads?.map(road =>
+            road === arrivalRoad ? { ...road, from: toward } : road
+          ),
+        },
+        true
+      )
+    }
+  }
+
   // Now the drawing, and the pins on the regions as drawn.
   const trace = tracer([
     ...realms.flatMap(r => r.polygon),
@@ -1065,8 +1146,8 @@ export function layoutRealmMap(
     ])
   )
   const roomOfRealm = new Map<string, number>()
-  for (const { realm, polygon, water } of drawnRealms) {
-    const room = roomOf(polygon, water)
+  for (const { realm, polygon, harbour } of drawnRealms) {
+    const room = roomOf(polygon, harbour)
     roomOfRealm.set(realm, room.length)
     const inRealm = townsFirst.filter(index => districts[index].realm === realm)
     for (const sample of room) {
@@ -1087,8 +1168,8 @@ export function layoutRealmMap(
   const positions = new Map<string, { x: number; y: number }>()
   const landShare = new Map<string, number>()
   const realmShare = new Map<string, number>()
-  for (const { realm, water } of drawnRealms) {
-    if (!water)
+  for (const { realm, harbour } of drawnRealms) {
+    if (!harbour)
       landShare.set(realm, (roomOfRealm.get(realm) ?? 0) / landSamples)
   }
   planned.forEach(({ district, realm, pins: inDistrict }, index) => {
@@ -1120,7 +1201,7 @@ export function layoutRealmMap(
       y: middleY + (pin.y - from.y) + Math.sin(i * 2.4) * 0.01 * (i + 1),
       footprint: pinFootprint(pin.scale),
     }))
-    const standing = isWater(realm)
+    const standing = isHarbour(realm)
       ? room
       : room.filter(i => clearOf(i, COAST_MARGIN, 1))
     spreadPins(
@@ -1138,10 +1219,27 @@ export function layoutRealmMap(
     })
   })
 
+  // The middle of each district as drawn, for the ways that call there.
+  const stopIn = (name: string): Point[] => {
+    const index = districts.findIndex(d => d.district === name)
+    const room = everySample.filter(i => index !== -1 && owner[i] === index)
+    if (room.length === 0) return []
+    return [
+      [
+        room.reduce((sum, i) => sum + xs[i], 0) / room.length,
+        room.reduce((sum, i) => sum + ys[i], 0) / room.length,
+      ],
+    ]
+  }
+  const trailStops = (spec.trail ?? []).flatMap(stopIn)
+
   return {
     positions,
+    trail: trailStops.length > 0 ? [crossroads, ...trailStops, crossroads] : [],
+    boardwalk: spec.boardwalk ?? [],
     coast: shore,
-    realms: drawnRealms,
+    cove,
+    realms: drawnRealms.map(({ realm, polygon }) => ({ realm, polygon })),
     districts,
     landmarks: {
       arrivalHarbour: shoreEnd(0, spec.landmarks.arrivalHarbour),

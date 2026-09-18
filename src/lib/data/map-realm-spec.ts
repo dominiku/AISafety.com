@@ -6,21 +6,24 @@
 // coast. District borders are not part of the spec: map-realm-layout.ts works
 // them out from the anchors.
 //
-// Where this departs from the spec, to suit the layout the site works out:
-//   - A road is always a border between districts (see `roads`), so districts
-//     are arranged on either side of the three roads out of the crossroads,
-//     and some anchors are moved to suit. In Policy that puts Governments
-//     north of the road to the Advocacy port with the think tanks, and
-//     Macrostrategy and Standards south of it, next to Technical research.
-//     In the Talent pipeline it puts Field-building north of the road.
+// Where this departs from the spec, after Rob's reviews of 18 September:
+//   - Advocacy is a small harbour of its own, not an anchorage off Policy's
+//     coast: a cove just north-east of the castle town, with the edge of
+//     Field infrastructure for its west shore, the north-west corner of
+//     Policy and strategy for its south-east shore, and a quay of its own
+//     land to the east. A short boardwalk joins it to the castle town.
+//   - Field infrastructure stops at the cove (x = 30). Policy and strategy is
+//     the middle band of the east side, running up east of the quay, and
+//     Technical research the bottom one. The Media/Technical border slants,
+//     so nothing lines up straight down the middle of the island.
+//   - The road is a border between districts only in the Talent pipeline
+//     (see `roads`), which puts Field-building north of it. East of the
+//     crossroads there is a footpath calling at each district, not a road.
 //   - The arrival harbour is on the west shore, in a bay, not the north-west.
 //   - The Talent pipeline is a unit wider at its east end (its corners there
-//     are (33, 15) and (33, 22), not (33, 16) and (33, 21)), to make room for
-//     the castle town at the crossroads.
-//   - The Policy/Technical border starts at the crossroads (33, 18.5) and
-//     runs to (64, 21.5), not (64, 17), so the land south of the Policy road
-//     is not a thin wedge. The coast makes up every such difference, so the
-//     realms keep their shares of the land.
+//     are (33, 15) and (33, 22)), to make room for the castle town.
+// The coast makes up every difference in area, so the realms keep their
+// shares of the land.
 
 import type { RealmMapSpec } from './map-realm-layout'
 
@@ -29,8 +32,8 @@ export const MAP_35_SPEC: RealmMapSpec = {
   realms: {
     'Field infrastructure': [
       [0, 0],
-      [36, 0],
-      [38, 11],
+      [30, 0],
+      [30, 12],
       [33, 15],
       [2, 8],
       [0, 8],
@@ -47,40 +50,54 @@ export const MAP_35_SPEC: RealmMapSpec = {
       [0, 21],
       [2, 21],
       [33, 22],
-      [32, 34],
+      [37, 34],
       [0, 34],
     ],
     'Policy and strategy': [
-      [36, 0],
-      [64, 0],
-      [64, 21.5],
-      [33, 18.5],
       [33, 15],
-      [38, 11],
+      [34, 13],
+      [36, 11],
+      [40, 11],
+      [40, -2],
+      [64, -2],
+      [64, 20.5],
+      [33, 19.5],
     ],
     'Technical research': [
-      [33, 18.5],
-      [64, 21.5],
+      [33, 19.5],
+      [64, 20.5],
       [64, 34],
-      [32, 34],
+      [37, 34],
       [33, 22],
     ],
   },
   anchorage: {
     realmStartsWith: 'Advocacy',
+    // The cove, the landing at its foot and the quay along its east shore.
     box: [
-      [46, 3.5],
-      [62, 3.5],
-      [62, 13.5],
-      [46, 13.5],
+      [30, -2],
+      [40, -2],
+      [40, 11],
+      [36, 11],
+      [34, 13],
+      [33, 15],
+      [30, 12],
+    ],
+    water: [
+      [30, -2],
+      [36, -2],
+      [36, 11],
+      [34, 13],
+      [31, 13],
+      [30, 12],
     ],
   },
   districtAnchors: {
-    'Tools, databases and research infrastructure': [13, 8.7],
-    'Operations and services': [22, 6.5],
-    'Hubs and coworking': [24.5, 10.5],
-    'Grantmakers and donor advisory': [31.5, 7],
-    'Venture capital and incubators': [33.5, 10.5],
+    'Tools, databases and research infrastructure': [11, 8.5],
+    'Operations and services': [18.5, 6],
+    'Hubs and coworking': [20.5, 10.5],
+    'Grantmakers and donor advisory': [25, 6.5],
+    'Venture capital and incubators': [27.5, 11.5],
     'Field-building and local groups': [7, 12],
     'Introductory learning': [14, 12.5],
     'Policy and governance programs': [21, 14.5],
@@ -88,19 +105,19 @@ export const MAP_35_SPEC: RealmMapSpec = {
     'Career support and placement': [28, 18],
     'Foundational and explanatory': [10, 24],
     'News and commentary': [20, 26],
-    'Forums and online communities': [28, 28.5],
-    'Grassroots campaigns': [51, 6],
-    'Professional advocacy and communication': [56, 10.5],
-    'Macrostrategy and forecasting': [42, 18],
-    'Policy research and think tanks': [45, 9],
-    'Governments and multi-stakeholder bodies': [39, 13.5],
-    'Standards, assurance and verification': [50, 17.5],
-    'Policy advocacy and lobbying': [53, 11.5],
-    'Conceptual and foundations research': [35, 26],
-    'Alignment and control': [37, 22],
-    'Interpretability and model understanding': [40.5, 26],
-    'Evaluations and threat research': [45, 20.5],
-    'Capabilities research': [49, 24],
+    'Forums and online communities': [33, 29],
+    'Grassroots campaigns': [36, 6],
+    'Professional advocacy and communication': [33, 11.5],
+    'Macrostrategy and forecasting': [36.5, 16.5],
+    'Policy research and think tanks': [47.5, 9.5],
+    'Governments and multi-stakeholder bodies': [41.5, 14.5],
+    'Standards, assurance and verification': [47.5, 19],
+    'Policy advocacy and lobbying': [53.5, 15],
+    'Conceptual and foundations research': [39.5, 28.5],
+    'Alignment and control': [37.5, 23],
+    'Interpretability and model understanding': [47, 28.5],
+    'Evaluations and threat research': [45.5, 23.5],
+    'Capabilities research': [52, 24],
   },
   roads: [
     // In from the arrival bay to the castle town: the places a newcomer
@@ -119,40 +136,6 @@ export const MAP_35_SPEC: RealmMapSpec = {
       ],
       right: ['Technical research programs'],
     },
-    // On through Policy to the Advocacy port, beside the anchorage. Lobbying
-    // is on the shore north of the port, next to the advocacy ships.
-    {
-      realm: 'Policy and strategy',
-      from: [33, 18.5],
-      to: [56.3, 12.8],
-      toShore: true,
-      settleTo: true,
-      left: [
-        'Policy research and think tanks',
-        'Governments and multi-stakeholder bodies',
-        'Policy advocacy and lobbying',
-      ],
-      right: [
-        'Macrostrategy and forecasting',
-        'Standards, assurance and verification',
-      ],
-    },
-    // South-east into Technical research, along the crest of the Control Dam
-    // (Alignment and control lies across the road there), with threats and
-    // capabilities to its north-east and theory and interpretability to its
-    // south-west.
-    {
-      realm: 'Technical research',
-      from: [33, 18.5],
-      to: [46.8, 30],
-      toShore: true,
-      settleTo: true,
-      left: ['Evaluations and threat research', 'Capabilities research'],
-      right: [
-        'Conceptual and foundations research',
-        'Interpretability and model understanding',
-      ],
-    },
   ],
   blocks: {
     // The Career Castle of the classic map: the town at the end of the road,
@@ -160,25 +143,45 @@ export const MAP_35_SPEC: RealmMapSpec = {
     'Career support and placement': { seed: [33, 18.5] },
     // The Forum: four entries, one built landmark in the corner of Media
     // between the south coast and the border with Conceptual research.
-    'Forums and online communities': { seed: [32.4, 30.5] },
+    'Forums and online communities': { seed: [35.6, 30.5] },
   },
+  // A walk round the east side at leisure: out through Policy and strategy,
+  // back through Technical research.
+  trail: [
+    'Macrostrategy and forecasting',
+    'Governments and multi-stakeholder bodies',
+    'Policy research and think tanks',
+    'Policy advocacy and lobbying',
+    'Standards, assurance and verification',
+    'Evaluations and threat research',
+    'Capabilities research',
+    'Interpretability and model understanding',
+    'Conceptual and foundations research',
+    'Alignment and control',
+  ],
+  // From the foot of the cove to the corner of the castle town.
+  boardwalk: [
+    [32.5, 13],
+    [33, 15],
+  ],
   coastFeatures: [
     // The arrival bay on the west shore, between two capes.
-    { toward: [3.5, 15], depth: -0.24, width: 8 },
+    { toward: [3.5, 15], depth: -0.24, width: 8, atArrival: true },
     { toward: [3, 8.5], depth: 0.07, width: 6 },
     { toward: [4, 22.5], depth: 0.07, width: 6 },
-    // The Advocacy port, sheltered by a cape to its north.
-    { toward: [56.3, 12.8], depth: -0.1, width: 5 },
-    { toward: [52, 7], depth: 0.08, width: 5 },
     // The east cape, Capabilities Cove and the Forum's headland.
-    { toward: [58, 19.5], depth: 0.07, width: 6 },
-    { toward: [52, 26], depth: -0.09, width: 3 },
+    // The north-east corner falls away to the sea, so Policy and strategy
+    // keeps to the middle of the east side.
+    { toward: [56, 4], depth: -0.22, width: 13 },
+    { toward: [58, 18], depth: 0.07, width: 6 },
+    { toward: [54, 27], depth: -0.05, width: 3 },
     { toward: [31, 31], depth: 0.05, width: 5 },
   ],
   landmarks: {
     arrivalHarbour: [3.5, 15],
     crossroads: [33, 18.5],
-    departureHarbour: [56.3, 12.8],
+    // Where the boardwalk leaves the castle town for the ships.
+    departureHarbour: [33, 15],
     controlDam: [36, 21],
   },
 }

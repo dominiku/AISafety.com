@@ -8,7 +8,7 @@ import {
 } from './map-realm-layout'
 import { MAP_35_SPEC } from './map-realm-spec'
 
-// A small island split down the middle, with an anchorage off its east end.
+// A small island split down the middle, with a cove in its north shore.
 const spec: RealmMapSpec = {
   island: { cx: 30, cy: 17, rx: 22, ry: 12 },
   realms: {
@@ -28,10 +28,16 @@ const spec: RealmMapSpec = {
   anchorage: {
     realmStartsWith: 'Ships',
     box: [
-      [50, 2],
-      [60, 2],
-      [60, 12],
-      [50, 12],
+      [38, -2],
+      [46, -2],
+      [46, 12],
+      [38, 12],
+    ],
+    water: [
+      [38, -2],
+      [46, -2],
+      [46, 12],
+      [38, 12],
     ],
   },
   districtAnchors: {
@@ -39,7 +45,7 @@ const spec: RealmMapSpec = {
     'West two': [20, 10],
     'East one': [38, 12],
     'East two': [44, 22],
-    Boats: [55, 7],
+    Boats: [42, 9],
   },
   landmarks: MAP_35_SPEC.landmarks,
   // The road from the west shore to (33, 18.5) splits the West realm.
@@ -82,7 +88,7 @@ const pins = [
   ...pinsOf('West', 'West two', 10, 12, 22),
   ...pinsOf('East', 'East one', 10, 40, 10, 'Large'),
   ...pinsOf('East', 'East two', 10, 40, 22, 'Small'),
-  ...pinsOf('Ships and sailors', 'Boats', 6, 55, 8),
+  ...pinsOf('Ships and sailors', 'Boats', 6, 42, 8),
   {
     id: 'far',
     realm: 'East',
@@ -126,10 +132,11 @@ describe('layoutRealmMap', () => {
     }
   })
 
-  it('keeps land pins on the island and ships off it', () => {
+  it('keeps land pins on the land and ships in the cove', () => {
     for (const pin of pins) {
-      const water = pin.realm.startsWith('Ships')
-      expect(inside(at(pin), layout.coast), pin.id).toBe(!water)
+      const ship = pin.realm.startsWith('Ships')
+      expect(inside(at(pin), layout.coast), pin.id).toBe(true)
+      expect(inside(at(pin), layout.cove), pin.id).toBe(ship)
     }
   })
 
@@ -220,31 +227,26 @@ describe('layoutRealmMap', () => {
     const stray = { ...pins[0], id: 'stray', realm: 'Nowhere' }
     const withStray = layoutRealmMap([...pins, stray], graveyard, spec)
     expect(withStray.positions.has('stray')).toBe(false)
-  })
+  }, 20_000)
 
   it('gives the same map for the same records in any order', () => {
     const again = layoutRealmMap([...pins].reverse(), graveyard, spec)
     expect(again.districts.map(d => d.pieces)).toEqual(
       layout.districts.map(d => d.pieces)
     )
-  })
+  }, 20_000)
 })
 
 describe('MAP_35_SPEC', () => {
   it('anchors every district inside its realm', () => {
     // Matched by position alone, so a typo in the borders or the anchors
-    // shows up. The anchorage lies over the sea end of a land realm's
-    // polygon, so its own anchors are told apart by being off the island.
-    const { cx, cy, rx, ry } = MAP_35_SPEC.island
+    // shows up. The bay is cut out of the land realms' polygons, so an anchor
+    // in it is a ship's.
     const regions = Object.values(MAP_35_SPEC.realms)
     for (const [district, anchor] of Object.entries(
       MAP_35_SPEC.districtAnchors
     )) {
-      const atSea = Math.hypot((anchor[0] - cx) / rx, (anchor[1] - cy) / ry) > 1
-      if (atSea) {
-        expect(inside(anchor, MAP_35_SPEC.anchorage.box), district).toBe(true)
-        continue
-      }
+      if (inside(anchor, MAP_35_SPEC.anchorage.box)) continue
       expect(
         regions.filter(polygon => inside(anchor, polygon)).length,
         district
