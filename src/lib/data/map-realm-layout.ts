@@ -33,9 +33,8 @@
 //      from the coast; ships in the anchorage keep off it.
 //   5. The ways. The road in from the arrival harbour is a border: the
 //      districts of the realm it runs through keep to their own side of it.
-//      East of the crossroads there is only a footpath, which calls at the
-//      middle of each district in turn, and a short boardwalk from the castle
-//      town to the cove.
+//      East of the castle town there are only footpaths, which wander out
+//      through the districts, and a short boardwalk from the town to the cove.
 //   6. The drawing. All of the above is worked out with ruler-straight
 //      borders at whatever angle they fall, which gets the sizes right. Then
 //      every line is redrawn in the map's angular hand: its corners moved
@@ -68,9 +67,13 @@ export interface RealmLandmarks {
 }
 
 export interface RealmMapSpec {
-  // The island the realm borders were drawn for. The coast starts from this
-  // ellipse and is reshaped around it.
+  // The middle of the island and its rough reach each way. Bearings along the
+  // coast are taken from here, so the whole coast must be in sight of it.
   island: { cx: number; cy: number; rx: number; ry: number }
+  // The rough outline of the island, if it is not that ellipse. The coast
+  // starts from it and is reshaped around it. A cove is not part of it: run
+  // the outline straight across the cove's mouth.
+  outline?: Point[]
   // Land realms by their Realm name in Airtable. The polygons overshoot the
   // island and are cut off by its coast.
   realms: Record<string, Point[]>
@@ -104,9 +107,9 @@ export interface RealmMapSpec {
   // grows as a square around `seed`. Put the seed on a corner or an edge of
   // the realm and the town fills that corner or end of it.
   blocks?: Record<string, { seed: Point }>
-  // The districts the footpath calls at, in order, leaving the crossroads and
-  // coming back to it.
-  trail?: string[]
+  // Footpaths, each as the places it wanders through. They are drawn as one
+  // easy curve, not in the map's angular hand.
+  trails?: Point[][]
   // The boardwalk from the castle town to the cove, end to end.
   boardwalk?: Point[]
   // What shapes the coast besides the realms: a bay (depth below 0) or a
@@ -142,9 +145,9 @@ export interface RealmLayout {
   }[]
   landmarks: RealmLandmarks
   roads: Point[][]
-  // The places the footpath and the boardwalk call at, to be joined by a
-  // curve: these two wander, unlike everything else on the map.
-  trail: Point[]
+  // The footpaths (each to be drawn as a curve through its points: they
+  // wander, unlike everything else on the map) and the boardwalk.
+  trails: Point[][]
   boardwalk: Point[]
   /** The district a point of the drawn map lies in, or null at sea. */
   districtAt: (x: number, y: number) => string | null
@@ -159,6 +162,7 @@ const GRID_HEIGHT = 32.7
 const STEP = 0.25
 
 const COAST_POINTS = 240
+const LAND_SHARE = 0.93
 // How far a realm's shore may move in or out to fit what the realm holds.
 const SHORE_RANGE: [number, number] = [0.8, 1.3]
 // Grid units of sea the coast leaves to the edges of the frame, and how far
@@ -166,7 +170,7 @@ const SHORE_RANGE: [number, number] = [0.8, 1.3]
 const FRAME_MARGIN = 1.5
 const FRAME_TOP = 3.4
 // Grid units of sea kept around every pin that is not on the land.
-const KEEP_CLEAR_RADIUS = 3
+const KEEP_CLEAR_RADIUS = 2.2
 // Grid units a pin's middle keeps from the coast, so its logo and the name
 // under it stay on the land.
 const COAST_MARGIN = 1.2
@@ -359,12 +363,25 @@ function shapeCoast(
   const coast = new Coast(spec.island)
   const realms = [...wanted.keys()]
 
-  // The lie of the coast before any realm moves it: slow swells, then finer
-  // and finer roughness, and the bays and capes the spec asks for.
+  // The lie of the coast before any realm moves it: the spec's outline (or
+  // failing that its ellipse, with slow swells to break it up), a little
+  // roughness, and the bays and capes the spec asks for.
+  const outline = spec.outline
   const swell = coast.reach.map((_, index) => {
     const angle = (index / COAST_POINTS) * 2 * Math.PI
     let reach = 1
+    if (outline) {
+      // How far out the outline lies on this bearing.
+      reach = 0.05
+      while (reach < 2) {
+        const [x, y] = coast.pointAt(index, reach + 0.005)
+        if (!insidePolygon(x, y, outline)) break
+        reach += 0.005
+      }
+    }
     for (const [waves, height, phase] of COAST_WAVES) {
+      // The outline has its own shape: only the fine roughness is added.
+      if (outline && waves < 9) continue
       reach += height * Math.sin(waves * angle + phase)
     }
     for (const { toward, depth, width } of spec.coastFeatures ?? []) {
@@ -394,14 +411,19 @@ function shapeCoast(
       if (realm !== -1) samples.push({ x, y, realm })
     }
   }
-  // As much land as the spec's ellipse has.
-  const landWanted = samples.filter(
-    ({ x, y }) =>
-      Math.hypot(
-        (x - spec.island.cx) / spec.island.rx,
-        (y - spec.island.cy) / spec.island.ry
-      ) <= 1
-  ).length
+  // Nearly as much land as the spec's outline (or ellipse) has: the coast
+  // cannot always reach it, where the frame or a pin at sea is in the way, and
+  // a realm hemmed in like that would come out short.
+  const landWanted =
+    LAND_SHARE *
+    samples.filter(({ x, y }) =>
+      outline
+        ? insidePolygon(x, y, outline)
+        : Math.hypot(
+            (x - spec.island.cx) / spec.island.rx,
+            (y - spec.island.cy) / spec.island.ry
+          ) <= 1
+    ).length
 
   const push = realms.map(() => 1)
   for (let round = 0; round < 40; round++) {
@@ -1219,23 +1241,9 @@ export function layoutRealmMap(
     })
   })
 
-  // The middle of each district as drawn, for the ways that call there.
-  const stopIn = (name: string): Point[] => {
-    const index = districts.findIndex(d => d.district === name)
-    const room = everySample.filter(i => index !== -1 && owner[i] === index)
-    if (room.length === 0) return []
-    return [
-      [
-        room.reduce((sum, i) => sum + xs[i], 0) / room.length,
-        room.reduce((sum, i) => sum + ys[i], 0) / room.length,
-      ],
-    ]
-  }
-  const trailStops = (spec.trail ?? []).flatMap(stopIn)
-
   return {
     positions,
-    trail: trailStops.length > 0 ? [crossroads, ...trailStops, crossroads] : [],
+    trails: spec.trails ?? [],
     boardwalk: spec.boardwalk ?? [],
     coast: shore,
     cove,

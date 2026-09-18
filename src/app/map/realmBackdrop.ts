@@ -5,8 +5,8 @@
 // too) straight or at 45°. Borders are heavier between realms than between
 // districts. The road in from the arrival harbour is a border too, drawn over
 // it. The Advocacy cove is water inside the coast, drawn over the land, with
-// a short boardwalk from its foot to the castle town. East of the crossroads
-// a footpath wanders from district to district: the one curved line on the
+// a short boardwalk from its foot to the castle town. East of the town
+// footpaths wander out through the districts: the only curved lines on the
 // map. The Advocacy anchorage is marked out
 // on the water, and the newcomer's road runs from the arrival harbour to the
 // crossroads and on toward each of the three realms it leads to. The colors
@@ -23,7 +23,7 @@ export type RealmBackdrop = Pick<
   | 'districts'
   | 'landmarks'
   | 'roads'
-  | 'trail'
+  | 'trails'
   | 'boardwalk'
   | 'districtAt'
 >
@@ -136,20 +136,20 @@ export function drawRealmBackdrop(
       .attr('stroke-linejoin', 'round')
   }
 
-  const { arrivalHarbour, crossroads } = layout.landmarks
-  // The two ways that wander: a curve through the places they call at.
+  const { arrivalHarbour } = layout.landmarks
+  // The footpaths wander: each is one easy curve through its points.
   const wander = d3
     .line<Point>()
     .x(p => p[0] * gridSize)
     .y(p => p[1] * gridSize)
     .curve(d3.curveCatmullRom.alpha(0.5))
-  if (layout.trail.length > 1) {
+  for (const trail of layout.trails) {
     group
       .append('path')
-      .attr('d', wander(layout.trail))
+      .attr('d', wander(trail))
       .attr('fill', 'none')
       .attr('stroke', ROAD)
-      .attr('stroke-width', 3.5)
+      .attr('stroke-width', 4)
       .attr('stroke-dasharray', '2 9')
       .attr('stroke-linecap', 'round')
   }
@@ -174,13 +174,13 @@ export function drawRealmBackdrop(
       .attr('stroke-linecap', 'round')
       .attr('stroke-linejoin', 'round')
   }
-  for (const spot of [arrivalHarbour, crossroads]) {
+  for (const spot of [arrivalHarbour]) {
     group
       .append('circle')
       .attr('cx', spot[0] * gridSize)
       .attr('cy', spot[1] * gridSize)
       .attr('r', 16)
-      .attr('fill', spot === crossroads ? ROAD : LINE)
+      .attr('fill', LINE)
       .attr('stroke', '#fff')
       .attr('stroke-width', 4)
   }
