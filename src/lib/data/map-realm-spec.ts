@@ -3,9 +3,21 @@
 // units: x 0 to 60, y 0 to about 32, y increasing downward.
 //
 // Realm polygons deliberately overshoot the island and are cut off by its
-// coast. Their straight edges are the spec's own and are sized so each realm's
-// share of the land matches its share of the entries. District borders are not
-// part of the spec: map-realm-layout.ts works them out from the anchors.
+// coast. District borders are not part of the spec: map-realm-layout.ts works
+// them out from the anchors.
+//
+// Where this departs from the spec, to suit the layout the site works out:
+//   - The Talent pipeline is a unit wider at its east end (its corners there
+//     are (33, 15) and (33, 22), not (33, 16) and (33, 21)), to make room for
+//     the castle town at the crossroads. The coast makes up the difference,
+//     so the realms keep their shares of the land.
+//   - The Policy/Technical border starts at the crossroads (33, 18.5), not
+//     half a unit south of it, because the main road runs along it. The
+//     departure harbour is where that border meets the east coast, a few
+//     units south of the spec's (56.5, 14).
+//   - The road is a border inside the Talent pipeline (see `roadside`), with
+//     three districts north of it so neither side is a thin strip. Their
+//     anchors are moved to suit; the spec had Field-building south of it.
 
 import type { RealmMapSpec } from './map-realm-layout'
 
@@ -16,22 +28,22 @@ export const MAP_35_SPEC: RealmMapSpec = {
       [0, 0],
       [36, 0],
       [38, 11],
-      [33, 16],
+      [33, 15],
       [2, 8],
       [0, 8],
     ],
     'Talent pipeline': [
       [0, 8],
       [2, 8],
-      [33, 16],
-      [33, 21],
+      [33, 15],
+      [33, 22],
       [2, 21],
       [0, 21],
     ],
     'Media and discourse': [
       [0, 21],
       [2, 21],
-      [33, 21],
+      [33, 22],
       [32, 34],
       [0, 34],
     ],
@@ -39,16 +51,16 @@ export const MAP_35_SPEC: RealmMapSpec = {
       [36, 0],
       [64, 0],
       [64, 17],
-      [33, 19],
-      [33, 16],
+      [33, 18.5],
+      [33, 15],
       [38, 11],
     ],
     'Technical research': [
-      [33, 19],
+      [33, 18.5],
       [64, 17],
       [64, 34],
       [32, 34],
-      [33, 21],
+      [33, 22],
     ],
   },
   anchorage: {
@@ -66,10 +78,10 @@ export const MAP_35_SPEC: RealmMapSpec = {
     'Hubs and coworking': [26, 12],
     'Grantmakers and donor advisory': [31.5, 7],
     'Venture capital and incubators': [35, 12],
-    'Field-building and local groups': [8, 16],
-    'Introductory learning': [11, 11.5],
-    'Policy and governance programs': [19, 13.5],
-    'Technical research programs': [19, 18],
+    'Field-building and local groups': [7, 12],
+    'Introductory learning': [14, 12.5],
+    'Policy and governance programs': [21, 14.5],
+    'Technical research programs': [16, 19],
     'Career support and placement': [28, 18],
     'Foundational and explanatory': [10, 24],
     'News and commentary': [20, 26],
@@ -87,19 +99,35 @@ export const MAP_35_SPEC: RealmMapSpec = {
     'Evaluations and threat research': [45, 20.5],
     'Capabilities research': [49, 24],
   },
-  // Section 4 of the spec: Policy programs lie north of the road and
-  // Technical programs south of it. The two districts at the arrival harbour
-  // go on the side their anchor is on, and Career support, at the end of the
-  // road, lies across it.
+  // Walking the road from the arrival harbour: the places a newcomer starts
+  // from and the policy programs to the north, the technical programs (by far
+  // the largest district) to the south, and the castle town at its end.
   roadside: {
     realm: 'Talent pipeline',
-    north: ['Introductory learning', 'Policy and governance programs'],
-    south: ['Field-building and local groups', 'Technical research programs'],
+    north: [
+      'Field-building and local groups',
+      'Introductory learning',
+      'Policy and governance programs',
+    ],
+    south: ['Technical research programs'],
   },
+  blocks: {
+    // The Career Castle of the classic map: a town at the end of the road,
+    // its east gate on the crossroads.
+    'Career support and placement': { at: [33, 18.5], align: [-1, 0] },
+    // The Forum: four entries, one built landmark on the south coast, up
+    // against the border with Conceptual research.
+    'Forums and online communities': { at: [32.4, 28.5], align: [-1, 0] },
+  },
+  eastRoadToward: [64, 17],
+  shipsRoadVia: [
+    'Macrostrategy and forecasting',
+    'Policy research and think tanks',
+  ],
   landmarks: {
     arrivalHarbour: [6, 11],
     crossroads: [33, 18.5],
-    departureHarbour: [56.5, 14],
+    departureHarbour: [57.2, 17.4],
     controlDam: [36, 21],
   },
 }

@@ -615,3 +615,24 @@ describe('pinPositionAt', () => {
     expect(() => pinPositionAt(layout, 'nope', 1)).toThrow('nope')
   })
 })
+
+describe('layoutPins: keeping to a district', () => {
+  it('never slides a pin off the ground it stands on', () => {
+    // Two Large pins on the same spot push each other 40 or so apart. The
+    // first may not leave x <= 5, so it stays and the other gives way.
+    const fenced = { ...pin('Large', 0, 0), within: (x: number) => x <= 5 }
+    const free = pin('Large', 0, 0)
+    const layout = layoutPins(
+      [fenced, free],
+      [],
+      { ...config, maxShift: 60 },
+      1
+    )
+    const xs = layout.positions.get(fenced.id)!.x
+    for (const x of xs) expect(x).toBeLessThanOrEqual(5)
+    const apart = layout.positions
+      .get(free.id)!
+      .x.map((x, level) => Math.abs(x - xs[level]))
+    expect(Math.max(...apart)).toBeGreaterThan(10)
+  })
+})

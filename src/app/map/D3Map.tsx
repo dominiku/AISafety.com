@@ -423,6 +423,17 @@ export default function D3Map({
       }
     })
 
+    // PROTOTYPE Map 3.5: the ground a pin may slide over is its own district,
+    // where the layout has borders. A pin standing outside any district
+    // (closed orgs, map furniture) is free, as on the classic map.
+    const districtGround = (org: MapOrg) => {
+      if (!realmBackdrop || org.x === null || org.y === null) return undefined
+      const district = realmBackdrop.districtAt(org.x, org.y)
+      if (district === null) return undefined
+      return (px: number, py: number) =>
+        realmBackdrop.districtAt(px / GRID_SIZE, py / GRID_SIZE) === district
+    }
+
     // PROTOTYPE zoom tiers: every pin's group and footprint, so a zoom can
     // resize the pins and show or hide them.
     const pins: {
@@ -636,6 +647,8 @@ export default function D3Map({
             ),
             x: xPos,
             y: yPos,
+            // PROTOTYPE Map 3.5: a sliding pin keeps inside its own district.
+            within: districtGround(org),
             halfWidth: bridgeW / 2,
             top: -iconSize / 2,
             bottom: labelY + rectH / 2,

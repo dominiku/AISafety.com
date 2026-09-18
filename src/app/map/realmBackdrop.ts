@@ -1,8 +1,9 @@
 // PROTOTYPE Map 3.5: a schematic backdrop for the realm and district layout,
 // drawn in place of the island art, which was painted for the classic
 // positions and does not line up with the new ones. An abstract version of the
-// classic map: an irregular island in flat colors, with borders that wander a
-// little, heavier between realms than between districts. The Advocacy anchorage is marked out
+// classic map: an angular island in flat colors, with borders that run
+// straight and then turn, heavier between realms than between districts and
+// around a town. The Advocacy anchorage is marked out
 // on the water, and the newcomer's road runs from the arrival harbour to the
 // crossroads and on toward each of the three realms it leads to. The colors
 // follow the Map 3.5 schematic and are placeholders for the real art.
@@ -12,7 +13,7 @@ import type { Point, RealmLayout } from '@/lib/data/map-realm-layout'
 
 export type RealmBackdrop = Pick<
   RealmLayout,
-  'coast' | 'realms' | 'districts' | 'landmarks' | 'roads'
+  'coast' | 'realms' | 'districts' | 'landmarks' | 'roads' | 'districtAt'
 >
 
 const SEA = '#16323f'
@@ -79,14 +80,18 @@ export function drawRealmBackdrop(
       .append('g')
       .attr('clip-path', `url(#${realmClipId})`)
     const fill = realm.water ? ANCHORAGE : colorOf(realm.realm)
-    for (const district of layout.districts) {
+    // Towns lie over the open districts around them.
+    const inOrder = [...layout.districts].sort(
+      (a, b) => Number(a.block) - Number(b.block)
+    )
+    for (const district of inOrder) {
       if (district.realm !== realm.realm) continue
       inRealm
         .append('path')
         .attr('d', district.pieces.map(outline).join(''))
         .attr('fill', fill)
         .attr('stroke', realm.water ? SEA : LINE)
-        .attr('stroke-width', realm.water ? 3 : 2.5)
+        .attr('stroke-width', realm.water ? 3 : district.block ? 5 : 2.5)
         .attr('stroke-dasharray', realm.water ? '10 8' : null)
     }
     if (realm.water) {

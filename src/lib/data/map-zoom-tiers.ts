@@ -126,6 +126,9 @@ export interface TierPin {
   halfWidth: number
   top: number
   bottom: number
+  /** The ground the pin stands on, where the map has borders to keep to:
+   *  true for a spot (map pixels) it may slide to. Its own spot always is. */
+  within?: (x: number, y: number) => boolean
 }
 
 /** Something pins slide off but that never moves or hides a pin itself: an
@@ -532,6 +535,27 @@ export function layoutPins(
       }
     }
 
+    // A pin pushed off its own ground comes back along the way it went, as
+    // far as the border.
+    const keepOnGround = (i: number): void => {
+      const { within, x: homeX, y: homeY } = ordered[i]
+      if (!within || within(x[i], y[i])) return
+      let onGround = 0
+      let off = 1
+      for (let step = 0; step < 6; step++) {
+        const mid = (onGround + off) / 2
+        if (
+          within(homeX + (x[i] - homeX) * mid, homeY + (y[i] - homeY) * mid)
+        ) {
+          onGround = mid
+        } else {
+          off = mid
+        }
+      }
+      x[i] = homeX + (x[i] - homeX) * onGround
+      y[i] = homeY + (y[i] - homeY) * onGround
+    }
+
     for (let round = 0; round < RELAX_ROUNDS; round++) {
       const homing = round < RELAX_ROUNDS * HOMING_SHARE
       let pushed = false
@@ -572,6 +596,7 @@ export function layoutPins(
           a.cy = y[i] + (s * (ordered[i].top + ordered[i].bottom)) / 2
         }
         clampToTarget(i)
+        keepOnGround(i)
       }
       // Settled: nothing is being drawn home and nothing needed a push.
       if (!homing && !pushed) break

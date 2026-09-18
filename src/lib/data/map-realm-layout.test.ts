@@ -35,13 +35,17 @@ const spec: RealmMapSpec = {
     ],
   },
   districtAnchors: {
-    'West one': [14, 12],
-    'West two': [22, 22],
+    'West one': [16, 21],
+    'West two': [20, 10],
     'East one': [38, 12],
     'East two': [44, 22],
     Boats: [55, 7],
   },
   landmarks: MAP_35_SPEC.landmarks,
+  // The road from the west shore to (33, 18.5) splits the West realm.
+  roadside: { realm: 'West', north: ['West two'], south: ['West one'] },
+  // A town in the East realm.
+  blocks: { 'East two': { at: [44, 22], align: [0, 0] } },
 }
 
 // Every district is drafted as a tight clump, one pin far out to sea.
@@ -135,8 +139,9 @@ describe('layoutRealmMap', () => {
         footprint(pins.filter(p => p.district === district)) /
         footprint(pins.filter(p => p.realm === realm))
       const got = layout.realmShare.get(district)! / wanted
-      expect(got, district).toBeGreaterThan(0.95)
-      expect(got, district).toBeLessThan(1.05)
+      // A town grows a whole row of samples at a time, so it is less exact.
+      expect(got, district).toBeGreaterThan(0.92)
+      expect(got, district).toBeLessThan(1.08)
     }
   })
 
@@ -155,6 +160,45 @@ describe('layoutRealmMap', () => {
     expect(closest).toBeGreaterThan(1)
   })
 
+  it('keeps districts to their own side of the road', () => {
+    const [hx, hy] = layout.landmarks.arrivalHarbour
+    const [cx, cy] = layout.landmarks.crossroads
+    const southOfRoad = ([x, y]: Point) =>
+      (cx - hx) * (y - hy) - (cy - hy) * (x - hx) > 0
+    // The drawn road bends a little, so pins right on it are left out.
+    const clear = (pin: LayoutPin) => {
+      const [x, y] = at(pin)
+      const off =
+        Math.abs((cx - hx) * (y - hy) - (cy - hy) * (x - hx)) /
+        Math.hypot(cx - hx, cy - hy)
+      return off > 1.5
+    }
+    for (const pin of pins.filter(clear)) {
+      if (pin.district === 'West two') expect(southOfRoad(at(pin))).toBe(false)
+      if (pin.district === 'West one') expect(southOfRoad(at(pin))).toBe(true)
+    }
+  })
+
+  it('makes a town a square block', () => {
+    const town = layout.districts.find(d => d.district === 'East two')!
+    expect(town.block).toBe(true)
+    expect(town.pieces).toHaveLength(1)
+    const xs = town.pieces[0].map(p => p[0])
+    const ys = town.pieces[0].map(p => p[1])
+    const width = Math.max(...xs) - Math.min(...xs)
+    const height = Math.max(...ys) - Math.min(...ys)
+    expect(width / height).toBeGreaterThan(0.75)
+    expect(width / height).toBeLessThan(1.33)
+  })
+
+  it('says which district a spot on the map is in', () => {
+    for (const pin of pins) {
+      const [x, y] = at(pin)
+      expect(layout.districtAt(x, y), pin.id).toBe(pin.district)
+    }
+    expect(layout.districtAt(1, 1)).toBeNull()
+  })
+
   it('draws the coast clear of the pins that stay put', () => {
     expect(inside([46, 24], layout.coast)).toBe(false)
     // The same spot on the other side of the island is land.
@@ -169,7 +213,9 @@ describe('layoutRealmMap', () => {
 
   it('gives the same map for the same records in any order', () => {
     const again = layoutRealmMap([...pins].reverse(), graveyard, spec)
-    expect(again.districts).toEqual(layout.districts)
+    expect(again.districts.map(d => d.pieces)).toEqual(
+      layout.districts.map(d => d.pieces)
+    )
   })
 })
 
