@@ -23,7 +23,7 @@ import * as d3 from 'd3'
 import {
   cliffFaces,
   coastStretches,
-  deltaChannels,
+  deltaArms,
   roundCorners,
 } from '@/lib/data/map-art-geometry'
 import {
@@ -165,7 +165,12 @@ const middle = (points: { x: number; y: number }[]) => ({
 })
 
 // Every landmark's place: those of the districts, then the fixed ones.
-function landmarksFor(layout: RealmBackdrop, pins: ArtPin[]) {
+function landmarksFor(
+  layout: RealmBackdrop,
+  pins: ArtPin[],
+  // Ground that is taken already: the river's course.
+  taken: { x: number; y: number; radius: number }[] = []
+) {
   const [damX, damY] = layout.landmarks.controlDam
   const onLand = pins.filter(pin => layout.districtAt(pin.x, pin.y) !== null)
   const atSea = pins.filter(pin => layout.districtAt(pin.x, pin.y) === null)
@@ -174,7 +179,7 @@ function landmarksFor(layout: RealmBackdrop, pins: ArtPin[]) {
     layout.districtAt,
     onLand,
     FRAME,
-    [{ x: damX, y: damY, radius: 2.5 }]
+    [{ x: damX, y: damY, radius: 2.5 }, ...taken]
   )
   placed.push({ symbol: 'dam', x: damX, y: damY, ...DAM })
 
@@ -331,41 +336,71 @@ export function artBackdropMarkup(
     const district = layout.districtAt(x, y)
     return district === null ? undefined : realmOfDistrict.get(district)
   }
-  const landmarks = pins ? landmarksFor(layout, pins) : []
-  // A delta realm's river: from the spot in the realm farthest from the sea,
-  // out to four mouths spread along the realm's coast.
-  const rivers = new Map<string, Point[][]>()
-  const riverOf = (realm: string) => {
-    const known = rivers.get(realm)
-    if (known) return known
+  let landmarks = pins ? landmarksFor(layout, pins) : []
+  // The river: it rises at the mountain lake in the range, comes down through
+  // the range and over the dam, passes under the castle town and enters the
+  // delta realm, where it splits again and again on its way to the sea. With
+  // no range or no delta on the map there is no river.
+  const deltaRealm = layout.realms.find(
+    realm => themeOf(realm.realm).terrain === 'delta'
+  )?.realm
+  const riverFrom = (spring: PlacedLandmark | undefined) => {
+    const river: { points: Point[]; width: number }[] = []
+    if (!deltaRealm || !spring) return river
     const shore = coastStretches(coast)
       .filter(
         ({ middle, outward }) =>
-          realmAt(middle[0] - outward[0], middle[1] - outward[1]) === realm
+          realmAt(middle[0] - outward[0], middle[1] - outward[1]) === deltaRealm
       )
       .sort((a, b) => a.middle[0] - b.middle[0])
-    const mouths = [0.12, 0.38, 0.64, 0.9].flatMap(share => {
+    // The mouths keep to the stretch of coast the river comes down to.
+    const mouths = [0.4, 0.58, 0.76, 0.93].flatMap(share => {
       const stretch = shore[Math.floor(share * shore.length)]
       return stretch ? [stretch.middle] : []
     })
-    let source: Point | null = null
-    let farthest = 0
-    for (let x = 0; x <= FRAME.width; x += 0.5) {
-      for (let y = 0; y <= FRAME.height; y += 0.5) {
-        if (realmAt(x, y) !== realm) continue
-        let toSea = Infinity
-        for (const [cx, cy] of layout.coast) {
-          toSea = Math.min(toSea, Math.hypot(cx - x, cy - y))
-        }
-        if (toSea > farthest) {
-          farthest = toSea
-          source = [x, y]
-        }
+    if (mouths.length > 0) {
+      const dam = layout.landmarks.controlDam
+      const source: Point = [spring.x, spring.y + spring.height * 0.2]
+      const toward: Point = [
+        mouths.reduce((sum, m) => sum + m[0], 0) / mouths.length,
+        mouths.reduce((sum, m) => sum + m[1], 0) / mouths.length,
+      ]
+      const head: Point = [
+        dam[0] + (toward[0] - dam[0]) * 0.45,
+        dam[1] + (toward[1] - dam[1]) * 0.45,
+      ]
+      // Down through the range in two easy bends.
+      const along = (share: number, swing: number): Point => [
+        source[0] + (dam[0] - source[0]) * share,
+        source[1] + (dam[1] - source[1]) * share + swing,
+      ]
+      river.push(
+        { points: [source, along(0.35, 0.9), along(0.7, -0.5), dam], width: 9 },
+        { points: [dam, head], width: 14 }
+      )
+      for (const arm of deltaArms(head, mouths)) {
+        river.push({ points: arm.points, width: arm.depth === 0 ? 11 : 8 })
       }
     }
-    const river = source ? deltaChannels(source, mouths) : []
-    rivers.set(realm, river)
     return river
+  }
+  const springOf = (marks: PlacedLandmark[]) =>
+    marks.find(mark => mark.symbol === 'range')
+  // The landmarks are placed again clear of the river (all but its first
+  // reach, which is the spring's own), and the river drawn from where the
+  // spring then stands.
+  let river = riverFrom(springOf(landmarks))
+  if (pins && river.length > 0) {
+    const spring = springOf(landmarks)!
+    landmarks = landmarksFor(
+      layout,
+      pins,
+      river
+        .flatMap(stretch => alongLine(stretch.points))
+        .filter(([x, y]) => Math.hypot(x - spring.x, y - spring.y) > 3)
+        .map(([x, y]) => ({ x, y, radius: 0.8 }))
+    )
+    river = riverFrom(springOf(landmarks))
   }
 
   const out: string[] = []
@@ -440,22 +475,20 @@ export function artBackdropMarkup(
         `<path d="${coastPath}" fill="none" stroke="${SAND}" stroke-width="${BEACH_WIDTH * 2 * g}" stroke-linejoin="round"/>`
       )
     }
-    // The delta's river, over the beach so its mouths cut through the sand.
-    if (theme.terrain === 'delta') {
-      for (const [n, channel] of riverOf(realm.realm).entries()) {
-        out.push(
-          `<path d="${curve(channel)}" fill="none" stroke="${WATER}" stroke-width="${n === 0 ? 15 : 11}" stroke-linecap="round"/>`
-        )
-      }
-    }
     out.push('</g></g>')
   })
 
-  // Realm borders, a little heavier than the district ones.
+  // Realm borders, a little heavier than the district ones, and the river
+  // over them and over the beach, so its mouths cut through the sand.
   out.push('<g clip-path="url(#art-coast)">')
   for (const realm of layout.realms) {
     out.push(
       `<path d="${outline(realm.polygon)}" fill="none" stroke="${LINE}" stroke-opacity="0.5" stroke-width="4" stroke-linejoin="round"/>`
+    )
+  }
+  for (const stretch of river) {
+    out.push(
+      `<path d="M${stretch.points.map(px).join('L')}" fill="none" stroke="${WATER}" stroke-width="${stretch.width}" stroke-linecap="round" stroke-linejoin="round"/>`
     )
   }
   // The cove is water inside the coast, drawn over the land; its shallows
@@ -477,16 +510,13 @@ export function artBackdropMarkup(
       radius: Math.max(mark.width, mark.height) * 0.4,
     })),
     ...layout.roads.flatMap(alongLine).map(([x, y]) => ({ x, y, radius: 0.7 })),
+    ...river
+      .flatMap(stretch => alongLine(stretch.points))
+      .map(([x, y]) => ({ x, y, radius: 0.6 })),
   ]
   for (const realm of layout.realms) {
     const theme = themeOf(realm.realm)
     if (!theme.terrain) continue
-    const river =
-      theme.terrain === 'delta'
-        ? riverOf(realm.realm)
-            .flatMap(alongLine)
-            .map(([x, y]) => ({ x, y, radius: 0.6 }))
-        : []
     const inRealm = (x: number, y: number) => realmAt(x, y) === realm.realm
     const behind =
       theme.terrain === 'range'
@@ -499,12 +529,7 @@ export function artBackdropMarkup(
         : []
     const spots = [
       ...behind,
-      ...scatterSpots(
-        inRealm,
-        [...taken, ...river],
-        FRAME,
-        TERRAIN_SCATTER[theme.terrain]
-      ),
+      ...scatterSpots(inRealm, taken, FRAME, TERRAIN_SCATTER[theme.terrain]),
     ].sort((a, b) => a.y - b.y)
     for (const spot of spots) {
       out.push(terrainDetail(theme, spot, g, pins !== undefined))

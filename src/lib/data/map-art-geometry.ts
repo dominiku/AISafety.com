@@ -118,35 +118,51 @@ export function cliffFaces(polygon: Point[], height: number): CliffFace[] {
   return faces
 }
 
+export interface DeltaArm {
+  points: Point[]
+  // 0 for the arms leaving the head of the delta, 1 for the arms those split
+  // into, and so on: the deeper, the narrower.
+  depth: number
+}
+
 /**
- * A river delta: one stream from `source` that forks part of the way to the
- * sea and reaches each of the `mouths`, every arm bowing a little its own
- * way. The first channel is the stream down to the fork, the rest the arms
- * from the fork; each is a list of points to draw one curve through.
+ * A river delta from its `head` to the `mouths`, given in order along the
+ * coast. The river splits in two, and each arm in two again, until every
+ * mouth has its own: what a delta does, and not a fan of arms from one point.
+ * An arm to a single mouth bows a little on its way.
  */
-export function deltaChannels(
-  source: Point,
+export function deltaArms(
+  head: Point,
   mouths: Point[],
-  bow = 0.12
-): Point[][] {
+  bow = 0.1,
+  depth = 0
+): DeltaArm[] {
   if (mouths.length === 0) return []
-  const toward: Point = [
-    mouths.reduce((sum, m) => sum + m[0], 0) / mouths.length,
-    mouths.reduce((sum, m) => sum + m[1], 0) / mouths.length,
-  ]
-  const fork: Point = [
-    source[0] + (toward[0] - source[0]) * 0.3,
-    source[1] + (toward[1] - source[1]) * 0.3,
-  ]
-  const arms = mouths.map((mouth, i): Point[] => {
-    const dx = mouth[0] - fork[0]
-    const dy = mouth[1] - fork[1]
-    const side = i % 2 === 0 ? 1 : -1
+  if (mouths.length === 1) {
+    const [mouth] = mouths
+    const dx = mouth[0] - head[0]
+    const dy = mouth[1] - head[1]
+    const side = depth % 2 === 0 ? 1 : -1
     const bend: Point = [
-      fork[0] + dx * 0.55 - dy * bow * side,
-      fork[1] + dy * 0.55 + dx * bow * side,
+      head[0] + dx * 0.5 - dy * bow * side,
+      head[1] + dy * 0.5 + dx * bow * side,
     ]
-    return [fork, bend, mouth]
+    return [{ points: [head, bend, mouth], depth }]
+  }
+  const half = Math.ceil(mouths.length / 2)
+  return [mouths.slice(0, half), mouths.slice(half)].flatMap(side => {
+    if (side.length === 1) return deltaArms(head, side, bow, depth)
+    const toward: Point = [
+      side.reduce((sum, m) => sum + m[0], 0) / side.length,
+      side.reduce((sum, m) => sum + m[1], 0) / side.length,
+    ]
+    const split: Point = [
+      head[0] + (toward[0] - head[0]) * 0.45,
+      head[1] + (toward[1] - head[1]) * 0.45,
+    ]
+    return [
+      { points: [head, split], depth },
+      ...deltaArms(split, side, bow, depth + 1),
+    ]
   })
-  return [[source, fork], ...arms]
 }

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   cliffFaces,
   coastStretches,
-  deltaChannels,
+  deltaArms,
   roundCorners,
 } from './map-art-geometry'
 import type { Point } from './map-realm-layout'
@@ -75,25 +75,41 @@ describe('coastStretches', () => {
   })
 })
 
-describe('deltaChannels', () => {
-  it('runs one stream that forks to every mouth', () => {
-    const mouths: Point[] = [
-      [0, 10],
-      [5, 12],
-      [10, 10],
-    ]
-    const channels = deltaChannels([5, 0], mouths)
-    const [stream, ...arms] = channels
-    expect(stream[0]).toEqual([5, 0])
-    const fork = stream[stream.length - 1]
-    expect(arms).toHaveLength(3)
-    arms.forEach((arm, i) => {
-      expect(arm[0]).toEqual(fork)
-      expect(arm[arm.length - 1]).toEqual(mouths[i])
-    })
+describe('deltaArms', () => {
+  const mouths: Point[] = [
+    [0, 10],
+    [4, 12],
+    [8, 12],
+    [12, 10],
+  ]
+
+  it('splits in two, and each arm in two again, down to every mouth', () => {
+    const arms = deltaArms([6, 0], mouths)
+    // Two arms from the head, each splitting into two that reach the sea.
+    expect(arms.filter(arm => arm.depth === 0)).toHaveLength(2)
+    const reaching = arms.filter(arm => arm.depth === 1)
+    expect(reaching.map(arm => arm.points[arm.points.length - 1])).toEqual(
+      mouths
+    )
+    // Every deeper arm starts where a shallower one ends.
+    for (const arm of reaching) {
+      expect(
+        arms.some(
+          other =>
+            other.depth === 0 &&
+            other.points[other.points.length - 1] === arm.points[0]
+        )
+      ).toBe(true)
+    }
+    for (const arm of arms.filter(a => a.depth === 0)) {
+      expect(arm.points[0]).toEqual([6, 0])
+    }
   })
 
-  it('is empty with no mouths', () => {
-    expect(deltaChannels([0, 0], [])).toEqual([])
+  it('runs one bowed arm to a single mouth, and none to no mouths', () => {
+    const [arm] = deltaArms([0, 0], [[0, 10]])
+    expect(arm.points).toHaveLength(3)
+    expect(arm.points[1][0]).not.toBe(0)
+    expect(deltaArms([0, 0], [])).toEqual([])
   })
 })
