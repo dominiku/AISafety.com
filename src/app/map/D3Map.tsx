@@ -39,7 +39,7 @@ import {
   type PinLayout,
   type TierPin,
 } from '@/lib/data/map-zoom-tiers'
-import { drawRealmBackdrop, type BackdropPin } from './realmBackdrop'
+import { drawRealmBackdrop, type RealmBackdrop } from './realmBackdrop'
 import styles from './page.module.css'
 
 interface MapOrg {
@@ -63,6 +63,9 @@ interface D3MapProps {
   // The areas drawn and the rule placing orgs in them. The classic map unless
   // the Map 3.5 prototype passes its realms and districts.
   scheme?: MapAreaScheme
+  // PROTOTYPE Map 3.5: the island, realms and districts worked out for that
+  // layout. When given, they are drawn in place of the island art.
+  realmBackdrop?: RealmBackdrop
 }
 
 // Map constants from WebFlow
@@ -93,11 +96,13 @@ const AREA_FRAME_MARGIN = 2
 // it is framed at.
 const FOCUS_MARGIN = 0.85
 const LANDMARK_FRAME_MARGIN = 6
+const REALM_SUB_LABEL_ZOOM = 1.5
 
 export default function D3Map({
   orgs,
   suggestEntryUrl,
   scheme = CLASSIC_MAP_SCHEME,
+  realmBackdrop,
 }: D3MapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const tooltipRef = useRef<HTMLDivElement>(null)
@@ -150,7 +155,13 @@ export default function D3Map({
   // PROTOTYPE zoom tiers. The tuning panel edits the config; the d3 pipeline
   // reads it through the ref and is told to re-apply it, so moving a slider
   // does not rebuild the map.
-  const [tierConfig, setTierConfig] = useState(DEFAULT_ZOOM_TIER_CONFIG)
+  // PROTOTYPE Map 3.5: 31 realm and district names do not fit the resting
+  // view, so that layout starts with districts named only once zoomed in.
+  const [tierConfig, setTierConfig] = useState(() =>
+    realmBackdrop
+      ? { ...DEFAULT_ZOOM_TIER_CONFIG, subLabelZoom: REALM_SUB_LABEL_ZOOM }
+      : DEFAULT_ZOOM_TIER_CONFIG
+  )
   const [showAreaCounts, setShowAreaCounts] = useState(true)
   const tierConfigRef = useRef(tierConfig)
   const applyTiersRef = useRef(() => {})
@@ -290,9 +301,17 @@ export default function D3Map({
       .attr('r', 0.5)
 
     // Add background image. PROTOTYPE Map 3.5: the island art was painted for
-    // the classic positions, so another scheme gets a schematic drawn from its
-    // own pins (closed orgs sit off the island and take no land).
-    if (scheme === CLASSIC_MAP_SCHEME) {
+    // the classic positions, so the realm layout brings its own schematic.
+    if (realmBackdrop) {
+      drawRealmBackdrop(
+        svgGroup,
+        defs,
+        realmBackdrop,
+        GRID_SIZE,
+        MAP_WIDTH,
+        MAP_HEIGHT
+      )
+    } else {
       svgGroup
         .append('image')
         .attr('xlink:href', MAP_BACKGROUND_URL)
@@ -300,21 +319,6 @@ export default function D3Map({
         .attr('height', MAP_HEIGHT)
         .attr('x', 0)
         .attr('y', 0)
-    } else {
-      const backdropPins: BackdropPin[] = []
-      for (const org of orgs) {
-        if (org.isMagic || org.x === null || org.y === null) continue
-        const district = primaryCategory(org.category) ?? ''
-        const [realm] = mapAreaPath(district, scheme)
-        if (!realm || isInQuietMapArea(district, scheme)) continue
-        backdropPins.push({
-          x: org.x * GRID_SIZE,
-          y: org.y * GRID_SIZE,
-          realm,
-          district,
-        })
-      }
-      drawRealmBackdrop(svgGroup, defs, backdropPins, MAP_WIDTH, MAP_HEIGHT)
     }
 
     // Add main title
@@ -1063,7 +1067,7 @@ export default function D3Map({
         d3.select(container).select('svg').remove()
       }
     }
-  }, [orgs, showAreaCounts, scheme])
+  }, [orgs, showAreaCounts, scheme, realmBackdrop])
 
   return (
     <>

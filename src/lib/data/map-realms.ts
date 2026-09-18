@@ -23,7 +23,7 @@ export interface RealmPin {
 // Closed orgs keep their own corner. Its realm and district carry the same
 // name, so it is one area, not a realm holding a single district, and like
 // the classic Gone Graveyard it is not filled out on the zoomed-out map.
-const QUIET_REALMS = ['No longer active']
+export const QUIET_REALM = 'No longer active'
 
 function median(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b)
@@ -68,7 +68,7 @@ export function buildRealmScheme(pins: RealmPin[]): MapAreaScheme {
       console.warn(`[map-realms] "${realm}" names two areas; second skipped`)
       continue
     }
-    addArea(realm, inRealm, QUIET_REALMS.includes(realm) ? { quiet: true } : {})
+    addArea(realm, inRealm, realm === QUIET_REALM ? { quiet: true } : {})
 
     const districts = [...new Set(inRealm.map(p => p.district))].sort()
     for (const district of districts) {

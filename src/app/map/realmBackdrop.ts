@@ -1,50 +1,58 @@
 // PROTOTYPE Map 3.5: a schematic backdrop for the realm and district layout,
 // drawn in place of the island art, which was painted for the classic
-// positions and does not line up with the draft ones.
-//
-// There is no drawn boundary data yet, so the land is split by which pin is
-// nearest (a Voronoi diagram): each pin's cell takes its realm's color, a thin
-// line runs wherever two districts meet and a heavier one where two realms do.
-// Moving pins in Airtable therefore moves the borders with them. The colors
+// positions and does not line up with the new ones. An abstract version of the
+// classic map: a faceted island, flat colors and straight borders, heavier
+// between realms than between districts. The Advocacy anchorage is marked out
+// on the water, and the newcomer's road runs from the arrival harbour to the
+// crossroads and on toward each of the three realms it leads to. The colors
 // follow the Map 3.5 schematic and are placeholders for the real art.
 
 import * as d3 from 'd3'
+import type {
+  Point,
+  RealmLayout,
+  RealmMapSpec,
+} from '@/lib/data/map-realm-layout'
 
-export interface BackdropPin {
-  x: number // map pixels
-  y: number
-  realm: string
-  district: string
+export interface RealmBackdrop {
+  layout: Pick<RealmLayout, 'coast' | 'realms' | 'districts'>
+  landmarks: RealmMapSpec['landmarks']
 }
 
 const SEA = '#16323f'
-const LAND_EDGE = '#5b6f7f'
-const BORDER = '#ffffff'
-// Handed out to the realms in alphabetical order.
-const REALM_COLORS = [
-  '#f7c8a8',
-  '#cfcfcf',
-  '#cdb2e0',
-  '#b7ddb0',
-  '#f6d571',
-  '#a9c6e8',
-  '#e8b4b4',
-  '#b4e0dc',
-]
+const ANCHORAGE = '#1f4556'
+const LINE = '#1b2b3e'
+const ROAD = '#8a5a2b'
+// Matched on the first word of the realm's name; any other realm gets one of
+// the spare colors.
+const REALM_COLORS: Record<string, string> = {
+  field: '#cfcfcf',
+  media: '#cdb2e0',
+  policy: '#b7ddb0',
+  talent: '#f6d571',
+  technical: '#a9c6e8',
+}
+const SPARE_COLORS = ['#f7c8a8', '#e8b4b4', '#b4e0dc']
 
-const CLIP_ID = 'realm-land-clip'
-
-// Two cells share an edge when they share two corners.
-const cornerKey = (p: [number, number]) =>
-  `${Math.round(p[0] * 10)},${Math.round(p[1] * 10)}`
+const COAST_CLIP_ID = 'realm-coast-clip'
 
 export function drawRealmBackdrop(
   group: d3.Selection<SVGGElement, unknown, null, undefined>,
   defs: d3.Selection<SVGDefsElement, unknown, null, undefined>,
-  pins: BackdropPin[],
+  { layout, landmarks }: RealmBackdrop,
+  gridSize: number,
   width: number,
   height: number
 ) {
+  const px = ([x, y]: Point) => `${x * gridSize},${y * gridSize}`
+  const outline = (polygon: Point[]) => `M${polygon.map(px).join('L')}Z`
+  const clip = (id: string, polygon: Point[]) =>
+    defs
+      .append('clipPath')
+      .attr('id', id)
+      .append('path')
+      .attr('d', outline(polygon))
+
   // The sea runs well past the frame so zooming out never shows its edge.
   group
     .append('rect')
@@ -54,80 +62,96 @@ export function drawRealmBackdrop(
     .attr('height', height * 3)
     .attr('fill', SEA)
 
-  // One oval landmass, as in the Map 3.5 brief, kept clear of the title.
-  const land = {
-    cx: width / 2,
-    cy: height * 0.54,
-    rx: width * 0.485,
-    ry: height * 0.43,
-  }
-  defs
-    .append('clipPath')
-    .attr('id', CLIP_ID)
-    .append('ellipse')
-    .attr('cx', land.cx)
-    .attr('cy', land.cy)
-    .attr('rx', land.rx)
-    .attr('ry', land.ry)
-
-  const landGroup = group.append('g').attr('clip-path', `url(#${CLIP_ID})`)
-  const realms = [...new Set(pins.map(p => p.realm))].sort()
+  clip(COAST_CLIP_ID, layout.coast)
+  let spare = 0
   const colorOf = (realm: string) =>
-    REALM_COLORS[realms.indexOf(realm) % REALM_COLORS.length]
+    REALM_COLORS[realm.split(' ')[0].toLowerCase()] ??
+    SPARE_COLORS[spare++ % SPARE_COLORS.length]
 
-  const delaunay = d3.Delaunay.from(
-    pins,
-    p => p.x,
-    p => p.y
+  // Water first, so the island is drawn over the part of it that runs inland.
+  const byWaterFirst = [...layout.realms].sort(
+    (a, b) => Number(b.water) - Number(a.water)
   )
-  const voronoi = delaunay.voronoi([0, 0, width, height])
-  const cells = pins.map(
-    (_, i) => voronoi.cellPolygon(i) as [number, number][] | null
-  )
-
-  cells.forEach((cell, i) => {
-    if (!cell) return
-    const color = colorOf(pins[i].realm)
-    landGroup
-      .append('path')
-      .attr('d', `M${cell.map(p => p.join(',')).join('L')}Z`)
-      .attr('fill', color)
-      // Same-colored stroke closes the hairline seams between cells.
-      .attr('stroke', color)
-      .attr('stroke-width', 1.5)
-  })
-
-  // Borders go on after every cell, so no fill paints over one.
-  cells.forEach((cell, i) => {
-    if (!cell) return
-    const corners = new Set(cell.map(cornerKey))
-    for (const j of delaunay.neighbors(i)) {
-      const other = cells[j]
-      if (j <= i || !other || pins[i].district === pins[j].district) continue
-      // A cell polygon repeats its first corner at the end.
-      const shared = other.slice(0, -1).filter(p => corners.has(cornerKey(p)))
-      if (shared.length < 2) continue
-      const betweenRealms = pins[i].realm !== pins[j].realm
-      landGroup
-        .append('line')
-        .attr('x1', shared[0][0])
-        .attr('y1', shared[0][1])
-        .attr('x2', shared[1][0])
-        .attr('y2', shared[1][1])
-        .attr('stroke', BORDER)
-        .attr('stroke-width', betweenRealms ? 7 : 2)
-        .attr('stroke-opacity', betweenRealms ? 1 : 0.7)
-        .attr('stroke-linecap', 'round')
+  byWaterFirst.forEach((realm, i) => {
+    const realmClipId = `realm-clip-${i}`
+    clip(realmClipId, realm.polygon)
+    // A district's cell is cut off by its realm's border, and on land by the
+    // coast too.
+    const inRealm = group
+      .append('g')
+      .attr('clip-path', realm.water ? null : `url(#${COAST_CLIP_ID})`)
+      .append('g')
+      .attr('clip-path', `url(#${realmClipId})`)
+    const fill = realm.water ? ANCHORAGE : colorOf(realm.realm)
+    for (const district of layout.districts) {
+      if (district.realm !== realm.realm) continue
+      inRealm
+        .append('path')
+        .attr('d', outline(district.polygon))
+        .attr('fill', fill)
+        .attr('stroke', realm.water ? SEA : LINE)
+        .attr('stroke-width', realm.water ? 3 : 2.5)
+        .attr('stroke-dasharray', realm.water ? '10 8' : null)
+    }
+    if (realm.water) {
+      // The land will cover the inland part; until then this hides it.
+      group.append('path').attr('d', outline(layout.coast)).attr('fill', SEA)
     }
   })
 
+  // Realm borders over the district ones, then the coast over both.
+  const onLand = group.append('g').attr('clip-path', `url(#${COAST_CLIP_ID})`)
+  for (const realm of layout.realms) {
+    if (realm.water) continue
+    onLand
+      .append('path')
+      .attr('d', outline(realm.polygon))
+      .attr('fill', 'none')
+      .attr('stroke', LINE)
+      .attr('stroke-width', 8)
+      .attr('stroke-linejoin', 'round')
+  }
   group
-    .append('ellipse')
-    .attr('cx', land.cx)
-    .attr('cy', land.cy)
-    .attr('rx', land.rx)
-    .attr('ry', land.ry)
+    .append('path')
+    .attr('d', outline(layout.coast))
     .attr('fill', 'none')
-    .attr('stroke', LAND_EDGE)
-    .attr('stroke-width', 6)
+    .attr('stroke', LINE)
+    .attr('stroke-width', 8)
+    .attr('stroke-linejoin', 'round')
+
+  // The road: in from the arrival harbour to the crossroads, then a fork into
+  // each realm on the east side.
+  const { arrivalHarbour, crossroads, departureHarbour, controlDam } = landmarks
+  const beyond = (from: Point, to: Point, times: number): Point => [
+    from[0] + (to[0] - from[0]) * times,
+    from[1] + (to[1] - from[1]) * times,
+  ]
+  const roads: Point[][] = [
+    [arrivalHarbour, crossroads],
+    [crossroads, departureHarbour],
+    [crossroads, controlDam, beyond(crossroads, controlDam, 3)],
+    // North-east, to the shore the Advocacy ships lie off.
+    [crossroads, [46, 8]],
+  ]
+  for (const road of roads) {
+    group
+      .append('path')
+      .attr('d', `M${road.map(px).join('L')}`)
+      .attr('fill', 'none')
+      .attr('stroke', ROAD)
+      .attr('stroke-width', 7)
+      .attr('stroke-dasharray', '22 14')
+      .attr('stroke-linecap', 'round')
+      .attr('stroke-linejoin', 'round')
+  }
+  for (const spot of [arrivalHarbour, crossroads, departureHarbour]) {
+    group
+      .append('circle')
+      .attr('cx', spot[0] * gridSize)
+      .attr('cy', spot[1] * gridSize)
+      .attr('r', 16)
+      .attr('fill', spot === crossroads ? ROAD : LINE)
+      .attr('stroke', '#fff')
+      .attr('stroke-width', 4)
+  }
 }

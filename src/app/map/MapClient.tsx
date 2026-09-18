@@ -16,7 +16,9 @@ import { placementsById } from '@/lib/placements'
 import { filterItems, optionCounts } from '@/lib/filter-counts'
 import { isPlacedOnMap } from '@/lib/map-images'
 import { CLASSIC_MAP_SCHEME } from '@/lib/data/map-areas'
-import { buildRealmScheme } from '@/lib/data/map-realms'
+import { buildRealmScheme, QUIET_REALM } from '@/lib/data/map-realms'
+import { layoutRealmMap, type LayoutPin } from '@/lib/data/map-realm-layout'
+import { MAP_35_SPEC } from '@/lib/data/map-realm-spec'
 import { SITE_PAGES } from '@/lib/site-pages'
 import styles from './page.module.css'
 
@@ -202,40 +204,53 @@ export default function MapClient({
   // the logos drawn here.
   const mapOrgs = useMemo(() => orgs.filter(isPlacedOnMap), [orgs])
 
-  // PROTOTYPE Map 3.5: on IA_work the map draws each org at its draft position
-  // and places it by its District, in an area tree built from the Realm and
-  // District fields. An org the curation has not reached yet keeps its old
-  // position and belongs to no area, so it stays visible as still to do. The
-  // cards below the map are unchanged.
+  // PROTOTYPE Map 3.5: on IA_work the map places each org by its District, in
+  // an area tree built from the Realm and District fields, and works out the
+  // land, the regions and every position itself (map-realm-layout.ts) from
+  // the rough draft positions in NewX/NewY. Closed orgs and map furniture stay
+  // where the draft has them, off the land. An org with no realm, district or
+  // draft position yet keeps its classic spot. The cards below the map are
+  // unchanged.
   const isIaWork = dataSource === 'ia' && iaWork !== null
-  const drawnOrgs = useMemo(
-    () =>
-      isIaWork
-        ? mapOrgs.map(org => ({
-            ...org,
-            category: org.draft?.district ?? org.category,
-            x: org.draft?.x ?? org.x,
-            y: org.draft?.y ?? org.y,
-          }))
-        : mapOrgs,
-    [isIaWork, mapOrgs]
-  )
-  const areaScheme = useMemo(
-    () =>
-      isIaWork
-        ? buildRealmScheme(
-            mapOrgs
-              .filter(org => !org.isMagic)
-              .map(org => ({
-                realm: org.draft?.realm ?? null,
-                district: org.draft?.district ?? null,
-                x: org.draft?.x ?? null,
-                y: org.draft?.y ?? null,
-              }))
-          )
-        : CLASSIC_MAP_SCHEME,
-    [isIaWork, mapOrgs]
-  )
+  const realmMap = useMemo(() => {
+    if (!isIaWork) return null
+    const placed: LayoutPin[] = []
+    const fixed: { x: number; y: number }[] = []
+    for (const org of mapOrgs) {
+      const { x, y, realm, district } = org.draft ?? {}
+      if (x == null || y == null) continue
+      if (org.isMagic || !realm || !district || realm === QUIET_REALM) {
+        fixed.push({ x, y })
+      } else {
+        placed.push({ id: org.id, realm, district, x, y, scale: org.scale })
+      }
+    }
+    const layout = layoutRealmMap(placed, fixed, MAP_35_SPEC)
+    const orgs = mapOrgs.map(org => {
+      const at = layout.positions.get(org.id)
+      return {
+        ...org,
+        category: org.draft?.district ?? org.category,
+        x: at?.x ?? org.draft?.x ?? org.x,
+        y: at?.y ?? org.draft?.y ?? org.y,
+      }
+    })
+    const scheme = buildRealmScheme(
+      orgs
+        .filter(org => !org.isMagic)
+        .map(org => ({
+          realm: org.draft?.realm ?? null,
+          district: org.draft?.district ?? null,
+          x: org.x,
+          y: org.y,
+        }))
+    )
+    return {
+      orgs,
+      scheme,
+      backdrop: { layout, landmarks: MAP_35_SPEC.landmarks },
+    }
+  }, [isIaWork, mapOrgs])
 
   const categoryCounts = useMemo(
     () =>
@@ -283,8 +298,12 @@ export default function MapClient({
       <div className="padding-bottom-24px">
         <div ref={mapWrapperRef} className={styles['map-wrapper']}>
           <D3Map
-            orgs={drawnOrgs}
-            scheme={areaScheme}
+            // A fresh map per data source: the view and the tuning panel
+            // start over, since the two layouts share neither.
+            key={dataSource}
+            orgs={realmMap?.orgs ?? mapOrgs}
+            scheme={realmMap?.scheme ?? CLASSIC_MAP_SCHEME}
+            realmBackdrop={realmMap?.backdrop}
             suggestEntryUrl={suggestEntryLink}
           />
           {iaWork && (
