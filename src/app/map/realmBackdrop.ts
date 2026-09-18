@@ -1,23 +1,19 @@
 // PROTOTYPE Map 3.5: a schematic backdrop for the realm and district layout,
 // drawn in place of the island art, which was painted for the classic
 // positions and does not line up with the new ones. An abstract version of the
-// classic map: a faceted island, flat colors and straight borders, heavier
-// between realms than between districts. The Advocacy anchorage is marked out
+// classic map: an irregular island in flat colors, with borders that wander a
+// little, heavier between realms than between districts. The Advocacy anchorage is marked out
 // on the water, and the newcomer's road runs from the arrival harbour to the
 // crossroads and on toward each of the three realms it leads to. The colors
 // follow the Map 3.5 schematic and are placeholders for the real art.
 
 import * as d3 from 'd3'
-import type {
-  Point,
-  RealmLayout,
-  RealmMapSpec,
-} from '@/lib/data/map-realm-layout'
+import type { Point, RealmLayout } from '@/lib/data/map-realm-layout'
 
-export interface RealmBackdrop {
-  layout: Pick<RealmLayout, 'coast' | 'realms' | 'districts'>
-  landmarks: RealmMapSpec['landmarks']
-}
+export type RealmBackdrop = Pick<
+  RealmLayout,
+  'coast' | 'realms' | 'districts' | 'landmarks' | 'roads'
+>
 
 const SEA = '#16323f'
 const ANCHORAGE = '#1f4556'
@@ -39,7 +35,7 @@ const COAST_CLIP_ID = 'realm-coast-clip'
 export function drawRealmBackdrop(
   group: d3.Selection<SVGGElement, unknown, null, undefined>,
   defs: d3.Selection<SVGDefsElement, unknown, null, undefined>,
-  { layout, landmarks }: RealmBackdrop,
+  layout: RealmBackdrop,
   gridSize: number,
   width: number,
   height: number
@@ -119,21 +115,8 @@ export function drawRealmBackdrop(
     .attr('stroke-width', 8)
     .attr('stroke-linejoin', 'round')
 
-  // The road: in from the arrival harbour to the crossroads, then a fork into
-  // each realm on the east side.
-  const { arrivalHarbour, crossroads, departureHarbour, controlDam } = landmarks
-  const beyond = (from: Point, to: Point, times: number): Point => [
-    from[0] + (to[0] - from[0]) * times,
-    from[1] + (to[1] - from[1]) * times,
-  ]
-  const roads: Point[][] = [
-    [arrivalHarbour, crossroads],
-    [crossroads, departureHarbour],
-    [crossroads, controlDam, beyond(crossroads, controlDam, 3)],
-    // North-east, to the shore the Advocacy ships lie off.
-    [crossroads, [46, 8]],
-  ]
-  for (const road of roads) {
+  const { arrivalHarbour, crossroads, departureHarbour } = layout.landmarks
+  for (const road of layout.roads) {
     group
       .append('path')
       .attr('d', `M${road.map(px).join('L')}`)

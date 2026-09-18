@@ -248,7 +248,7 @@ export default function MapClient({
     return {
       orgs,
       scheme,
-      backdrop: { layout, landmarks: MAP_35_SPEC.landmarks },
+      backdrop: layout,
     }
   }, [isIaWork, mapOrgs])
 

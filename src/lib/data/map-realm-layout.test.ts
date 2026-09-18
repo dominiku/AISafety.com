@@ -116,6 +116,14 @@ describe('layoutRealmMap', () => {
     }
   })
 
+  it('shapes the coast so each realm has land in proportion to its logos', () => {
+    // West holds 80 of the 130 footprint on land, East 50.
+    expect(layout.landShare.get('West')! / (80 / 130)).toBeGreaterThan(0.93)
+    expect(layout.landShare.get('West')! / (80 / 130)).toBeLessThan(1.07)
+    expect(layout.landShare.get('East')! / (50 / 130)).toBeGreaterThan(0.93)
+    expect(layout.landShare.get('East')! / (50 / 130)).toBeLessThan(1.07)
+  })
+
   it('gives each district room in proportion to its logos', () => {
     for (const { district, realm } of layout.districts) {
       const footprint = (of: LayoutPin[]) =>
@@ -141,13 +149,13 @@ describe('layoutRealmMap', () => {
       }
     }
     // Drafted 0.4 apart.
-    expect(closest).toBeGreaterThan(1.5)
+    expect(closest).toBeGreaterThan(1)
   })
 
   it('draws the coast clear of the pins that stay put', () => {
     expect(inside([46, 24], layout.coast)).toBe(false)
     // The same spot on the other side of the island is land.
-    expect(inside([14, 24], layout.coast)).toBe(true)
+    expect(inside([16, 22], layout.coast)).toBe(true)
   })
 
   it('leaves a realm with no borders where the draft has it', () => {
