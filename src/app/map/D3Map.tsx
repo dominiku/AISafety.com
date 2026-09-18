@@ -646,6 +646,8 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
     let layout: PinLayout | null = null
     // A pin picked from the search shows even if its tier is still hidden.
     let forcedPinId: string | null = null
+    // An area picked from the search shows all its pins: its categories.
+    let focusAreas: string[] = []
     applyPins = (k: number) => {
       appliedK = k
       if (!layout) return
@@ -677,20 +679,23 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
           `${onObstacles} on an area name`
       }
     }
+    // Working the layout out takes a few hundred milliseconds, so a slider
+    // being dragged or a window being resized waits for a pause.
+    let tierTimer: ReturnType<typeof setTimeout> | null = null
     const applyTiers = () => {
+      if (tierTimer !== null) clearTimeout(tierTimer)
+      tierTimer = null
       measureScreenScale()
       layout = layoutPins(
         pins.map(pin => pin.tier),
         obstacles,
         tierConfigRef.current,
-        zoomOf(1)
+        zoomOf(1),
+        focusAreas
       )
       applyPins(d3.zoomTransform(svgNode).k)
     }
     applyTiers()
-    // Working the layout out takes a few hundred milliseconds, so a slider
-    // being dragged or a window being resized waits for a pause.
-    let tierTimer: ReturnType<typeof setTimeout> | null = null
     const scheduleTiers = () => {
       if (tierTimer !== null) clearTimeout(tierTimer)
       tierTimer = setTimeout(applyTiers, 120)
@@ -727,6 +732,10 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
         forcedPinId = null
         applyPins(appliedK)
       }
+      if (focusAreas.length > 0) {
+        focusAreas = []
+        scheduleTiers()
+      }
     }
     // Mobile pins are tiny at rest, so land closer in.
     const pinZoom = () => (isMobile() ? 8 : 3.5)
@@ -754,24 +763,38 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
         // The area's pins: the same first-category rule that names the area
         // an org is drawn in. Decorations are not part of any area.
         const categories = categoriesForMapArea(area.label)
-        const pins: { x: number; y: number }[] = []
+        const areaPins: { x: number; y: number }[] = []
         for (const org of orgs) {
           if (org.isMagic || org.x === null || org.y === null) continue
           const primary = primaryCategory(org.category)
           if (!primary || !categories.includes(primary)) continue
-          pins.push({ x: org.x, y: org.y })
+          areaPins.push({ x: org.x, y: org.y })
         }
-        const bounds = mapAreaBounds(area, pins)
+        const bounds = mapAreaBounds(area, areaPins)
         const margin =
-          pins.length > 0 ? AREA_FRAME_MARGIN : LANDMARK_FRAME_MARGIN
+          areaPins.length > 0 ? AREA_FRAME_MARGIN : LANDMARK_FRAME_MARGIN
         const width = (bounds.maxX - bounds.minX + margin * 2) * GRID_SIZE
         const height = (bounds.maxY - bounds.minY + margin * 2) * GRID_SIZE
         // Fit the frame in view, never closer than a pin pick lands and never
         // further out than the resting view.
-        const k = Math.max(
+        const fitK = Math.max(
           1,
           Math.min(PADDED_WIDTH / width, PADDED_HEIGHT / height, pinZoom())
         )
+        // PROTOTYPE zoom tiers: a picked area shows all its pins. They are
+        // laid out as due from the start; any that still cannot fit at the
+        // framing zoom pull the view in to the zoom where they can.
+        focusAreas = categories
+        applyTiers()
+        let revealZ = 0
+        for (const { tier } of pins) {
+          if (tier.area !== null && categories.includes(tier.area)) {
+            revealZ = Math.max(revealZ, layout?.reveal.get(tier.id) ?? 0)
+          }
+        }
+        const revealK =
+          (revealZ * REFERENCE_SCREEN_SCALE * 1.001) / screenScaleAtRest
+        const k = Math.min(Math.max(fitK, revealK), maxZoom)
         flyToPoint(
           ((bounds.minX + bounds.maxX) / 2) * GRID_SIZE,
           ((bounds.minY + bounds.maxY) / 2) * GRID_SIZE,

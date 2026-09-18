@@ -134,6 +134,14 @@ describe('layoutPins: which pins show', () => {
     expect(reveal.get(pins[2].id)).toBe(2)
   })
 
+  it('shows every pin of a focused area from the start, and no others', () => {
+    const picked = pin('Small', 0, 0, 'Blog')
+    const other = pin('Small', 1000, 0, 'Video')
+    const { reveal } = layoutPins([picked, other], [], config, 1, ['Blog'])
+    expect(reveal.get(picked.id)).toBe(0)
+    expect(reveal.get(other.id)).toBe(4)
+  })
+
   it('applies the size tiers alone when overlap avoidance is off', () => {
     const large = pin('Large', 0, 0)
     const medium = pin('Medium', 1, 0)

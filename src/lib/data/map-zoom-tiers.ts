@@ -182,7 +182,9 @@ function zoomLevels(config: ZoomTierConfig, restingZoom: number): number[] {
  * Where every pin sits and from which z it shows.
  *
  * A pin is due from its size tier's threshold; each area's minPerArea most
- * important pins, and map furniture, are due from the start. Level by level
+ * important pins, and map furniture, are due from the start, and so is every
+ * pin of a focusAreas area (the one picked from the search, which should show
+ * all it has). Level by level
  * from fully zoomed in to fully zoomed out, the pins due at that level slide
  * apart (and off the obstacles) by up to maxShift, heavier for bigger orgs so
  * a Large pin moves least. A pin still overlapping a more important one after
@@ -193,7 +195,8 @@ export function layoutPins(
   pins: TierPin[],
   obstacles: MapObstacle[],
   config: ZoomTierConfig,
-  restingZoom: number
+  restingZoom: number,
+  focusAreas: string[] = []
 ): PinLayout {
   const ordered = [...pins].sort(byPriority)
   const n = ordered.length
@@ -201,7 +204,7 @@ export function layoutPins(
   const obstacleBoxes = obstacles.map(obstacleBox)
 
   const due = ordered.map(pin => {
-    if (pin.area === null) return 0
+    if (pin.area === null || focusAreas.includes(pin.area)) return 0
     const rank = scaleRank(pin.scale)
     return rank === 0 ? 0 : rank === 1 ? config.mediumZoom : config.smallZoom
   })
