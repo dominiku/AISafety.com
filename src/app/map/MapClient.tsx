@@ -18,7 +18,7 @@ import { isPlacedOnMap } from '@/lib/map-images'
 import { CLASSIC_MAP_SCHEME } from '@/lib/data/map-areas'
 import { buildRealmScheme, QUIET_REALM } from '@/lib/data/map-realms'
 import { layoutRealmMap, type LayoutPin } from '@/lib/data/map-realm-layout'
-import { MAP_35_SPEC } from '@/lib/data/map-realm-spec'
+import { MAP_35_GRAVEYARD_MOVE, MAP_35_SPEC } from '@/lib/data/map-realm-spec'
 import { SITE_PAGES } from '@/lib/site-pages'
 import styles from './page.module.css'
 
@@ -207,8 +207,8 @@ export default function MapClient({
   // PROTOTYPE Map 3.5: on IA_work the map places each org by its District, in
   // an area tree built from the Realm and District fields, and works out the
   // land, the regions and every position itself (map-realm-layout.ts) from
-  // the rough draft positions in NewX/NewY. Closed orgs and map furniture stay
-  // where the draft has them, off the land. An org with no realm, district or
+  // the rough draft positions in NewX/NewY. Map furniture stays where the
+  // draft has it, off the land, and so do closed orgs, moved as one group. An org with no realm, district or
   // draft position yet keeps its classic spot. The cards below the map are
   // unchanged.
   const isIaWork = dataSource === 'ia' && iaWork !== null
@@ -216,9 +216,25 @@ export default function MapClient({
     if (!isIaWork) return null
     const placed: LayoutPin[] = []
     const fixed: { x: number; y: number }[] = []
+    // Closed orgs keep their draft arrangement but move as one, out of the
+    // island's way (see MAP_35_GRAVEYARD_MOVE).
+    const moved = (org: MapOrg) => {
+      const quiet = org.draft?.realm === QUIET_REALM
+      return {
+        x:
+          (org.draft?.x ?? null) === null
+            ? null
+            : org.draft!.x! + (quiet ? MAP_35_GRAVEYARD_MOVE[0] : 0),
+        y:
+          (org.draft?.y ?? null) === null
+            ? null
+            : org.draft!.y! + (quiet ? MAP_35_GRAVEYARD_MOVE[1] : 0),
+      }
+    }
     for (const org of mapOrgs) {
-      const { x, y, realm, district } = org.draft ?? {}
-      if (x == null || y == null) continue
+      const { realm, district } = org.draft ?? {}
+      const { x, y } = moved(org)
+      if (x === null || y === null) continue
       if (org.isMagic || !realm || !district || realm === QUIET_REALM) {
         fixed.push({ x, y })
       } else {
@@ -231,8 +247,8 @@ export default function MapClient({
       return {
         ...org,
         category: org.draft?.district ?? org.category,
-        x: at?.x ?? org.draft?.x ?? org.x,
-        y: at?.y ?? org.draft?.y ?? org.y,
+        x: at?.x ?? moved(org).x ?? org.x,
+        y: at?.y ?? moved(org).y ?? org.y,
       }
     })
     const scheme = buildRealmScheme(

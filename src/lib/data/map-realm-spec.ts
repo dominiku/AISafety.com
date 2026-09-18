@@ -22,7 +22,13 @@
 // Field-building north of it; east of the castle there are footpaths, not
 // roads.
 
-import type { RealmMapSpec } from './map-realm-layout'
+import type { Point, RealmMapSpec } from './map-realm-layout'
+
+// The closed orgs' corner is drafted in the south-east of the frame, where
+// the sketch has Technical research's coast. They keep their arrangement and
+// move up as one group to the open sea in the north-east, by the compass,
+// which leaves Technical research the land its logos call for.
+export const MAP_35_GRAVEYARD_MOVE: Point = [0, -20]
 
 export const MAP_35_SPEC: RealmMapSpec = {
   // The castle town: every stretch of coast is in sight of it.
@@ -41,27 +47,26 @@ export const MAP_35_SPEC: RealmMapSpec = {
     [23.8, 6.7],
     [26.4, 7.8],
     [28.1, 10],
-    [30.3, 8.2],
-    [32.9, 8.2],
-    [34, 9.4],
-    [41.9, 11.7],
-    [43.4, 11.7],
-    [44.3, 13.6],
-    [45.2, 16.1],
-    [49, 13.2],
-    [53, 13.8],
-    [55.5, 16],
-    [57.5, 18.5],
-    [58.2, 23],
-    [56, 25],
+    [30.3, 8],
+    [33, 8],
+    [34, 8.6],
+    [41.9, 9.4],
+    [44, 9.4],
+    [45, 12],
+    [45.4, 15],
+    [49, 14.6],
+    [53, 15],
+    [55.5, 16.5],
+    [57.5, 19],
+    [57.8, 23.8],
+    [54, 24.2],
     [55, 29.7],
     [53.9, 32],
     [44.3, 32],
-    [42.1, 30.8],
-    [41, 29.5],
-    [35.6, 28.9],
-    [31.4, 29.5],
-    [31.2, 30.6],
+    [42.1, 31.4],
+    [38, 31],
+    [33, 31],
+    [31.2, 31.2],
     [28.1, 31.8],
     [21.6, 31.2],
     [18.1, 28.7],
@@ -81,11 +86,11 @@ export const MAP_35_SPEC: RealmMapSpec = {
       [30, 11.5],
       [30, 15.5],
       [26.5, 15.5],
-      [-2, 13],
+      [-2, 11.5],
     ],
     // The band, and the castle town at its east end.
     'Talent pipeline': [
-      [-2, 13],
+      [-2, 11.5],
       [26.5, 15.5],
       [33, 15.5],
       [33, 21],
@@ -106,7 +111,7 @@ export const MAP_35_SPEC: RealmMapSpec = {
       [45.5, 16.5],
       [45.5, -2],
       [64, -2],
-      [64, 24],
+      [64, 25.2],
       [41, 23],
       [33, 21],
     ],
@@ -114,7 +119,7 @@ export const MAP_35_SPEC: RealmMapSpec = {
       [28.5, 21],
       [33, 21],
       [41, 23],
-      [64, 24],
+      [64, 25.2],
       [64, 36],
       [30, 36],
       [29, 29.5],
@@ -137,9 +142,9 @@ export const MAP_35_SPEC: RealmMapSpec = {
       [34, -2],
       [41.5, -2],
       [41.5, 13],
-      [40.5, 15],
-      [35, 15],
-      [34, 13.5],
+      [40.5, 14],
+      [35, 14],
+      [34, 13],
     ],
   },
   districtAnchors: {
@@ -160,13 +165,13 @@ export const MAP_35_SPEC: RealmMapSpec = {
     'Professional advocacy and communication': [32, 12],
     'Macrostrategy and forecasting': [36.5, 19],
     'Policy research and think tanks': [49, 19.5],
-    'Governments and multi-stakeholder bodies': [41.5, 18.5],
-    'Standards, assurance and verification': [43.5, 22],
+    'Governments and multi-stakeholder bodies': [41, 18.8],
+    'Standards, assurance and verification': [45, 19.5],
     'Policy advocacy and lobbying': [54.5, 21],
     'Conceptual and foundations research': [34, 28],
-    'Alignment and control': [34, 23.5],
-    'Interpretability and model understanding': [44, 30],
-    'Evaluations and threat research': [43.5, 26],
+    'Alignment and control': [36.5, 24],
+    'Interpretability and model understanding': [41.5, 26.5],
+    'Evaluations and threat research': [46.5, 26],
     'Capabilities research': [51, 28],
   },
   roads: [
@@ -219,7 +224,7 @@ export const MAP_35_SPEC: RealmMapSpec = {
   // From the corner of the castle town to the foot of the cove.
   boardwalk: [
     [32.4, 15.6],
-    [35.2, 14.7],
+    [35.2, 13.9],
   ],
   coastFeatures: [
     // The arrival harbour on the west shore.

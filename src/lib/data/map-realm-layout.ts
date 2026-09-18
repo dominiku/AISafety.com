@@ -183,6 +183,10 @@ const HOME_PULL = 0.3
 // coast's corners on a coarser one, for longer straight runs.
 const SNAP = 0.5
 const SHORE_SNAP = 1
+// The coast turns a corner with a short 45° cut this long each way, as on the
+// classic map, and no two of its corners are nearer than SHORE_RUN.
+const SHORE_CHAMFER = 1
+const SHORE_RUN = 3
 // A long line also turns where it crosses this lattice (grid units), so it
 // steps along its way in several places and not in one big dogleg.
 const LATTICE = 5
@@ -379,9 +383,8 @@ function shapeCoast(
         reach += 0.005
       }
     }
-    for (const [waves, height, phase] of COAST_WAVES) {
-      // The outline has its own shape: only the fine roughness is added.
-      if (outline && waves < 9) continue
+    // The outline has its own shape; without one, swells break up the oval.
+    for (const [waves, height, phase] of outline ? [] : COAST_WAVES) {
       reach += height * Math.sin(waves * angle + phase)
     }
     for (const { toward, depth, width } of spec.coastFeatures ?? []) {
@@ -756,25 +759,96 @@ function groupBy<T>(items: T[], key: (item: T) => string): Map<string, T[]> {
 }
 
 /**
- * The shore as it is drawn: the shaped coast kept at a corner every few
- * bearings, the corners moved onto a coarse grid and joined in the map's
- * angular hand. This polygon, not the smooth coast behind it, is the land.
+ * The shore as it is drawn, in the classic map's hand: long runs along the
+ * axes, each corner cut by a short 45° stretch. The shaped coast is kept at a
+ * corner every so many bearings (and at each bearing in `keep`), the corners
+ * are moved onto a coarse grid, and each pair is joined by a run one way and
+ * a run the other, whichever order keeps nearer the shaped coast. This
+ * polygon, not the smooth coast behind it, is the land.
  */
-function angularShore(coast: Coast): Point[] {
-  const bearings = new Set<number>()
-  for (let at = 0, k = 0; at < COAST_POINTS - 3; at += 5 + ((k * 7) % 4), k++) {
-    if (![...bearings].some(kept => Math.abs(kept - at) < 3)) bearings.add(at)
+function angularShore(
+  coast: Coast,
+  keep: number[],
+  // Those of `keep` that are the back of a bay: the shore runs in to them
+  // square, so the bay is a basin and not a slit.
+  backs: number[]
+): Point[] {
+  const bearings = new Set(keep)
+  for (let at = 0, k = 0; at < COAST_POINTS - 6; at += 9 + ((k * 5) % 5), k++) {
+    if (![...bearings].some(kept => Math.abs(kept - at) < 5)) bearings.add(at)
   }
   const corners: Point[] = []
+  const basins = new Set<Point>()
   for (const at of [...bearings].sort((a, b) => a - b)) {
     const [x, y] = coast.pointAt(at)
     const corner: Point = [snapTo(x, SHORE_SNAP), snapTo(y, SHORE_SNAP)]
     const before = corners[corners.length - 1]
-    if (!before || before[0] !== corner[0] || before[1] !== corner[1]) {
-      corners.push(corner)
+    const kept = keep.includes(at)
+    if (
+      before &&
+      !kept &&
+      Math.hypot(corner[0] - before[0], corner[1] - before[1]) < SHORE_RUN
+    ) {
+      continue
     }
+    // Nearly level with the corner before: make it level, for one straight
+    // run and no little step.
+    if (before && !kept) {
+      if (Math.abs(corner[0] - before[0]) <= 1) corner[0] = before[0]
+      else if (Math.abs(corner[1] - before[1]) <= 1) corner[1] = before[1]
+    }
+    corners.push(corner)
+    if (backs.includes(at)) basins.add(corner)
   }
-  return angular(corners, true)
+  while (
+    corners.length > 3 &&
+    Math.hypot(
+      corners[0][0] - corners[corners.length - 1][0],
+      corners[0][1] - corners[corners.length - 1][1]
+    ) < SHORE_RUN
+  ) {
+    corners.pop()
+  }
+
+  const middle = coast.pointAt(0, 0)
+  const off = ([x, y]: Point) => {
+    const [sx, sy] = coast.shoreToward(x, y)
+    return Math.abs(
+      Math.hypot(x - middle[0], y - middle[1]) -
+        Math.hypot(sx - middle[0], sy - middle[1])
+    )
+  }
+  const shore: Point[] = []
+  corners.forEach((from, i) => {
+    const to = corners[(i + 1) % corners.length]
+    shore.push(from)
+    const dx = to[0] - from[0]
+    const dy = to[1] - from[1]
+    if (dx === 0 || dy === 0) return
+    const elbows: Point[] = [
+      [to[0], from[1]],
+      [from[0], to[1]],
+    ]
+    const inland = (p: Point) => Math.hypot(p[0] - middle[0], p[1] - middle[1])
+    const intoBasin = basins.has(from) || basins.has(to)
+    const measure = intoBasin ? inland : off
+    const elbow =
+      measure(elbows[0]) <= measure(elbows[1]) ? elbows[0] : elbows[1]
+    const cut = Math.min(
+      SHORE_CHAMFER,
+      snapTo(Math.min(Math.abs(dx), Math.abs(dy)) / 2, SNAP)
+    )
+    const toward = (a: Point, b: Point): Point => {
+      const length = Math.hypot(b[0] - a[0], b[1] - a[1])
+      return [
+        a[0] + ((b[0] - a[0]) / length) * cut,
+        a[1] + ((b[1] - a[1]) / length) * cut,
+      ]
+    }
+    if (cut === 0) shore.push(elbow)
+    else shore.push(toward(elbow, from), toward(elbow, to))
+  })
+  return shore
 }
 
 /** The grid point on a line of the map (its turns are grid points and it runs
@@ -827,7 +901,36 @@ export function layoutRealmMap(
     wanted.set(realm, footprintOf(inRealm) / footprintOf(onLand))
   }
   const coast = shapeCoast(spec, wanted, keepClear)
-  const shore = angularShore(coast)
+  // The arrival harbour keeps a corner at the back of its bay and one on the
+  // point either side, so the bay is drawn as a bay.
+  const harbourRealm = spec.realms[spec.roads?.[0]?.realm ?? '']
+  // A point of the bay that stops just short of its realm's border would
+  // leave a sliver of the realm beyond it: such a point goes on the border.
+  const pointOfBay = (from: number, turn: 1 | -1): number => {
+    const wrap = (bearing: number) =>
+      (Math.round(bearing) + COAST_POINTS) % COAST_POINTS
+    if (!harbourRealm) return wrap(from)
+    for (let step = 1; step <= 8; step++) {
+      const [x, y] = coast.pointAt(wrap(from + turn * step), 0.97)
+      if (!insidePolygon(x, y, harbourRealm)) return wrap(from + turn * step)
+    }
+    return wrap(from)
+  }
+  const harbourBearings = (spec.coastFeatures ?? [])
+    .filter(feature => feature.atArrival)
+    .flatMap(({ toward, width }) => {
+      const at = coast.bearingOf(toward[0], toward[1])
+      return [
+        pointOfBay(at - width, -1),
+        (Math.round(at) + COAST_POINTS) % COAST_POINTS,
+        pointOfBay(at + width, 1),
+      ]
+    })
+  const shore = angularShore(
+    coast,
+    harbourBearings,
+    harbourBearings.filter((_, i) => i % 3 === 1)
+  )
   const cove = spec.anchorage.water
   const toShore = ([x, y]: Point) => nearestOn(shore, coast.shoreToward(x, y))
 
