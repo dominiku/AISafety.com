@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { MAP_AREAS } from '@/lib/data/map-areas'
 import {
   AREA_LABELS,
   BACKGROUND_IMAGE_URL,
@@ -71,11 +72,9 @@ describe('map-geometry mirrors src/app/map/D3Map.tsx', () => {
   })
 
   it('area labels', () => {
-    for (const { label, x, y } of AREA_LABELS) {
-      expect(d3MapSource).toContain(`{ label: '${label}', x: ${x}, y: ${y} }`)
-    }
-    const count = (d3MapSource.match(/\{ label: '/g) ?? []).length
-    expect(count).toBe(AREA_LABELS.length)
+    // Not a copy: both renderers draw the one list in lib/data/map-areas.
+    expect(AREA_LABELS).toBe(MAP_AREAS)
+    expect(d3MapSource).toContain('MAP_AREAS.forEach(({ label, x, y }) => {')
   })
 
   it('glyph metrics formulas', () => {

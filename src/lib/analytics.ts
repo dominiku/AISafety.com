@@ -410,7 +410,8 @@ export function trackMapSearchOpen(method: MapSearchOpenMethod): void {
 /**
  * Track a settled /map search — fired once the visitor pauses typing, or
  * immediately if they pick a result / leave the box before the pause.
- * `results` is how many listings matched (0 = the map has nothing for it).
+ * `results` is how many rows matched, areas included (0 = the map has nothing
+ * for it).
  */
 export function trackMapSearchQuery(query: string, results: number): void {
   if (typeof window === 'undefined') return
@@ -439,6 +440,30 @@ export function trackMapSearchPick(
     label: title,
     url,
     listingId,
+    position,
+    area,
+  })
+}
+
+/**
+ * Track a /map search pick of an AREA ("Blog Beach") rather than a listing —
+ * the map frames the whole area. Same event as a listing pick so the search
+ * funnel counts it; `source: 'area'` tells the two apart, and there is no url
+ * or listingId. `area` is the area's category, the usual area dimension.
+ */
+export function trackMapSearchAreaPick(
+  query: string,
+  areaName: string,
+  position: string,
+  area?: string
+): void {
+  if (typeof window === 'undefined') return
+  sendTrackEvent({
+    type: 'map_search_pick',
+    page: 'Map',
+    source: 'area',
+    query: query || undefined,
+    label: areaName,
     position,
     area,
   })

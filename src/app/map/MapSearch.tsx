@@ -6,11 +6,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent, MutableRefObject } from 'react'
 import SearchBar from '@/components/SearchBar'
 import {
+  trackMapSearchAreaPick,
   trackMapSearchOpen,
   trackMapSearchPick,
   trackMapSearchQuery,
   type MapSearchOpenMethod,
 } from '@/lib/analytics'
+import {
+  categoriesForMapArea,
+  categoryForMapArea,
+  primaryCategory,
+  searchMapAreas,
+  type MapArea,
+} from '@/lib/data/map-areas'
 import styles from './page.module.css'
 
 export interface MapSearchOrg {
@@ -48,6 +56,8 @@ interface MapSearchProps {
   orgs: MapSearchOrg[]
   suggestEntryUrl: string
   onPick: (org: MapSearchOrg) => void
+  // An area ("Blog Beach") was picked instead of a listing.
+  onPickArea: (area: MapArea) => void
   onClear: () => void
   // The map fills this in so it can shut the search, and so it knows to let
   // the search have ESC before falling back to resetting the view.
@@ -55,6 +65,13 @@ interface MapSearchProps {
 }
 
 const MAX_RESULTS = 5
+// Areas sit above the listings and don't use up their slots, so "blog" shows
+// Blog Beach and still five blogs.
+const MAX_AREA_RESULTS = 2
+
+type SearchRow =
+  | { kind: 'area'; area: MapArea; category: string | null; listings: number }
+  | { kind: 'org'; org: MapSearchOrg }
 
 // Mirrors map-search-collapse in page.module.css — the field has to stay
 // mounted for the shrink, so this is how long we wait before removing it.
@@ -69,6 +86,7 @@ export default function MapSearch({
   orgs,
   suggestEntryUrl,
   onPick,
+  onPickArea,
   onClear,
   controlRef,
 }: MapSearchProps) {
@@ -172,9 +190,33 @@ export default function MapSearch({
     return () => window.removeEventListener('keydown', handler, true)
   }, [])
 
-  const results = useMemo(() => {
+  // How many findable listings are drawn in each area — shown on its row.
+  const listingsByCategory = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const org of orgs) {
+      const category = primaryCategory(org.category)
+      if (category) counts.set(category, (counts.get(category) ?? 0) + 1)
+    }
+    return counts
+  }, [orgs])
+
+  const results = useMemo((): SearchRow[] => {
     const q = query.trim().toLowerCase()
     if (!q) return []
+    const areas = searchMapAreas(q)
+      .slice(0, MAX_AREA_RESULTS)
+      .map((area): SearchRow => {
+        return {
+          kind: 'area',
+          area,
+          // Analytics slices by one category; an umbrella area has none.
+          category: categoryForMapArea(area.label),
+          listings: categoriesForMapArea(area.label).reduce(
+            (sum, category) => sum + (listingsByCategory.get(category) ?? 0),
+            0
+          ),
+        }
+      })
     // Same ranking as the admin map editor's search: a field starting with
     // the query outranks a mid-word match.
     const prefix: MapSearchOrg[] = []
@@ -188,8 +230,11 @@ export default function MapSearch({
       if (fields.some(f => f.startsWith(q))) prefix.push(org)
       else if (fields.some(f => f.includes(q))) rest.push(org)
     }
-    return [...prefix, ...rest].slice(0, MAX_RESULTS)
-  }, [orgs, query])
+    const listings = [...prefix, ...rest]
+      .slice(0, MAX_RESULTS)
+      .map((org): SearchRow => ({ kind: 'org', org }))
+    return [...areas, ...listings]
+  }, [orgs, query, listingsByCategory])
 
   useEffect(() => {
     expandedRef.current = expanded
@@ -239,9 +284,27 @@ export default function MapSearch({
   })
 
   // `rank` is the result's place in the list, counted from 1.
-  const pick = (org: MapSearchOrg, rank: number) => {
+  const pick = (row: SearchRow, rank: number) => {
     // The search that led here may not have settled yet.
     recordQuery()
+    if (row.kind === 'area') {
+      const { area, category } = row
+      trackMapSearchAreaPick(
+        query.trim(),
+        area.label,
+        String(rank),
+        category ?? undefined
+      )
+      // As with a listing: the picked name fills the box and must not be
+      // recorded as a search of its own.
+      lastTrackedQueryRef.current = area.label.toLowerCase()
+      setQuery(area.label)
+      setOpen(false)
+      setActiveIndex(-1)
+      onPickArea(area)
+      return
+    }
+    const { org } = row
     // First category only, matching how the map's clicks and hovers are
     // sliced by area; '' (uncategorized) is sent as nothing.
     trackMapSearchPick(
@@ -340,9 +403,9 @@ export default function MapSearch({
       />
       {open && (
         <div className={styles['map-search-results']} role="listbox">
-          {results.map((org, i) => (
+          {results.map((row, i) => (
             <button
-              key={org.id}
+              key={row.kind === 'area' ? row.area.label : row.org.id}
               type="button"
               role="option"
               aria-selected={i === activeIndex}
@@ -353,29 +416,57 @@ export default function MapSearch({
               // which closes this list before a click would land.
               onMouseDown={event => {
                 event.preventDefault()
-                pick(org, i + 1)
+                pick(row, i + 1)
               }}
             >
-              <span className={styles['map-search-logo']}>
-                {org.mapLogo && (
-                  <Image
-                    src={org.mapLogo}
-                    alt=""
-                    width={28}
-                    height={28}
-                    unoptimized
-                    onError={e => {
-                      ;(e.target as HTMLImageElement).style.display = 'none'
-                    }}
-                  />
-                )}
-              </span>
-              <span className={styles['map-search-text']}>
-                <span className={styles['map-search-name']}>{org.title}</span>
-                <span className={styles['map-search-category']}>
-                  {org.category.split(',')[0].trim()}
-                </span>
-              </span>
+              {row.kind === 'area' ? (
+                <>
+                  <span
+                    className={`${styles['map-search-logo']} ${styles['map-search-area-icon']}`}
+                  >
+                    <Icon
+                      src="/images/icons/map.svg"
+                      size={16}
+                      className="color-teal-bright-400"
+                    />
+                  </span>
+                  <span className={styles['map-search-text']}>
+                    <span className={styles['map-search-name']}>
+                      {row.area.label}
+                    </span>
+                    <span className={styles['map-search-category']}>
+                      {`Area · ${row.listings} ${
+                        row.listings === 1 ? 'listing' : 'listings'
+                      }`}
+                    </span>
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className={styles['map-search-logo']}>
+                    {row.org.mapLogo && (
+                      <Image
+                        src={row.org.mapLogo}
+                        alt=""
+                        width={28}
+                        height={28}
+                        unoptimized
+                        onError={e => {
+                          ;(e.target as HTMLImageElement).style.display = 'none'
+                        }}
+                      />
+                    )}
+                  </span>
+                  <span className={styles['map-search-text']}>
+                    <span className={styles['map-search-name']}>
+                      {row.org.title}
+                    </span>
+                    <span className={styles['map-search-category']}>
+                      {row.org.category.split(',')[0].trim()}
+                    </span>
+                  </span>
+                </>
+              )}
             </button>
           ))}
           {results.length === 0 && (

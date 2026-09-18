@@ -102,26 +102,8 @@ export const AREA_LABEL_STYLE = {
   pillFill: 'rgba(27, 43, 62, 0.6)',
 }
 
-export const AREA_LABELS = [
-  { label: 'Conceptual Cliffs', x: 46, y: 5.5 },
-  { label: 'Resource Rock', x: 3.5, y: 8 },
-  { label: 'Support Shoreline', x: 13, y: 6.7 },
-  { label: 'Newsletter Nook', x: 15.8, y: 14.5 },
-  { label: 'Video Vista', x: 23, y: 5.6 },
-  { label: 'Funding Forest', x: 29.2, y: 7 },
-  { label: 'Governance Grove', x: 37.7, y: 5.5 },
-  { label: 'Strategy Summit', x: 34.8, y: 19 },
-  { label: 'Research Range', x: 45.3, y: 15.9 },
-  { label: 'Training Town', x: 22.2, y: 17.2 },
-  { label: 'Empirical Escarpment', x: 53.5, y: 16 },
-  { label: 'Podcast Port', x: 9.5, y: 20.5 },
-  { label: 'Blog Beach', x: 15, y: 25.8 },
-  { label: 'Forecasting Falls', x: 39.2, y: 23.8 },
-  { label: 'Career Castle', x: 30.5, y: 29.4 },
-  { label: 'Advocacy Anchorage', x: 8, y: 31 },
-  { label: 'Capabilities Cove', x: 45, y: 27.1 },
-  { label: 'Gone Graveyard', x: 56, y: 30 },
-]
+// The one list of area labels, shared with the public map.
+export { MAP_AREAS as AREA_LABELS } from '@/lib/data/map-areas'
 
 // ─── Coordinate helpers ────────────────────────────────────────────────────
 

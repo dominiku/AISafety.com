@@ -2,15 +2,42 @@
 
 // @refresh reset — d3 pipeline is inside useEffect; force remount on edit.
 
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import * as d3 from 'd3'
 import MapControls from '@/components/MapControls'
 import MapSearch, { NO_MAP_SEARCH_CONTROL } from './MapSearch'
+import MapTuningPanel from './MapTuningPanel'
 import type { MapSearchControl } from './MapSearch'
 import { trackListingClick, trackListingHover } from '@/lib/analytics'
 import { withUtm } from '@/lib/utm'
 import { positionTooltip } from '@/lib/mapTooltip'
 import { MAP_BACKGROUND_URL } from '@/lib/map-images'
+import {
+  MAP_AREAS,
+  categoriesForMapArea,
+  isInQuietMapArea,
+  mapAreaBounds,
+  mapAreaDepth,
+  mapAreaHasChildren,
+  mapAreaPath,
+  primaryCategory,
+  type MapArea,
+} from '@/lib/data/map-areas'
+import {
+  DEFAULT_ZOOM_TIER_CONFIG,
+  REFERENCE_SCREEN_SCALE,
+  countOverlaps,
+  labelMapScale,
+  labelScaleCap,
+  labelShowsAt,
+  layoutPins,
+  pinMapScale,
+  pinPositionAt,
+  type MapFocus,
+  type MapObstacle,
+  type PinLayout,
+  type TierPin,
+} from '@/lib/data/map-zoom-tiers'
 import styles from './page.module.css'
 
 interface MapOrg {
@@ -53,27 +80,14 @@ const SIZE_TO_SCALE: Record<string, number> = {
 const BASE_LOGO_SIZE = 64
 const LOGO_GLOBAL_SCALE = 1.0
 
-// Area labels from WebFlow
-const AREA_LABELS = [
-  { label: 'Conceptual Cliffs', x: 46, y: 5.5 },
-  { label: 'Resource Rock', x: 3.5, y: 8 },
-  { label: 'Support Shoreline', x: 13, y: 6.7 },
-  { label: 'Newsletter Nook', x: 15.8, y: 14.5 },
-  { label: 'Video Vista', x: 23, y: 5.6 },
-  { label: 'Funding Forest', x: 29.2, y: 7 },
-  { label: 'Governance Grove', x: 37.7, y: 5.5 },
-  { label: 'Strategy Summit', x: 34.8, y: 19 },
-  { label: 'Research Range', x: 45.3, y: 15.9 },
-  { label: 'Training Town', x: 22.2, y: 17.2 },
-  { label: 'Empirical Escarpment', x: 53.5, y: 16 },
-  { label: 'Podcast Port', x: 9.5, y: 20.5 },
-  { label: 'Blog Beach', x: 15, y: 25.8 },
-  { label: 'Forecasting Falls', x: 39.2, y: 23.8 },
-  { label: 'Career Castle', x: 30.5, y: 29.4 },
-  { label: 'Advocacy Anchorage', x: 8, y: 31 },
-  { label: 'Capabilities Cove', x: 45, y: 27.1 },
-  { label: 'Gone Graveyard', x: 56, y: 30 },
-]
+// Grid units of breathing room around an area framed from the search, so
+// edge pins and their name labels are not cut off. A landmark with no pins of
+// its own gets a wider frame, to show what surrounds it.
+const AREA_FRAME_MARGIN = 2
+// PROTOTYPE zoom tiers: a picked area's pins show from this share of the zoom
+// it is framed at.
+const FOCUS_MARGIN = 0.85
+const LANDMARK_FRAME_MARGIN = 6
 
 export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -92,13 +106,16 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
   const searchControlRef = useRef<MapSearchControl>(NO_MAP_SEARCH_CONTROL)
   const searchRef = useRef<{
     flyTo: (org: {
+      id: string
       x: number | null
       y: number | null
       scale: string | null
     }) => void
+    flyToArea: (area: MapArea) => void
     clearHighlight: () => void
   }>({
     flyTo: () => {},
+    flyToArea: () => {},
     clearHighlight: () => {},
   })
   // Magic-map decorations and unlinked furniture rows (e.g. "Last updated")
@@ -120,6 +137,19 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
   // and tab focus. Keeping the last zoom transform here lets the rebuild
   // restore the viewport instead of jumping back to the zoomed-out default.
   const savedTransformRef = useRef<d3.ZoomTransform | null>(null)
+
+  // PROTOTYPE zoom tiers. The tuning panel edits the config; the d3 pipeline
+  // reads it through the ref and is told to re-apply it, so moving a slider
+  // does not rebuild the map.
+  const [tierConfig, setTierConfig] = useState(DEFAULT_ZOOM_TIER_CONFIG)
+  const [showAreaCounts, setShowAreaCounts] = useState(true)
+  const tierConfigRef = useRef(tierConfig)
+  const applyTiersRef = useRef(() => {})
+  const tierReadoutRef = useRef<HTMLParagraphElement>(null)
+  useEffect(() => {
+    tierConfigRef.current = tierConfig
+    applyTiersRef.current()
+  }, [tierConfig])
 
   useEffect(() => {
     if (!containerRef.current || orgs.length === 0) return
@@ -186,6 +216,9 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
     // svgGroup (the previous approach) invalidates its compositor layer
     // in Mac WebKit and causes visible flicker mid-zoom.
     let isZooming = false
+    // PROTOTYPE zoom tiers: filled in once the pins exist, further down.
+    let appliedK = -1
+    let applyPins: (k: number) => void = () => {}
     const zoom = d3
       .zoom<SVGSVGElement, unknown>()
       .scaleExtent([0.5, maxZoom])
@@ -203,6 +236,8 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
           `translate(${newX}, ${newY}) scale(${event.transform.k})`
         )
         savedTransformRef.current = event.transform
+        // A pan leaves pin sizes and visibility alone; only a zoom changes them.
+        if (event.transform.k !== appliedK) applyPins(event.transform.k)
       })
       .on('end', () => {
         isZooming = false
@@ -278,12 +313,43 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
     const finalPadX = basePadX * labelScale
     const finalPadY = basePadY * labelScale
 
-    AREA_LABELS.forEach(({ label, x, y }) => {
+    // Each label's group, the point it is drawn from, and its pill measured
+    // from that point: kept so a search pick can pulse it, and (PROTOTYPE zoom
+    // tiers) so a zoom can resize it and pins can slide off it.
+    const areaPills = new Map<
+      string,
+      {
+        group: d3.Selection<SVGGElement, unknown, null, undefined>
+        anchorX: number
+        anchorY: number
+        x: number
+        y: number
+        width: number
+        height: number
+        depth: number
+        isParent: boolean
+      }
+    >()
+
+    // PROTOTYPE: with most pins hidden at the resting view, the count on an
+    // area's label says how much there is to find by zooming in.
+    const areaCount = (label: string) => {
+      const categories = categoriesForMapArea(label)
+      return orgs.filter(org => {
+        if (org.isMagic || org.x === null || org.y === null) return false
+        const primary = primaryCategory(org.category)
+        return primary !== null && categories.includes(primary)
+      }).length
+    }
+
+    MAP_AREAS.forEach(({ label, x, y }) => {
+      const count = showAreaCounts ? areaCount(label) : 0
       const xPos = x * GRID_SIZE
       const yPos = y * GRID_SIZE
 
       const labelGroup = svgGroup
         .append('g')
+        .attr('class', 'mapFade')
         .attr('transform', `translate(${xPos}, ${yPos})`)
         .style('user-select', 'none')
         .style('pointer-events', 'none')
@@ -298,7 +364,7 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
         .attr('font-size', finalFontSize)
         .style('letter-spacing', '-0.01em')
         .attr('fill', '#fff')
-        .text(label)
+        .text(count > 0 ? `${label} · ${count}` : label)
 
       const bbox = textEl.node()?.getBBox()
       if (bbox) {
@@ -311,8 +377,26 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
           .attr('rx', (bbox.height + finalPadY * 2) / 2)
           .attr('ry', (bbox.height + finalPadY * 2) / 2)
           .attr('fill', 'rgba(27, 43, 62, 0.6)')
+        areaPills.set(label, {
+          group: labelGroup,
+          anchorX: xPos,
+          anchorY: yPos,
+          depth: mapAreaDepth(label),
+          isParent: mapAreaHasChildren(label),
+          x: bbox.x - finalPadX,
+          y: bbox.y - finalPadY,
+          width: bbox.width + finalPadX * 2,
+          height: bbox.height + finalPadY * 2,
+        })
       }
     })
+
+    // PROTOTYPE zoom tiers: every pin's group and footprint, so a zoom can
+    // resize the pins and show or hide them.
+    const pins: {
+      tier: TierPin
+      group: d3.Selection<SVGGElement, unknown, null, undefined>
+    }[] = []
 
     // Render organization logos
     orgs.forEach(org => {
@@ -330,6 +414,7 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
       // Create item group with translate, then link inside (matching Webflow structure)
       const itemGroup = svgGroup
         .append('g')
+        .attr('class', 'mapFade')
         .attr('transform', `translate(${xPos}, ${yPos})`)
       // QA: Items with no real link (e.g. "Last updated") should render
       // on the map but not be clickable
@@ -501,6 +586,26 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
           .attr('height', bridgeH)
           .attr('fill', 'transparent')
           .lower()
+
+        pins.push({
+          group: itemGroup,
+          tier: {
+            id: org.id,
+            title: org.title,
+            scale: org.scale,
+            // Every area the pin is in, outermost first. Map furniture
+            // (Merch, Last updated) belongs to none.
+            regions: org.isMagic
+              ? []
+              : mapAreaPath(primaryCategory(org.category) ?? ''),
+            quiet: isInQuietMapArea(primaryCategory(org.category) ?? ''),
+            x: xPos,
+            y: yPos,
+            halfWidth: bridgeW / 2,
+            top: -iconSize / 2,
+            bottom: labelY + rectH / 2,
+          },
+        })
       }
 
       // Tooltip events with smart edge-detection positioning
@@ -553,6 +658,106 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
         })
     })
 
+    // PROTOTYPE zoom tiers. z is the zoom the tier rules work in: screen
+    // pixels per map pixel against a reference desktop, so a phone at rest
+    // counts as further out than a desktop at rest.
+    let screenScaleAtRest = REFERENCE_SCREEN_SCALE
+    const measureScreenScale = () => {
+      const rect = svgNode.getBoundingClientRect()
+      // A map that is not laid out yet (a hidden tab, mid-resize) measures
+      // zero; keep the last real measurement until it is.
+      if (rect.width === 0 || rect.height === 0) return
+      screenScaleAtRest = Math.min(
+        rect.width / PADDED_WIDTH,
+        rect.height / PADDED_HEIGHT
+      )
+    }
+    const zoomOf = (k: number) =>
+      (k * screenScaleAtRest) / REFERENCE_SCREEN_SCALE
+    // Pins slide off the area names; the names themselves never move.
+    const obstacles: MapObstacle[] = [...areaPills.values()].map(pill => ({
+      x: pill.anchorX + pill.x,
+      y: pill.anchorY + pill.y,
+      width: pill.width,
+      height: pill.height,
+      anchorX: pill.anchorX,
+      anchorY: pill.anchorY,
+      depth: pill.depth,
+      isParent: pill.isParent,
+    }))
+    const labelCap = labelScaleCap(obstacles)
+    let layout: PinLayout | null = null
+    // A pin picked from the search shows even if its tier is still hidden.
+    let forcedPinId: string | null = null
+    // An area picked from the search shows all its pins once framed.
+    let focus: MapFocus | null = null
+    applyPins = (k: number) => {
+      appliedK = k
+      if (!layout) return
+      const config = tierConfigRef.current
+      const z = zoomOf(k)
+      const s = pinMapScale(z, config)
+      const labelScale = labelMapScale(z, config, labelCap)
+      for (const pill of areaPills.values()) {
+        pill.group
+          .attr(
+            'transform',
+            `translate(${pill.anchorX}, ${pill.anchorY}) scale(${labelScale})`
+          )
+          .classed('mapFadeHidden', !labelShowsAt(pill, z, config))
+      }
+      // The pins on screen, where they are drawn, for the panel's readout.
+      const showing: TierPin[] = []
+      let largeHeldBack = 0
+      for (const { tier, group } of pins) {
+        const revealed = (layout.reveal.get(tier.id) ?? 0) <= z
+        const at = pinPositionAt(layout, tier.id, z)
+        if (revealed) showing.push({ ...tier, ...at })
+        else if (tier.scale === 'Large') largeHeldBack++
+        group
+          .attr('transform', `translate(${at.x}, ${at.y}) scale(${s})`)
+          .classed('mapFadeHidden', !revealed && tier.id !== forcedPinId)
+      }
+      if (tierReadoutRef.current) {
+        const { pairs, onObstacles } = countOverlaps(
+          showing,
+          obstacles,
+          z,
+          config
+        )
+        tierReadoutRef.current.textContent =
+          `Zoom ${z.toFixed(2)} · ${showing.length} of ${pins.length} pins · ` +
+          `${largeHeldBack} Large held back · ${pairs} overlapping pairs · ` +
+          `${onObstacles} on an area name`
+      }
+    }
+    // Working the layout out takes a few hundred milliseconds, so a slider
+    // being dragged or a window being resized waits for a pause.
+    let tierTimer: ReturnType<typeof setTimeout> | null = null
+    const applyTiers = () => {
+      if (tierTimer !== null) clearTimeout(tierTimer)
+      tierTimer = null
+      measureScreenScale()
+      layout = layoutPins(
+        pins.map(pin => pin.tier),
+        obstacles,
+        tierConfigRef.current,
+        zoomOf(1),
+        focus
+      )
+      applyPins(d3.zoomTransform(svgNode).k)
+    }
+    applyTiers()
+    const scheduleTiers = () => {
+      if (tierTimer !== null) clearTimeout(tierTimer)
+      tierTimer = setTimeout(applyTiers, 120)
+    }
+    applyTiersRef.current = scheduleTiers
+    // The resting zoom depends on the map's size on screen, and the layout
+    // depends on the resting zoom.
+    const tierResizeObserver = new ResizeObserver(scheduleTiers)
+    tierResizeObserver.observe(svgNode)
+
     // Setup zoom controls
     const resetView = () => {
       svg.transition().duration(500).call(zoom.transform, d3.zoomIdentity)
@@ -567,58 +772,166 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
       reset: resetView,
     }
 
-    // Search: fly the viewport to a pin and pulse a ring around it. The ring
-    // sits inside svgGroup so it pans/zooms with the map; non-scaling-stroke
-    // keeps its line width constant at any zoom.
-    let highlightRing: d3.Selection<
-      SVGCircleElement,
-      unknown,
-      null,
-      undefined
-    > | null = null
+    // Search: fly the viewport to a pin and pulse a ring around it — or, for
+    // an area, frame it and pulse its label. The highlight sits inside
+    // svgGroup so it pans/zooms with the map; non-scaling-stroke keeps its
+    // line width constant at any zoom.
+    let removeHighlight: (() => void) | null = null
     const clearHighlight = () => {
-      if (highlightRing) {
-        highlightRing.interrupt()
-        highlightRing.remove()
-        highlightRing = null
+      removeHighlight?.()
+      removeHighlight = null
+      if (forcedPinId !== null) {
+        forcedPinId = null
+        applyPins(appliedK)
       }
+      if (focus !== null) {
+        focus = null
+        scheduleTiers()
+      }
+    }
+    // Mobile pins are tiny at rest, so land closer in.
+    const pinZoom = () => (isMobile() ? 8 : 3.5)
+    // Centers map point (px, py) in the rendered viewBox area at zoom k: the
+    // group transform places map point p at viewBox coordinate
+    // t + offset + k*p.
+    const flyToPoint = (px: number, py: number, k: number) => {
+      svg
+        .transition()
+        .duration(800)
+        .call(
+          zoom.transform,
+          d3.zoomIdentity
+            .translate(
+              PADDED_WIDTH / 2 - offsetX - k * px,
+              PADDED_HEIGHT / 2 - offsetY - k * py
+            )
+            .scale(k)
+        )
     }
     searchRef.current = {
       clearHighlight,
+      flyToArea: area => {
+        clearHighlight()
+        // The area's pins: the same first-category rule that names the area
+        // an org is drawn in. Decorations are not part of any area.
+        const categories = categoriesForMapArea(area.label)
+        const areaPins: { x: number; y: number }[] = []
+        for (const org of orgs) {
+          if (org.isMagic || org.x === null || org.y === null) continue
+          const primary = primaryCategory(org.category)
+          if (!primary || !categories.includes(primary)) continue
+          areaPins.push({ x: org.x, y: org.y })
+        }
+        const bounds = mapAreaBounds(area, areaPins)
+        const margin =
+          areaPins.length > 0 ? AREA_FRAME_MARGIN : LANDMARK_FRAME_MARGIN
+        const width = (bounds.maxX - bounds.minX + margin * 2) * GRID_SIZE
+        const height = (bounds.maxY - bounds.minY + margin * 2) * GRID_SIZE
+        // Fit the frame in view, never closer than a pin pick lands and never
+        // further out than the resting view.
+        const fitK = Math.max(
+          1,
+          Math.min(PADDED_WIDTH / width, PADDED_HEIGHT / height, pinZoom())
+        )
+        // PROTOTYPE zoom tiers: a picked area shows all its pins. They are
+        // due from just short of the framing zoom, so a small zoom out does
+        // not drop them at once but a real one thins the area like any
+        // other. Any that still cannot fit at the framing zoom pull the view
+        // in to the zoom where they can.
+        measureScreenScale()
+        focus = { areas: [area.label], fromZoom: zoomOf(fitK) * FOCUS_MARGIN }
+        applyTiers()
+        let revealZ = 0
+        for (const { tier } of pins) {
+          if (tier.regions.includes(area.label)) {
+            revealZ = Math.max(revealZ, layout?.reveal.get(tier.id) ?? 0)
+          }
+        }
+        const revealK =
+          (revealZ * REFERENCE_SCREEN_SCALE * 1.001) / screenScaleAtRest
+        const k = Math.min(Math.max(fitK, revealK), maxZoom)
+        flyToPoint(
+          ((bounds.minX + bounds.maxX) / 2) * GRID_SIZE,
+          ((bounds.minY + bounds.maxY) / 2) * GRID_SIZE,
+          k
+        )
+        const pill = areaPills.get(area.label)
+        if (!pill) return
+        // The pulse is an outline that swells away from the label's pill. It
+        // lives in the label's own group so it is resized along with it.
+        const outline = pill.group
+          .append('rect')
+          .attr('fill', 'none')
+          .attr('stroke', 'var(--white)')
+          .attr('stroke-width', 3.5)
+          .attr('vector-effect', 'non-scaling-stroke')
+          .style('pointer-events', 'none')
+        const outlineAt = (by: number) => ({
+          x: pill.x - by,
+          y: pill.y - by,
+          width: pill.width + by * 2,
+          height: pill.height + by * 2,
+          rx: pill.height / 2 + by,
+        })
+        const resting = outlineAt(4)
+        const swollen = outlineAt(18)
+        outline
+          .attr('x', resting.x)
+          .attr('y', resting.y)
+          .attr('width', resting.width)
+          .attr('height', resting.height)
+          .attr('rx', resting.rx)
+        removeHighlight = () => {
+          outline.interrupt()
+          outline.remove()
+        }
+        let growing = true
+        const pulse = () => {
+          const to = growing ? swollen : resting
+          outline
+            .transition()
+            .duration(600)
+            .ease(d3.easeSinInOut)
+            .attr('x', to.x)
+            .attr('y', to.y)
+            .attr('width', to.width)
+            .attr('height', to.height)
+            .attr('rx', to.rx)
+            .attr('stroke-opacity', growing ? 0.3 : 0.9)
+            .on('end', () => {
+              growing = !growing
+              pulse()
+            })
+        }
+        pulse()
+      },
       flyTo: org => {
         if (org.x === null || org.y === null) return
         clearHighlight()
         const px = org.x * GRID_SIZE
         const py = org.y * GRID_SIZE
-        // Mobile pins are tiny at rest, so land closer in.
-        const k = isMobile() ? 8 : 3.5
-        // Centers the pin in the rendered viewBox area: the group transform
-        // places map point p at viewBox coordinate t + offset + k*p.
-        svg
-          .transition()
-          .duration(800)
-          .call(
-            zoom.transform,
-            d3.zoomIdentity
-              .translate(
-                PADDED_WIDTH / 2 - offsetX - k * px,
-                PADDED_HEIGHT / 2 - offsetY - k * py
-              )
-              .scale(k)
-          )
+        // PROTOTYPE zoom tiers: show the pin whatever its tier, and draw the
+        // ring inside the pin's own group so it is resized along with it.
+        forcedPinId = org.id
+        applyPins(appliedK)
+        flyToPoint(px, py, pinZoom())
         const rawScale = SIZE_TO_SCALE[org.scale || 'Medium'] || 0.6
         const r = (BASE_LOGO_SIZE * rawScale) / 2 + 10
-        const ring = svgGroup
+        const pinGroup = pins.find(pin => pin.tier.id === org.id)?.group
+        const ring = (pinGroup ?? svgGroup)
           .append('circle')
-          .attr('cx', px)
-          .attr('cy', py)
+          .attr('cx', pinGroup ? 0 : px)
+          .attr('cy', pinGroup ? 0 : py)
           .attr('r', r)
           .attr('fill', 'none')
           .attr('stroke', 'var(--white)')
           .attr('stroke-width', 3.5)
           .attr('vector-effect', 'non-scaling-stroke')
           .style('pointer-events', 'none')
-        highlightRing = ring
+        removeHighlight = () => {
+          ring.interrupt()
+          ring.remove()
+        }
         let growing = true
         const pulse = () => {
           ring
@@ -703,8 +1016,15 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
       cancelHoverTimer()
       // The ring is removed with the SVG; the fns must not outlive the zoom
       // behavior they close over.
-      searchRef.current = { flyTo: () => {}, clearHighlight: () => {} }
+      searchRef.current = {
+        flyTo: () => {},
+        flyToArea: () => {},
+        clearHighlight: () => {},
+      }
       svgNode.removeEventListener('wheel', preventPageZoom)
+      tierResizeObserver.disconnect()
+      if (tierTimer !== null) clearTimeout(tierTimer)
+      applyTiersRef.current = () => {}
       if (tooltipEl) tooltipEl.removeEventListener('click', handleTooltipClick)
       document.removeEventListener('click', handleDocumentClick)
       document.removeEventListener('keydown', handleEscKey)
@@ -712,7 +1032,7 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
         d3.select(container).select('svg').remove()
       }
     }
-  }, [orgs])
+  }, [orgs, showAreaCounts])
 
   return (
     <>
@@ -725,12 +1045,22 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
         onReset={() => controlsRef.current.reset()}
       />
 
+      <MapTuningPanel
+        className={styles['map-tuning']}
+        config={tierConfig}
+        onChange={setTierConfig}
+        showAreaCounts={showAreaCounts}
+        onShowAreaCounts={setShowAreaCounts}
+        readoutRef={tierReadoutRef}
+      />
+
       <MapSearch
         className={styles['map-search']}
         orgs={searchOrgs}
         suggestEntryUrl={suggestEntryUrl}
         controlRef={searchControlRef}
         onPick={org => searchRef.current.flyTo(org)}
+        onPickArea={area => searchRef.current.flyToArea(area)}
         onClear={() => searchRef.current.clearHighlight()}
       />
 

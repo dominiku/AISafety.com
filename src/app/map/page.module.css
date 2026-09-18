@@ -196,6 +196,12 @@
   object-fit: contain;
 }
 
+/* An area row ("Blog Beach") has no logo: the same disc holds an icon, tinted
+   like the row hover instead of white. Must come after .map-search-logo. */
+.map-search-area-icon {
+  background-color: color-mix(in srgb, var(--bright-teal-500) 10%, transparent);
+}
+
 .map-search-text {
   flex: 1;
   min-width: 0;
@@ -300,6 +306,29 @@
 
 .map-container :global(.mapItem:hover) {
   transform: scale(1.2);
+}
+
+/* PROTOTYPE zoom tiers: pins and area names fade as a zoom reveals or hides
+   them. Hidden ones also lose `visibility`, after the fade, so a hidden pin
+   can't be hovered, clicked or tabbed to. */
+.map-container :global(.mapFade) {
+  transition: opacity 0.2s;
+}
+
+.map-container :global(.mapFadeHidden) {
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 0.2s,
+    visibility 0s 0.2s;
+}
+
+/* PROTOTYPE tuning panel: beside the zoom controls, same z-index reasoning. */
+.map-tuning {
+  position: absolute;
+  top: 24px;
+  right: 88px;
+  z-index: 95;
 }
 
 /* Map wrapper for positioning controls */
