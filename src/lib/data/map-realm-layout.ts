@@ -94,6 +94,9 @@ export interface RealmMapSpec {
     toShore?: boolean
     settleFrom?: boolean
     settleTo?: boolean
+    // How far (grid units) the road swings to either side of the straight
+    // line between its ends. Not given, it runs straight.
+    wander?: number
     left: string[]
     right: string[]
   }[]
@@ -145,7 +148,7 @@ export interface RealmLayout {
   boardwalk: Point[]
   /** The district a point of the drawn map lies in, or null at sea. */
   districtAt: (x: number, y: number) => string | null
-  // Share of the land each land realm ended up with, by realm name.
+  // Share of the island (its land and its cove) each realm ended up with.
   landShare: Map<string, number>
   // Share of its realm each district ended up with, by district name.
   realmShare: Map<string, number>
@@ -179,6 +182,8 @@ const HOME_PULL = 0.3
 const SHORE_SNAP = 0.5
 const SHORE_CHAMFER = 1
 const SHORE_RUN = 3
+// Straight stretches a wandering road is drawn in.
+const ROAD_STEPS = 14
 
 /** Land a logo takes, relative to a small one. Matches the pin sizes on the
  *  map: a Large logo is twice as wide as a Small one. */
@@ -256,6 +261,7 @@ class Coast {
 function shapeCoast(
   spec: RealmMapSpec,
   wanted: Map<string, number>,
+  grounds: Map<string, Point[]>,
   keepClear: { x: number; y: number }[]
 ): Coast {
   const coast = new Coast(spec.island)
@@ -297,14 +303,14 @@ function shapeCoast(
     const angle = (index / COAST_POINTS) * 2 * Math.PI
     const x = spec.island.cx + Math.cos(angle) * spec.island.rx * 0.9
     const y = spec.island.cy + Math.sin(angle) * spec.island.ry * 0.9
-    return realms.findIndex(realm => insidePolygon(x, y, spec.realms[realm]))
+    return realms.findIndex(realm => insidePolygon(x, y, grounds.get(realm)!))
   })
 
   // Coarse samples are enough to weigh the realms against each other.
   const samples: { x: number; y: number; realm: number }[] = []
   for (let x = 0.25; x < GRID_WIDTH; x += 0.5) {
     for (let y = 0.25; y < GRID_HEIGHT; y += 0.5) {
-      const realm = realms.findIndex(r => insidePolygon(x, y, spec.realms[r]))
+      const realm = realms.findIndex(r => insidePolygon(x, y, grounds.get(r)!))
       if (realm !== -1) samples.push({ x, y, realm })
     }
   }
@@ -800,16 +806,20 @@ export function layoutRealmMap(
   const isHarbour = (realm: string) =>
     realm.startsWith(spec.anchorage.realmStartsWith)
 
-  // What share of the land each land realm should have.
-  const onLand = pins.filter(
-    pin => spec.realms[pin.realm] && !isHarbour(pin.realm)
-  )
+  // The ground each realm has to work with, and what share of the island
+  // each should have. The harbour realm's ground is its land and its cove.
+  const groundOf = (realm: string): Point[] | undefined =>
+    isHarbour(realm) ? spec.anchorage.box : spec.realms[realm]
+  const onIsland = pins.filter(pin => groundOf(pin.realm))
   const wanted = new Map<string, number>()
+  const grounds = new Map<string, Point[]>()
   for (const [realm, inRealm] of byRealm) {
-    if (!spec.realms[realm] || isHarbour(realm)) continue
-    wanted.set(realm, footprintOf(inRealm) / footprintOf(onLand))
+    const ground = groundOf(realm)
+    if (!ground) continue
+    grounds.set(realm, ground)
+    wanted.set(realm, footprintOf(inRealm) / footprintOf(onIsland))
   }
-  const coast = shapeCoast(spec, wanted, keepClear)
+  const coast = shapeCoast(spec, wanted, grounds, keepClear)
   // The arrival harbour keeps a corner at the back of its bay and one on the
   // point either side, so the bay is drawn as a bay.
   const harbourRealm = spec.realms[spec.roads?.[0]?.realm ?? '']
@@ -850,7 +860,6 @@ export function layoutRealmMap(
   // Inside the coast; and of that, what is not the cove.
   const inShore = new Uint8Array(cols * rows)
   const isLand = new Uint8Array(cols * rows)
-  let landSamples = 0
   for (let index = 0; index < cols * rows; index++) {
     xs[index] = ((index % cols) + 0.5) * STEP
     ys[index] = (Math.floor(index / cols) + 0.5) * STEP
@@ -858,7 +867,6 @@ export function layoutRealmMap(
     inShore[index] = 1
     if (insidePolygon(xs[index], ys[index], cove)) continue
     isLand[index] = 1
-    landSamples++
   }
   // Whether everything `margin` grid units around a sample is land (or, for
   // a ship, sea).
@@ -913,7 +921,7 @@ export function layoutRealmMap(
   }[] = []
   const { crossroads, controlDam } = spec.landmarks
   // Each road as it came out, by the realm it runs through.
-  const laid = new Map<string, [Point, Point]>()
+  const laid = new Map<string, Point[]>()
 
   for (const [realm, inRealm] of byRealm) {
     const harbour = isHarbour(realm)
@@ -1052,12 +1060,48 @@ export function layoutRealmMap(
         if (road.settleFrom) roadStart = settled
         else roadEnd = settled
       }
-      laid.set(realm, [roadStart, roadEnd])
     }
-    // Inside is a·x + b·y <= c on the left side, the reverse on the right.
-    const roadA = -(roadEnd[1] - roadStart[1])
-    const roadB = roadEnd[0] - roadStart[0]
-    const roadC = roadA * roadStart[0] + roadB * roadStart[1]
+    // The road's line: straight, or swinging to one side and then the other
+    // and easing back to the straight line at both ends.
+    const along: Point = [roadEnd[0] - roadStart[0], roadEnd[1] - roadStart[1]]
+    const length = Math.hypot(along[0], along[1]) || 1
+    // To the left of the way the road runs (north, for a road running east).
+    const left: Point = [along[1] / length, -along[0] / length]
+    const roadLine: Point[] = []
+    for (let step = 0; step <= ROAD_STEPS; step++) {
+      const t = step / ROAD_STEPS
+      const swing =
+        (road?.wander ?? 0) *
+        Math.sin(2 * Math.PI * 1.25 * t) *
+        Math.sin(Math.PI * t)
+      roadLine.push([
+        roadStart[0] + along[0] * t + left[0] * swing,
+        roadStart[1] + along[1] * t + left[1] * swing,
+      ])
+    }
+    if (road) laid.set(realm, roadLine)
+    // Everything to one side of the road, as a polygon: the road's line, run
+    // on far past both ends, and closed far out to that side.
+    const far = 4 * GRID_WIDTH
+    const sideOfRoad = (side: -1 | 1): Point[] => {
+      const out: Point = [-side * left[0] * far, -side * left[1] * far]
+      const before: Point = [
+        roadStart[0] - (along[0] / length) * far,
+        roadStart[1] - (along[1] / length) * far,
+      ]
+      const after: Point = [
+        roadEnd[0] + (along[0] / length) * far,
+        roadEnd[1] + (along[1] / length) * far,
+      ]
+      return [
+        before,
+        ...roadLine,
+        after,
+        [after[0] + out[0], after[1] + out[1]],
+        [before[0] + out[0], before[1] + out[1]],
+      ]
+    }
+    const leftOfRoad = sideOfRoad(-1)
     shareOut(
       open,
       xs,
@@ -1067,7 +1111,7 @@ export function layoutRealmMap(
       road
         ? {
             ofSample: Int8Array.from(open, i =>
-              roadA * xs[i] + roadB * ys[i] <= roadC ? -1 : 1
+              insidePolygon(xs[i], ys[i], leftOfRoad) ? -1 : 1
             ),
             ofSite: sideOfSite,
           }
@@ -1079,10 +1123,7 @@ export function layoutRealmMap(
       const there = sites.filter(
         (_, i) => sideOfSite[i] === 0 || sideOfSite[i] === side
       )
-      const cell = cellOf(there, there.indexOf(sites[index]), frame)
-      return cell.length === 0
-        ? cell
-        : clipTo(cell, -side * roadA, -side * roadB, -side * roadC)
+      return cellOf(there, there.indexOf(sites[index]), sideOfRoad(side))
     }
     shared.forEach(([district, inDistrict], index) => {
       planned.push({
@@ -1110,7 +1151,7 @@ export function layoutRealmMap(
     const road = spec.roads?.[n]
     const ends = road && laid.get(road.realm)
     if (!road || !ends) return toShore(fallback)
-    return road.fromShore ? ends[0] : ends[1]
+    return road.fromShore ? ends[0] : ends[ends.length - 1]
   }
 
   // The arrival bay belongs where the road meets the shore, and the road's end
@@ -1192,9 +1233,9 @@ export function layoutRealmMap(
   const positions = new Map<string, { x: number; y: number }>()
   const landShare = new Map<string, number>()
   const realmShare = new Map<string, number>()
-  for (const { realm, harbour } of drawnRealms) {
-    if (!harbour)
-      landShare.set(realm, (roomOfRealm.get(realm) ?? 0) / landSamples)
+  const islandSamples = inShore.reduce((sum, is) => sum + is, 0)
+  for (const { realm } of drawnRealms) {
+    landShare.set(realm, (roomOfRealm.get(realm) ?? 0) / islandSamples)
   }
   planned.forEach(({ district, realm, pins: inDistrict }, index) => {
     const room = everySample.filter(i => owner[i] === index)

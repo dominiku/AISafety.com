@@ -140,12 +140,17 @@ describe('layoutRealmMap', () => {
     }
   })
 
-  it('shapes the coast so each realm has land in proportion to its logos', () => {
-    // West holds 80 of the 130 footprint on land, East 50.
-    expect(layout.landShare.get('West')! / (80 / 130)).toBeGreaterThan(0.9)
-    expect(layout.landShare.get('West')! / (80 / 130)).toBeLessThan(1.1)
-    expect(layout.landShare.get('East')! / (50 / 130)).toBeGreaterThan(0.9)
-    expect(layout.landShare.get('East')! / (50 / 130)).toBeLessThan(1.1)
+  it('shapes the coast so each realm has room in proportion to its logos', () => {
+    const footprint = (of: LayoutPin[]) =>
+      of.reduce((sum, p) => sum + pinFootprint(p.scale), 0)
+    for (const realm of ['West', 'East']) {
+      const wanted =
+        footprint(pins.filter(p => p.realm === realm)) / footprint(pins)
+      expect(layout.landShare.get(realm)! / wanted, realm).toBeGreaterThan(0.9)
+      expect(layout.landShare.get(realm)! / wanted, realm).toBeLessThan(1.1)
+    }
+    // The harbour realm too, though a cove takes what room the coast gives.
+    expect(layout.landShare.get('Ships and sailors')).toBeGreaterThan(0)
   })
 
   it('gives each district room in proportion to its logos', () => {

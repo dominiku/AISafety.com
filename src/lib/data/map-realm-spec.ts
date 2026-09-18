@@ -53,13 +53,13 @@ export const MAP_35_SPEC: RealmMapSpec = {
     [23.8, 6.7],
     [26.4, 7.8],
     [28.1, 10],
-    [30.3, 8],
-    [33, 8],
-    [34, 8.6],
-    [41.9, 9.4],
-    [44, 9.4],
-    [45, 12],
-    [46, 13.2],
+    [30, 9.6],
+    [32.5, 9.4],
+    [37.5, 9.8],
+    [40, 10],
+    [40.6, 12.6],
+    [43, 13],
+    [46, 12.6],
     [49, 12.4],
     [53, 13],
     [55.5, 15.5],
@@ -114,8 +114,8 @@ export const MAP_35_SPEC: RealmMapSpec = {
     'Policy and strategy': [
       [33, 16],
       [36, 16.5],
-      [45.5, 16.5],
-      [45.5, -2],
+      [40, 16.5],
+      [40, -2],
       [64, -2],
       [64, 25.2],
       [41, 23],
@@ -132,11 +132,12 @@ export const MAP_35_SPEC: RealmMapSpec = {
   },
   anchorage: {
     realmStartsWith: 'Advocacy',
-    // The U of land and the cove in it.
+    // A small U of land and the cove in it, sized for the 17 orgs it holds
+    // (the sketch drew it some three times that).
     box: [
       [28, -2],
-      [45.5, -2],
-      [45.5, 16.5],
+      [40, -2],
+      [40, 16.5],
       [36, 16.5],
       [33, 16],
       [30, 15.2],
@@ -144,12 +145,12 @@ export const MAP_35_SPEC: RealmMapSpec = {
       [28, 10],
     ],
     water: [
-      [34, -2],
-      [41.5, -2],
-      [41.5, 13],
-      [40.5, 14],
-      [35, 14],
-      [34, 13],
+      [31.8, -2],
+      [38.6, -2],
+      [38.6, 13.2],
+      [37.6, 14.4],
+      [32.8, 14.4],
+      [31.8, 13.2],
     ],
   },
   districtAnchors: {
@@ -166,11 +167,11 @@ export const MAP_35_SPEC: RealmMapSpec = {
     'Foundational and explanatory': [10, 23.5],
     'News and commentary': [21, 26.5],
     'Forums and online communities': [28, 28.5],
-    'Grassroots campaigns': [42, 13],
-    'Professional advocacy and communication': [32, 12],
+    'Grassroots campaigns': [37.5, 12.5],
+    'Professional advocacy and communication': [32.5, 12.5],
     'Macrostrategy and forecasting': [36.5, 18.5],
     'Policy research and think tanks': [49, 16],
-    'Governments and multi-stakeholder bodies': [41, 18.3],
+    'Governments and multi-stakeholder bodies': [41.5, 17],
     'Standards, assurance and verification': [45.5, 21],
     'Policy advocacy and lobbying': [54.5, 19.5],
     'Conceptual and foundations research': [34.5, 28],
@@ -180,8 +181,8 @@ export const MAP_35_SPEC: RealmMapSpec = {
     'Capabilities research': [51.5, 27.5],
   },
   roads: [
-    // In from the arrival harbour to the west gate of the castle town, down
-    // the middle of the band: the places a newcomer starts from and the policy
+    // In from the arrival harbour to the west gate of the castle town,
+    // wandering down the middle of the band: the places a newcomer starts from and the policy
     // programs to the north, the technical programs (by far the largest
     // district) to the south.
     {
@@ -190,6 +191,7 @@ export const MAP_35_SPEC: RealmMapSpec = {
       fromShore: true,
       settleFrom: true,
       to: [26.5, 18.25],
+      wander: 1.3,
       left: [
         'Field-building and local groups',
         'Introductory learning',
@@ -230,7 +232,7 @@ export const MAP_35_SPEC: RealmMapSpec = {
   // From the corner of the castle town to the foot of the cove.
   boardwalk: [
     [32.4, 15.8],
-    [35.2, 13.9],
+    [33.4, 14.5],
   ],
   coastFeatures: [
     // The arrival harbour on the west shore.
