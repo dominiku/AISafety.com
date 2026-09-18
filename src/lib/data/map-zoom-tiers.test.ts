@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_ZOOM_TIER_CONFIG,
   countOverlaps,
+  labelMapScale,
+  labelScaleCap,
   layoutPins,
   pinMapScale,
   pinPositionAt,
@@ -25,6 +27,9 @@ const config: ZoomTierConfig = {
   mediumShare: 0,
   avoidOverlaps: true,
   maxShift: 0,
+  spreadStrength: 0,
+  labelMode: 'map',
+  labelBoost: 1,
   showAllZoom: 6,
 }
 
@@ -295,7 +300,14 @@ describe('layoutPins: sliding pins apart', () => {
   })
 
   it('slides a pin off an area name, and never hides it for one', () => {
-    const label: MapObstacle = { x: -50, y: -10, width: 100, height: 20 }
+    const label: MapObstacle = {
+      x: -50,
+      y: -10,
+      width: 100,
+      height: 20,
+      anchorX: 0,
+      anchorY: 0,
+    }
     const onLabel = pin('Large', 0, 0)
     const layout = layoutPins([onLabel], [label], sliding, 1)
     expect(layout.reveal.get(onLabel.id)).toBe(0)
@@ -307,6 +319,143 @@ describe('layoutPins: sliding pins apart', () => {
     expect(fixed.reveal.get(onLabel.id)).toBe(0)
     const stuck = drawnAt([onLabel], fixed, 1)
     expect(countOverlaps(stuck, [label], 1, config).onObstacles).toBe(1)
+  })
+})
+
+describe('layoutPins: evening pins out', () => {
+  // An area 1000px wide whose two Large orgs sit together at its left end,
+  // with Small orgs (hidden until z = 4) tracing out the rest of it.
+  const area = () => [
+    pin('Large', 0, 0, 'Area', 'L1'),
+    pin('Large', 100, 0, 'Area', 'L2'),
+    ...[200, 400, 600, 800, 1000].map(x => pin('Small', x, 0, 'Area')),
+  ]
+  const spreading = { ...config, spreadStrength: 1 }
+
+  it('spreads the showing pins over the ground their area covers', () => {
+    const pins = area()
+    const layout = layoutPins(pins, [], spreading, 1)
+    const l1 = pinPositionAt(layout, pins[0].id, 1).x
+    const l2 = pinPositionAt(layout, pins[1].id, 1).x
+    // 100px apart at home; now sharing out the whole 1000px between them.
+    expect(l2 - l1).toBeGreaterThan(400)
+    expect(l1).toBeGreaterThanOrEqual(0)
+    expect(l2).toBeLessThanOrEqual(1000)
+  })
+
+  it('puts every pin back on its own spot once all are showing', () => {
+    const pins = area()
+    const layout = layoutPins(pins, [], spreading, 1)
+    for (const p of pins) {
+      const at = pinPositionAt(layout, p.id, 4)
+      expect(at.x).toBeCloseTo(p.x, 6)
+      expect(at.y).toBeCloseTo(p.y, 6)
+    }
+  })
+
+  it('moves pins part of the way at part strength', () => {
+    const pins = area()
+    const full = layoutPins(pins, [], spreading, 1)
+    const half = layoutPins(pins, [], { ...config, spreadStrength: 0.5 }, 1)
+    const moved = (l: PinLayout) => pinPositionAt(l, pins[1].id, 1).x - 100
+    expect(moved(half)).toBeCloseTo(moved(full) / 2, 0)
+  })
+
+  it('leaves a pin placed far from its area where it was put', () => {
+    const pins = [
+      ...area(),
+      pin('Small', 300, 0, 'Area'),
+      pin('Large', 9000, 0, 'Area', 'Stray'),
+    ]
+    const layout = layoutPins(pins, [], spreading, 1)
+    expect(pinPositionAt(layout, pins[8].id, 1)).toEqual({ x: 9000, y: 0 })
+    // And it does not drag the others toward it.
+    expect(pinPositionAt(layout, pins[1].id, 1).x).toBeLessThanOrEqual(1000)
+  })
+
+  it('leaves another area alone', () => {
+    const pins = [...area(), pin('Large', 5000, 0, 'Elsewhere')]
+    const layout = layoutPins(pins, [], spreading, 1)
+    expect(pinPositionAt(layout, pins[7].id, 1)).toEqual({ x: 5000, y: 0 })
+  })
+
+  it('does nothing at strength 0', () => {
+    const pins = area()
+    const layout = layoutPins(pins, [], config, 1)
+    expect(pinPositionAt(layout, pins[1].id, 1)).toEqual({ x: 100, y: 0 })
+  })
+})
+
+describe('labelMapScale', () => {
+  it("keeps today's size on the map in map mode", () => {
+    expect(labelMapScale(4, config, Infinity)).toBe(1)
+  })
+
+  it('keeps one size on screen in fixed mode', () => {
+    const fixed = { ...config, labelMode: 'fixed' as const, labelBoost: 1.2 }
+    // On screen = map scale times z.
+    expect(labelMapScale(0.5, fixed, Infinity) * 0.5).toBeCloseTo(1.2)
+    expect(labelMapScale(4, fixed, Infinity) * 4).toBeCloseTo(1.2)
+  })
+
+  it('grows the way pins grow in pins mode', () => {
+    const likePins = { ...config, labelMode: 'pins' as const }
+    expect(labelMapScale(1, likePins, Infinity)).toBe(1)
+    expect(labelMapScale(4, likePins, Infinity) * 4).toBeCloseTo(2)
+  })
+
+  it('never draws a name bigger on the map than the cap', () => {
+    const fixed = { ...config, labelMode: 'fixed' as const }
+    // Zoomed far out, one size on screen would be 10 times today's size on
+    // the map; the cap holds it, so from there it shrinks with the map.
+    expect(labelMapScale(0.1, fixed, 1.5)).toBe(1.5)
+    expect(labelMapScale(2, fixed, 1.5)).toBe(0.5)
+  })
+
+  it('resizes the obstacle about its anchor', () => {
+    // A name 100 wide anchored at its middle, shrunk to a quarter at z = 4:
+    // a pin 20px from the anchor is clear of it, where at full size it is on
+    // it.
+    const label: MapObstacle = {
+      x: -50,
+      y: -10,
+      width: 100,
+      height: 20,
+      anchorX: 0,
+      anchorY: 0,
+    }
+    const near = { ...pin('Large', 40, 0), halfWidth: 5, top: -5, bottom: 5 }
+    const fixed = { ...config, labelMode: 'fixed' as const }
+    expect(countOverlaps([near], [label], 4, config).onObstacles).toBe(1)
+    expect(countOverlaps([near], [label], 4, fixed).onObstacles).toBe(0)
+  })
+})
+
+describe('labelScaleCap', () => {
+  const name = (x: number): MapObstacle => ({
+    x: x - 50,
+    y: -10,
+    width: 100,
+    height: 20,
+    anchorX: x,
+    anchorY: 0,
+  })
+
+  it('is the size at which two names would touch', () => {
+    // 100 wide and 300 apart: they meet at three times the size, less the
+    // gap kept between them.
+    const cap = labelScaleCap([name(0), name(300)])
+    expect(cap).toBeGreaterThan(2.9)
+    expect(cap).toBeLessThan(3)
+  })
+
+  it("is never below today's size, even for names that already touch", () => {
+    expect(labelScaleCap([name(0), name(60)])).toBe(1)
+  })
+
+  it('tops out for names that are nowhere near each other', () => {
+    expect(labelScaleCap([name(0), name(100000)])).toBe(4)
+    expect(labelScaleCap([name(0)])).toBe(4)
   })
 })
 

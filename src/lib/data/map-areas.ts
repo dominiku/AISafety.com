@@ -135,6 +135,20 @@ function median(values: number[]): number {
 }
 
 /**
+ * Which pins sit far from the rest of their area on purpose: further from
+ * the area's middle than STRAY_PIN_FACTOR times the typical distance. True
+ * marks a stray. Works in any unit.
+ */
+export function strayPins(pins: { x: number; y: number }[]): boolean[] {
+  if (pins.length === 0) return []
+  const cx = median(pins.map(p => p.x))
+  const cy = median(pins.map(p => p.y))
+  const distances = pins.map(p => Math.hypot(p.x - cx, p.y - cy))
+  const limit = median(distances) * STRAY_PIN_FACTOR
+  return distances.map(d => d > limit)
+}
+
+/**
  * The box a search pick frames for an area, in grid units: the area's label
  * plus its pins (the ones whose FIRST category places them there). A few pins
  * sit far from their area on purpose; those strays are left out so one of
@@ -145,14 +159,8 @@ export function mapAreaBounds(
   area: MapArea,
   pins: { x: number; y: number }[]
 ): MapBounds {
-  let kept = pins
-  if (pins.length > 0) {
-    const cx = median(pins.map(p => p.x))
-    const cy = median(pins.map(p => p.y))
-    const distances = pins.map(p => Math.hypot(p.x - cx, p.y - cy))
-    const limit = median(distances) * STRAY_PIN_FACTOR
-    kept = pins.filter((_, i) => distances[i] <= limit)
-  }
+  const stray = strayPins(pins)
+  const kept = pins.filter((_, i) => !stray[i])
   const xs = [area.x, ...kept.map(p => p.x)]
   const ys = [area.y, ...kept.map(p => p.y)]
   return {

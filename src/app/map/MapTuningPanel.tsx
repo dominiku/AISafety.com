@@ -7,6 +7,7 @@
 import { useState, type RefObject } from 'react'
 import {
   DEFAULT_ZOOM_TIER_CONFIG,
+  type LabelMode,
   type ZoomTierConfig,
 } from '@/lib/data/map-zoom-tiers'
 import styles from './MapTuningPanel.module.css'
@@ -23,6 +24,8 @@ const TODAY_CONFIG: ZoomTierConfig = {
   smallZoom: 0,
   minPerArea: 0,
   mediumShare: 0,
+  spreadStrength: 0,
+  labelMode: 'map',
   avoidOverlaps: false,
 }
 
@@ -34,6 +37,8 @@ type SliderKey =
   | 'minPerArea'
   | 'mediumShare'
   | 'maxShift'
+  | 'spreadStrength'
+  | 'labelBoost'
 
 const SLIDERS: {
   key: SliderKey
@@ -99,6 +104,28 @@ const SLIDERS: {
     max: 160,
     step: 5,
   },
+  {
+    key: 'spreadStrength',
+    label: 'Evening pins out across their area',
+    hint: '0 = off, every pin on its own spot; 1 = fully evened out',
+    min: 0,
+    max: 1,
+    step: 0.1,
+  },
+  {
+    key: 'labelBoost',
+    label: 'Area name size',
+    hint: '1 = today at rest. Not used by "with the map". Capped zoomed out so names never touch',
+    min: 0.5,
+    max: 2,
+    step: 0.05,
+  },
+]
+
+const LABEL_MODES: { value: LabelMode; label: string }[] = [
+  { value: 'map', label: 'with the map (today)' },
+  { value: 'pins', label: 'the way pins grow' },
+  { value: 'fixed', label: 'not at all: one size on screen' },
 ]
 
 interface MapTuningPanelProps {
@@ -161,6 +188,23 @@ export default function MapTuningPanel({
             )}
           </label>
         ))}
+
+        <label className="flex flex-col gap-4px paragraph-xs color-white">
+          Area names grow when zooming:
+          <select
+            className="text-field"
+            value={config.labelMode}
+            onChange={e =>
+              onChange({ ...config, labelMode: e.target.value as LabelMode })
+            }
+          >
+            {LABEL_MODES.map(mode => (
+              <option key={mode.value} value={mode.value}>
+                {mode.label}
+              </option>
+            ))}
+          </select>
+        </label>
 
         <label className="flex items-center gap-8px paragraph-xs color-white">
           <input

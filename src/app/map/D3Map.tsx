@@ -23,6 +23,8 @@ import {
   DEFAULT_ZOOM_TIER_CONFIG,
   REFERENCE_SCREEN_SCALE,
   countOverlaps,
+  labelMapScale,
+  labelScaleCap,
   layoutPins,
   pinMapScale,
   pinPositionAt,
@@ -306,10 +308,20 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
     const finalPadX = basePadX * labelScale
     const finalPadY = basePadY * labelScale
 
-    // Each label's pill in map pixels, kept so a search pick can pulse it.
+    // Each label's group, the point it is drawn from, and its pill measured
+    // from that point: kept so a search pick can pulse it, and (PROTOTYPE zoom
+    // tiers) so a zoom can resize it and pins can slide off it.
     const areaPills = new Map<
       string,
-      { x: number; y: number; width: number; height: number }
+      {
+        group: d3.Selection<SVGGElement, unknown, null, undefined>
+        anchorX: number
+        anchorY: number
+        x: number
+        y: number
+        width: number
+        height: number
+      }
     >()
 
     // PROTOTYPE: with most pins hidden at the resting view, the count on an
@@ -358,8 +370,11 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
           .attr('ry', (bbox.height + finalPadY * 2) / 2)
           .attr('fill', 'rgba(27, 43, 62, 0.6)')
         areaPills.set(label, {
-          x: xPos + bbox.x - finalPadX,
-          y: yPos + bbox.y - finalPadY,
+          group: labelGroup,
+          anchorX: xPos,
+          anchorY: yPos,
+          x: bbox.x - finalPadX,
+          y: bbox.y - finalPadY,
           width: bbox.width + finalPadX * 2,
           height: bbox.height + finalPadY * 2,
         })
@@ -646,7 +661,15 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
     const zoomOf = (k: number) =>
       (k * screenScaleAtRest) / REFERENCE_SCREEN_SCALE
     // Pins slide off the area names; the names themselves never move.
-    const obstacles: MapObstacle[] = [...areaPills.values()]
+    const obstacles: MapObstacle[] = [...areaPills.values()].map(pill => ({
+      x: pill.anchorX + pill.x,
+      y: pill.anchorY + pill.y,
+      width: pill.width,
+      height: pill.height,
+      anchorX: pill.anchorX,
+      anchorY: pill.anchorY,
+    }))
+    const labelCap = labelScaleCap(obstacles)
     let layout: PinLayout | null = null
     // A pin picked from the search shows even if its tier is still hidden.
     let forcedPinId: string | null = null
@@ -658,6 +681,13 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
       const config = tierConfigRef.current
       const z = zoomOf(k)
       const s = pinMapScale(z, config)
+      const labelScale = labelMapScale(z, config, labelCap)
+      for (const pill of areaPills.values()) {
+        pill.group.attr(
+          'transform',
+          `translate(${pill.anchorX}, ${pill.anchorY}) scale(${labelScale})`
+        )
+      }
       // The pins on screen, where they are drawn, for the panel's readout.
       const showing: TierPin[] = []
       let largeHeldBack = 0
@@ -809,8 +839,9 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
         )
         const pill = areaPills.get(area.label)
         if (!pill) return
-        // The pulse is an outline that swells away from the label's pill.
-        const outline = svgGroup
+        // The pulse is an outline that swells away from the label's pill. It
+        // lives in the label's own group so it is resized along with it.
+        const outline = pill.group
           .append('rect')
           .attr('fill', 'none')
           .attr('stroke', 'var(--white)')

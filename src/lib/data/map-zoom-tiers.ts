@@ -2,11 +2,14 @@
 // they are drawn, and where. Zoomed out, only the major orgs show; zooming in
 // reveals the rest, the way place names appear on Google Maps. Pins that would
 // overlap slide apart, and slide home again as zooming in makes room.
-// Dependency-free so the rules can be unit tested.
+// Depends only on map-areas (itself dependency-free) so the rules can be unit
+// tested.
 //
 // "Zoom" here is z, not d3's k: z is screen pixels per map pixel, divided by
 // REFERENCE_SCREEN_SCALE. A desktop window at rest is z ≈ 1 and a phone at
 // rest is z ≈ 0.3, so one set of thresholds works on both.
+import { strayPins } from './map-areas'
+
 export const REFERENCE_SCREEN_SCALE = 0.5
 
 // The layout is worked out at a ladder of zoom levels from MIN_LEVEL_ZOOM up
@@ -22,6 +25,11 @@ const HOMING_SHARE = 0.6
 const HOMING_PULL = 0.15
 // Map pixels of clear space kept between two pins, and around an area name.
 const PIN_GAP = 2
+// Evening pins out: rounds of regrouping an area's pins around the ones
+// that are showing.
+const SPREAD_ROUNDS = 8
+
+export type LabelMode = 'map' | 'pins' | 'fixed'
 
 export interface ZoomTierConfig {
   /** Pin size at z = 1, as a multiple of the size the map draws today. */
@@ -49,6 +57,19 @@ export interface ZoomTierConfig {
   /** How far a pin may slide from its own spot, in map pixels (one grid
    *  square is about 41). 0 never moves a pin, only holds it back. */
   maxShift: number
+  /** Even the showing pins out across their area, so a zoomed-out map is not
+   *  clusters and gaps: 0 leaves every pin on its own spot, 1 moves each to
+   *  the middle of the stretch of its area it stands for. Needs
+   *  avoidOverlaps. With every pin showing, each stands only for itself, so
+   *  fully zoomed in nothing moves. */
+  spreadStrength: number
+  /** How an area's name changes size as the map zooms: 'map' grows it with
+   *  the map (today), 'pins' grows it the way pins grow, 'fixed' keeps it one
+   *  size on screen. */
+  labelMode: LabelMode
+  /** Size of an area's name at z = 1, as a multiple of its size today. Not
+   *  used by 'map', which is today's size by definition. */
+  labelBoost: number
   /** From this z on, every pin shows, overlapping or not. */
   showAllZoom: number
 }
@@ -64,6 +85,9 @@ export const DEFAULT_ZOOM_TIER_CONFIG: ZoomTierConfig = {
   mediumShare: 0.5,
   avoidOverlaps: true,
   maxShift: 60,
+  spreadStrength: 0.5,
+  labelMode: 'pins',
+  labelBoost: 1,
   showAllZoom: 6,
 }
 
@@ -86,12 +110,16 @@ export interface TierPin {
 }
 
 /** Something pins slide off but that never moves or hides a pin itself: an
- *  area's name. In map pixels; unlike a pin it keeps its size on the map. */
+ *  area's name. The box is in map pixels at today's size; it is resized with
+ *  the zoom (labelMapScale) about its anchor, the point the name is drawn
+ *  from. */
 export interface MapObstacle {
   x: number
   y: number
   width: number
   height: number
+  anchorX: number
+  anchorY: number
 }
 
 /** On-screen size of a pin at zoom z, as a multiple of its size today at
@@ -105,6 +133,52 @@ export function pinScreenScale(z: number, config: ZoomTierConfig): number {
  *  magnifies everything by z, so this divides that back out. */
 export function pinMapScale(z: number, config: ZoomTierConfig): number {
   return pinScreenScale(z, config) / z
+}
+
+/** The scale to draw an area's name at inside the zoomed map group, never
+ *  above `cap` (labelScaleCap): zoomed far out, a name that kept its size on
+ *  screen would outgrow the map under it and run into its neighbors, so from
+ *  there on it shrinks with the map, as names do today. */
+export function labelMapScale(
+  z: number,
+  config: ZoomTierConfig,
+  cap: number
+): number {
+  if (config.labelMode === 'map') return 1
+  const scale =
+    config.labelMode === 'fixed'
+      ? config.labelBoost / z
+      : (config.labelBoost * Math.pow(z, config.growthExponent)) / z
+  return Math.min(scale, cap)
+}
+
+// The cap is looked for between today's size (never go below it, even if two
+// names already touch) and this many times it.
+const MAX_LABEL_SCALE = 4
+
+/** The biggest the area names can be drawn, as a multiple of today's size on
+ *  the map, before any two of them touch. */
+export function labelScaleCap(obstacles: MapObstacle[]): number {
+  const touching = (scale: number): boolean => {
+    const boxes = obstacles.map(o => obstacleBox(o, scale))
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = 0; j < i; j++) {
+        const o = overlap(boxes[i], boxes[j], PIN_GAP)
+        if (o.x > 0 && o.y > 0) return true
+      }
+    }
+    return false
+  }
+  if (touching(1)) return 1
+  if (!touching(MAX_LABEL_SCALE)) return MAX_LABEL_SCALE
+  let lo = 1
+  let hi = MAX_LABEL_SCALE
+  for (let i = 0; i < 20; i++) {
+    const mid = (lo + hi) / 2
+    if (touching(mid)) hi = mid
+    else lo = mid
+  }
+  return lo
 }
 
 function scaleRank(scale: string | null): number {
@@ -138,12 +212,12 @@ function pinBox(pin: TierPin, x: number, y: number, s: number): Box {
   }
 }
 
-function obstacleBox(o: MapObstacle): Box {
+function obstacleBox(o: MapObstacle, scale: number): Box {
   return {
-    cx: o.x + o.width / 2,
-    cy: o.y + o.height / 2,
-    halfW: o.width / 2,
-    halfH: o.height / 2,
+    cx: o.anchorX + (o.x + o.width / 2 - o.anchorX) * scale,
+    cy: o.anchorY + (o.y + o.height / 2 - o.anchorY) * scale,
+    halfW: (o.width / 2) * scale,
+    halfH: (o.height / 2) * scale,
   }
 }
 
@@ -207,7 +281,8 @@ function zoomLevels(
  * pins are due from the focus zoom at the latest. Level by level
  * from fully zoomed in to fully zoomed out, the pins due at that level slide
  * apart (and off the obstacles) by up to maxShift, heavier for bigger orgs so
- * a Large pin moves least. A pin still overlapping a more important one after
+ * a Large pin moves least. With spreadStrength they first head for an evened
+ * out spot (spreadTargets) and slide from there. A pin still overlapping a more important one after
  * that is held back at that level and every level further out, so a pin never
  * disappears as z grows. At showAllZoom and beyond, everything shows.
  */
@@ -221,7 +296,9 @@ export function layoutPins(
   const ordered = [...pins].sort(byPriority)
   const n = ordered.length
   const levels = zoomLevels(config, restingZoom, focus)
-  const obstacleBoxes = obstacles.map(obstacleBox)
+  // Set per level: the names change size with the zoom.
+  let obstacleBoxes: Box[] = []
+  const labelCap = labelScaleCap(obstacles)
 
   const due = ordered.map(pin => {
     if (pin.area === null) return 0
@@ -260,7 +337,78 @@ export function layoutPins(
   let y = ordered.map(pin => pin.y)
   let shownFurtherIn: boolean[] = new Array(n).fill(true)
 
+  // An area's pins, less the ones placed far from it on purpose: those stay
+  // where they were put and do not pull the others toward them.
+  const indicesOfArea = new Map<string, number[]>()
+  ordered.forEach((pin, i) => {
+    if (pin.area === null) return
+    const list = indicesOfArea.get(pin.area) ?? []
+    list.push(i)
+    indicesOfArea.set(pin.area, list)
+  })
+  for (const [area, indices] of indicesOfArea) {
+    const stray = strayPins(indices.map(i => ordered[i]))
+    indicesOfArea.set(
+      area,
+      indices.filter((_, k) => !stray[k])
+    )
+  }
+
+  // Where each pin is heading before any sliding: its own spot, or with
+  // spreadStrength an evened-out one.
+  const tx = ordered.map(pin => pin.x)
+  const ty = ordered.map(pin => pin.y)
+
+  // The spots of ALL an area's pins, showing or not, trace out the ground the
+  // area covers. Each showing pin takes charge of the spots nearest to it
+  // and heads for the middle of them, a few rounds over (k-means, started
+  // from the pins' own spots so each stays in its own neighborhood). The
+  // showing pins end up evenly spread over the area, and on its ground.
+  const spreadTargets = (active: number[]): void => {
+    for (const i of active) {
+      tx[i] = ordered[i].x
+      ty[i] = ordered[i].y
+    }
+    if (config.spreadStrength <= 0) return
+    const showing = new Set(active)
+    for (const members of indicesOfArea.values()) {
+      const centers = members.filter(i => showing.has(i))
+      if (centers.length === 0 || centers.length === members.length) continue
+      const cx = centers.map(i => ordered[i].x)
+      const cy = centers.map(i => ordered[i].y)
+      for (let round = 0; round < SPREAD_ROUNDS; round++) {
+        const sumX = new Array(centers.length).fill(0)
+        const sumY = new Array(centers.length).fill(0)
+        const count = new Array(centers.length).fill(0)
+        for (const m of members) {
+          let nearest = 0
+          let best = Infinity
+          for (let c = 0; c < centers.length; c++) {
+            const d = Math.hypot(ordered[m].x - cx[c], ordered[m].y - cy[c])
+            if (d < best) {
+              best = d
+              nearest = c
+            }
+          }
+          sumX[nearest] += ordered[m].x
+          sumY[nearest] += ordered[m].y
+          count[nearest]++
+        }
+        for (let c = 0; c < centers.length; c++) {
+          if (count[c] === 0) continue
+          cx[c] = sumX[c] / count[c]
+          cy[c] = sumY[c] / count[c]
+        }
+      }
+      centers.forEach((i, c) => {
+        tx[i] = ordered[i].x + (cx[c] - ordered[i].x) * config.spreadStrength
+        ty[i] = ordered[i].y + (cy[c] - ordered[i].y) * config.spreadStrength
+      })
+    }
+  }
+
   const relax = (active: number[], s: number): void => {
+    spreadTargets(active)
     const reach = 2 * config.maxShift + PIN_GAP
     const pairs: [number, number][] = []
     for (let a = 0; a < active.length; a++) {
@@ -270,8 +418,8 @@ export function layoutPins(
         const pi = ordered[i]
         const pj = ordered[j]
         if (
-          Math.abs(pi.x - pj.x) < s * (pi.halfWidth + pj.halfWidth) + reach &&
-          Math.abs(pi.y - pj.y) <
+          Math.abs(tx[i] - tx[j]) < s * (pi.halfWidth + pj.halfWidth) + reach &&
+          Math.abs(ty[i] - ty[j]) <
             s * (pi.bottom - pi.top + pj.bottom - pj.top) + reach
         ) {
           pairs.push([i, j])
@@ -279,13 +427,14 @@ export function layoutPins(
       }
     }
 
-    const clampToHome = (i: number): void => {
-      const dx = x[i] - ordered[i].x
-      const dy = y[i] - ordered[i].y
+    // maxShift limits the slide from where the pin was heading.
+    const clampToTarget = (i: number): void => {
+      const dx = x[i] - tx[i]
+      const dy = y[i] - ty[i]
       const moved = Math.hypot(dx, dy)
       if (moved > config.maxShift) {
-        x[i] = ordered[i].x + (dx / moved) * config.maxShift
-        y[i] = ordered[i].y + (dy / moved) * config.maxShift
+        x[i] = tx[i] + (moved === 0 ? 0 : (dx / moved) * config.maxShift)
+        y[i] = ty[i] + (moved === 0 ? 0 : (dy / moved) * config.maxShift)
       }
     }
 
@@ -294,8 +443,8 @@ export function layoutPins(
       let pushed = false
       if (homing) {
         for (const i of active) {
-          x[i] += (ordered[i].x - x[i]) * HOMING_PULL
-          y[i] += (ordered[i].y - y[i]) * HOMING_PULL
+          x[i] += (tx[i] - x[i]) * HOMING_PULL
+          y[i] += (ty[i] - y[i]) * HOMING_PULL
         }
       }
       for (const [i, j] of pairs) {
@@ -328,7 +477,7 @@ export function layoutPins(
           a.cx = x[i]
           a.cy = y[i] + (s * (ordered[i].top + ordered[i].bottom)) / 2
         }
-        clampToHome(i)
+        clampToTarget(i)
       }
       // Settled: nothing is being drawn home and nothing needed a push.
       if (!homing && !pushed) break
@@ -338,6 +487,8 @@ export function layoutPins(
   for (let level = levels.length - 1; level >= 0; level--) {
     const z = levels[level]
     const s = pinMapScale(z, config)
+    const labelScale = labelMapScale(z, config, labelCap)
+    obstacleBoxes = obstacles.map(o => obstacleBox(o, labelScale))
     const everything = z >= config.showAllZoom
     let active: number[] = []
     for (let i = 0; i < n; i++) {
@@ -349,9 +500,14 @@ export function layoutPins(
       // from one level to the next.
       const startX = [...x]
       const startY = [...y]
-      if (config.maxShift > 0) relax(active, s)
+      const moves = config.maxShift > 0 || config.spreadStrength > 0
+      if (moves) relax(active, s)
 
-      if (!everything) {
+      // Hold back whatever still overlaps a more important pin, then settle
+      // again without it, so nothing is left pushed aside by (or evened out
+      // around) a pin that is not there. Settling again can move pins into
+      // each other afresh, so repeat until nothing more is held back.
+      while (!everything) {
         const kept: number[] = []
         for (const i of active) {
           const a = pinBox(ordered[i], x[i], y[i], s)
@@ -360,14 +516,12 @@ export function layoutPins(
           )
           if (!clash) kept.push(i)
         }
-        if (kept.length < active.length && config.maxShift > 0) {
-          // Settle again without the pins that were held back, so nothing is
-          // left pushed aside by a pin that is not there.
-          x = startX
-          y = startY
-          relax(kept, s)
-        }
+        if (kept.length === active.length) break
         active = kept
+        if (!moves) break
+        x = [...startX]
+        y = [...startY]
+        relax(active, s)
       }
     }
 
@@ -430,7 +584,8 @@ export function countOverlaps(
 ): { pairs: number; onObstacles: number } {
   const s = pinMapScale(z, config)
   const boxes = pins.map(pin => pinBox(pin, pin.x, pin.y, s))
-  const obstacleBoxes = obstacles.map(obstacleBox)
+  const labelScale = labelMapScale(z, config, labelScaleCap(obstacles))
+  const obstacleBoxes = obstacles.map(o => obstacleBox(o, labelScale))
   let pairs = 0
   let onObstacles = 0
   for (let i = 0; i < boxes.length; i++) {
