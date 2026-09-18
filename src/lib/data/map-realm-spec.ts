@@ -169,16 +169,16 @@ export const MAP_35_SPEC: RealmMapSpec = {
     'Forums and online communities': [28, 28.5],
     'Grassroots campaigns': [37.5, 12.5],
     'Professional advocacy and communication': [32.5, 12.5],
-    'Macrostrategy and forecasting': [36.5, 18.5],
-    'Policy research and think tanks': [49, 16],
-    'Governments and multi-stakeholder bodies': [41.5, 17],
-    'Standards, assurance and verification': [45.5, 21],
-    'Policy advocacy and lobbying': [54.5, 19.5],
-    'Conceptual and foundations research': [34.5, 28],
-    'Alignment and control': [37, 23.5],
-    'Interpretability and model understanding': [41.5, 28],
-    'Evaluations and threat research': [46, 25.5],
-    'Capabilities research': [51.5, 27.5],
+    'Macrostrategy and forecasting': [36.5, 19],
+    'Policy research and think tanks': [48.5, 18],
+    'Governments and multi-stakeholder bodies': [42.5, 15.2],
+    'Standards, assurance and verification': [43.5, 22],
+    'Policy advocacy and lobbying': [55, 19.5],
+    'Conceptual and foundations research': [35.5, 29],
+    'Alignment and control': [37, 24],
+    'Interpretability and model understanding': [42.5, 29],
+    'Evaluations and threat research': [47, 25.5],
+    'Capabilities research': [52, 28.5],
   },
   roads: [
     // In from the arrival harbour to the west gate of the castle town,
@@ -208,25 +208,27 @@ export const MAP_35_SPEC: RealmMapSpec = {
     // between the south coast and the border with Conceptual research.
     'Forums and online communities': { seed: [31.6, 30.5] },
   },
-  // Out from the castle town at leisure: one path east through Policy and
-  // strategy, one south-east through Technical research, each winding from
-  // one side of its realm to the other.
+  // Out from the castle town at leisure. Through Policy and strategy in one
+  // easy arc: up over Macrostrategy, by the Governments district to the
+  // north, through the think tanks and out to Lobbying on the east tip, with
+  // Standards beside the way, on the border with Evaluations. Through
+  // Technical research as in the sketch: down through Alignment and
+  // Conceptual research, up to Evaluations and down again to Capabilities,
+  // with Interpretability beside the way, on the south coast.
   trails: [
     [
       'Career support and placement',
       'Macrostrategy and forecasting',
       'Governments and multi-stakeholder bodies',
-      'Standards, assurance and verification',
       'Policy research and think tanks',
       'Policy advocacy and lobbying',
     ],
     [
       'Career support and placement',
-      'Conceptual and foundations research',
       'Alignment and control',
-      'Interpretability and model understanding',
-      'Capabilities research',
+      'Conceptual and foundations research',
       'Evaluations and threat research',
+      'Capabilities research',
     ],
   ],
   // From the corner of the castle town to the foot of the cove.
