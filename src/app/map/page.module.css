@@ -308,6 +308,29 @@
   transform: scale(1.2);
 }
 
+/* PROTOTYPE zoom tiers: pins fade as a zoom reveals or hides them. Hidden
+   pins also lose `visibility`, after the fade, so they can't be hovered,
+   clicked or tabbed to. */
+.map-container :global(.mapPin) {
+  transition: opacity 0.2s;
+}
+
+.map-container :global(.mapPinHidden) {
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 0.2s,
+    visibility 0s 0.2s;
+}
+
+/* PROTOTYPE tuning panel: beside the zoom controls, same z-index reasoning. */
+.map-tuning {
+  position: absolute;
+  top: 24px;
+  right: 88px;
+  z-index: 95;
+}
+
 /* Map wrapper for positioning controls */
 .map-wrapper {
   position: relative;
