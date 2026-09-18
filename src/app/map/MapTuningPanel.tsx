@@ -23,9 +23,11 @@ const TODAY_CONFIG: ZoomTierConfig = {
   mediumZoom: 0,
   smallZoom: 0,
   minPerArea: 0,
+  groundFill: 0,
   mediumShare: 0,
   spreadStrength: 0,
   labelMode: 'map',
+  subLabelZoom: 0,
   avoidOverlaps: false,
 }
 
@@ -35,7 +37,9 @@ type SliderKey =
   | 'mediumZoom'
   | 'smallZoom'
   | 'minPerArea'
+  | 'groundFill'
   | 'mediumShare'
+  | 'subLabelZoom'
   | 'maxShift'
   | 'spreadStrength'
   | 'labelBoost'
@@ -89,6 +93,14 @@ const SLIDERS: {
     step: 1,
   },
   {
+    key: 'groundFill',
+    label: 'Fill each area by its ground',
+    hint: 'share of an area its pins cover at rest, so big areas show more. 0 = off',
+    min: 0,
+    max: 1,
+    step: 0.05,
+  },
+  {
     key: 'mediumShare',
     label: 'Share of each area showing at the Medium zoom',
     hint: 'topped up from Small orgs; 0 = size tiers only',
@@ -110,6 +122,14 @@ const SLIDERS: {
     hint: '0 = off, every pin on its own spot; 1 = fully evened out',
     min: 0,
     max: 1,
+    step: 0.1,
+  },
+  {
+    key: 'subLabelZoom',
+    label: 'Sub-area names appear at zoom',
+    hint: 'a parent name (Research Range) gives way to its sub-areas. 0 = all names always',
+    min: 0,
+    max: 4,
     step: 0.1,
   },
   {

@@ -45,8 +45,17 @@ export interface ZoomTierConfig {
   mediumZoom: number
   smallZoom: number
   /** Each area's most important pins, this many, show from the start
-   *  whatever their size, so no area is empty zoomed out. */
+   *  whatever their size, so no area is empty zoomed out. Like every per-area
+   *  rule here it applies to every area a pin is in, at every depth of the
+   *  area tree. */
   minPerArea: number
+  /** Each area is also filled out, from its most important pins down, until
+   *  the pins showing at the resting view cover this share (0 to 1) of the
+   *  ground the area takes up, so a big area shows more than a small one
+   *  however many of its orgs are Large. 0 turns it off. Quiet pins are left
+   *  out. Unlike the other per-area rules this one is the innermost area's
+   *  only: sub-areas already tile their parent. */
+  groundFill: number
   /** The share of each area's pins (0 to 1) showing by mediumZoom, topped up
    *  from its Small orgs, so an area with few Medium orgs still fills in
    *  step by step and not all at once at smallZoom. */
@@ -70,6 +79,10 @@ export interface ZoomTierConfig {
   /** Size of an area's name at z = 1, as a multiple of its size today. Not
    *  used by 'map', which is today's size by definition. */
   labelBoost: number
+  /** The names of areas inside another area show from this z, and their
+   *  parent's name shows up to it, the way a country's name gives way to its
+   *  cities'. 0 shows every name at every zoom (today). */
+  subLabelZoom: number
   /** From this z on, every pin shows, overlapping or not. */
   showAllZoom: number
 }
@@ -82,12 +95,14 @@ export const DEFAULT_ZOOM_TIER_CONFIG: ZoomTierConfig = {
   mediumZoom: 1.8,
   smallZoom: 3,
   minPerArea: 3,
+  groundFill: 0.35,
   mediumShare: 0.5,
   avoidOverlaps: true,
   maxShift: 60,
   spreadStrength: 0.5,
   labelMode: 'pins',
   labelBoost: 1,
+  subLabelZoom: 0,
   showAllZoom: 6,
 }
 
@@ -99,9 +114,13 @@ export interface TierPin {
   /** 'Large' | 'Medium' | 'Small'; anything else ranks as Medium, the size
    *  the map draws it at. */
   scale: string | null
-  /** The area the pin is drawn in, or null for map furniture, which always
-   *  shows. */
-  area: string | null
+  /** The areas the pin is in, outermost first (['Research Range',
+   *  'Conceptual Cliffs']); one entry on a flat map. Empty for map furniture,
+   *  which always shows. */
+  regions: string[]
+  /** A quiet pin (one in the Gone Graveyard) is not used to fill an area out
+   *  by its ground. */
+  quiet?: boolean
   x: number
   y: number
   halfWidth: number
@@ -120,6 +139,22 @@ export interface MapObstacle {
   height: number
   anchorX: number
   anchorY: number
+  /** Where the name sits in the area tree: 0 for a top-level area. */
+  depth: number
+  /** Whether other areas sit inside this one. */
+  isParent: boolean
+}
+
+/** Whether an area's name shows at zoom z (see subLabelZoom). */
+export function labelShowsAt(
+  label: { depth: number; isParent: boolean },
+  z: number,
+  config: ZoomTierConfig
+): boolean {
+  if (config.subLabelZoom <= 0) return true
+  if (label.depth > 0 && z < config.subLabelZoom) return false
+  if (label.isParent && z >= config.subLabelZoom) return false
+  return true
 }
 
 /** On-screen size of a pin at zoom z, as a multiple of its size today at
@@ -244,6 +279,37 @@ export interface MapFocus {
   fromZoom: number
 }
 
+/** The ground a set of spots covers: the area of their convex hull. */
+function hullArea(points: { x: number; y: number }[]): number {
+  if (points.length < 3) return 0
+  const sorted = [...points].sort((a, b) => a.x - b.x || a.y - b.y)
+  const turn = (
+    o: { x: number; y: number },
+    a: { x: number; y: number },
+    b: { x: number; y: number }
+  ) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x)
+  const half = (pts: { x: number; y: number }[]) => {
+    const chain: { x: number; y: number }[] = []
+    for (const p of pts) {
+      while (
+        chain.length >= 2 &&
+        turn(chain[chain.length - 2], chain[chain.length - 1], p) <= 0
+      ) {
+        chain.pop()
+      }
+      chain.push(p)
+    }
+    return chain.slice(0, -1)
+  }
+  const hull = [...half(sorted), ...half([...sorted].reverse())]
+  let doubled = 0
+  for (let i = 0; i < hull.length; i++) {
+    const next = hull[(i + 1) % hull.length]
+    doubled += hull[i].x * next.y - next.x * hull[i].y
+  }
+  return Math.abs(doubled) / 2
+}
+
 export interface PinLayout {
   /** The zoom levels the layout was worked out at, zoomed-out first. */
   levels: number[]
@@ -275,6 +341,9 @@ function zoomLevels(
 /**
  * Where every pin sits and from which z it shows.
  *
+ * Areas form a tree and a pin is in every area on its path (regions), so each
+ * per-area rule below holds for a sub-area and for the area around it alike.
+ *
  * A pin is due from its size tier's threshold; each area's mediumShare most
  * important pins are due by mediumZoom; each area's minPerArea most
  * important pins, and map furniture, are due from the start. A focused area's
@@ -301,30 +370,64 @@ export function layoutPins(
   const labelCap = labelScaleCap(obstacles)
 
   const due = ordered.map(pin => {
-    if (pin.area === null) return 0
+    if (pin.regions.length === 0) return 0
     const rank = scaleRank(pin.scale)
     const tier =
       rank === 0 ? 0 : rank === 1 ? config.mediumZoom : config.smallZoom
-    return focus?.areas.includes(pin.area)
+    return focus?.areas.some(area => pin.regions.includes(area))
       ? Math.min(tier, focus.fromZoom)
       : tier
   })
-  const sizeOfArea = new Map<string, number>()
-  for (const pin of ordered) {
-    if (pin.area === null) continue
-    sizeOfArea.set(pin.area, (sizeOfArea.get(pin.area) ?? 0) + 1)
-  }
-  // `ordered` is most important first, so the first few of an area seen here
-  // are its most important.
-  const seenInArea = new Map<string, number>()
+
+  // Every area at every depth of the tree, with its pins most important
+  // first (the order `ordered` is in). A pin is in each area on its path.
+  const membersOf = new Map<string, number[]>()
   ordered.forEach((pin, i) => {
-    if (pin.area === null) return
-    const seen = seenInArea.get(pin.area) ?? 0
-    const byMedium = Math.ceil(config.mediumShare * sizeOfArea.get(pin.area)!)
-    if (seen < config.minPerArea) due[i] = 0
-    else if (seen < byMedium) due[i] = Math.min(due[i], config.mediumZoom)
-    seenInArea.set(pin.area, seen + 1)
+    for (const region of pin.regions) {
+      const list = membersOf.get(region) ?? []
+      list.push(i)
+      membersOf.set(region, list)
+    }
   })
+  // Pins placed far from their area on purpose are no part of its ground,
+  // and are left where they were put when the others are evened out.
+  const coreOf = new Map<string, number[]>()
+  for (const [region, members] of membersOf) {
+    const stray = strayPins(members.map(i => ordered[i]))
+    coreOf.set(
+      region,
+      members.filter((_, k) => !stray[k])
+    )
+  }
+
+  const restingScale = pinMapScale(restingZoom, config)
+  const footprint = (pin: TierPin) =>
+    2 * pin.halfWidth * restingScale * ((pin.bottom - pin.top) * restingScale)
+  for (const [region, members] of membersOf) {
+    const byMedium = Math.ceil(config.mediumShare * members.length)
+    members.forEach((i, seen) => {
+      if (seen < config.minPerArea) due[i] = 0
+      else if (seen < byMedium) due[i] = Math.min(due[i], config.mediumZoom)
+    })
+    if (config.groundFill <= 0) continue
+    // Ground is the innermost area's: sub-areas tile their parent, so filling
+    // the parent as well would fill them twice, and count the gaps between
+    // them as ground.
+    const own = (i: number) => ordered[i].regions.at(-1) === region
+    const ground = hullArea(
+      coreOf
+        .get(region)!
+        .filter(own)
+        .map(i => ordered[i])
+    )
+    let covered = 0
+    for (const i of members.filter(own)) {
+      if (covered >= config.groundFill * ground) break
+      if (ordered[i].quiet) continue
+      due[i] = 0
+      covered += footprint(ordered[i])
+    }
+  }
 
   // Heavier pins give way less when two are pushed apart.
   const weight = ordered.map(pin => 3 - scaleRank(pin.scale))
@@ -337,21 +440,12 @@ export function layoutPins(
   let y = ordered.map(pin => pin.y)
   let shownFurtherIn: boolean[] = new Array(n).fill(true)
 
-  // An area's pins, less the ones placed far from it on purpose: those stay
-  // where they were put and do not pull the others toward them.
+  // Evening out happens within the innermost area a pin is in: the ground a
+  // sub-area covers, not its parent's.
   const indicesOfArea = new Map<string, number[]>()
-  ordered.forEach((pin, i) => {
-    if (pin.area === null) return
-    const list = indicesOfArea.get(pin.area) ?? []
-    list.push(i)
-    indicesOfArea.set(pin.area, list)
-  })
-  for (const [area, indices] of indicesOfArea) {
-    const stray = strayPins(indices.map(i => ordered[i]))
-    indicesOfArea.set(
-      area,
-      indices.filter((_, k) => !stray[k])
-    )
+  for (const [region, core] of coreOf) {
+    const innermost = core.filter(i => ordered[i].regions.at(-1) === region)
+    if (innermost.length > 0) indicesOfArea.set(region, innermost)
   }
 
   // Where each pin is heading before any sliding: its own spot, or with
@@ -488,7 +582,9 @@ export function layoutPins(
     const z = levels[level]
     const s = pinMapScale(z, config)
     const labelScale = labelMapScale(z, config, labelCap)
-    obstacleBoxes = obstacles.map(o => obstacleBox(o, labelScale))
+    obstacleBoxes = obstacles
+      .filter(o => labelShowsAt(o, z, config))
+      .map(o => obstacleBox(o, labelScale))
     const everything = z >= config.showAllZoom
     let active: number[] = []
     for (let i = 0; i < n; i++) {
@@ -585,7 +681,9 @@ export function countOverlaps(
   const s = pinMapScale(z, config)
   const boxes = pins.map(pin => pinBox(pin, pin.x, pin.y, s))
   const labelScale = labelMapScale(z, config, labelScaleCap(obstacles))
-  const obstacleBoxes = obstacles.map(o => obstacleBox(o, labelScale))
+  const obstacleBoxes = obstacles
+    .filter(o => labelShowsAt(o, z, config))
+    .map(o => obstacleBox(o, labelScale))
   let pairs = 0
   let onObstacles = 0
   for (let i = 0; i < boxes.length; i++) {

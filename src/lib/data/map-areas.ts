@@ -27,6 +27,14 @@ export const MAP_AREA_BY_CATEGORY: Record<string, string> = {
 
 export interface MapArea {
   label: string
+  // The area this one sits inside, if any. Areas form a tree: 'Research
+  // Range' holds the three research areas today, and a future 'Media' area
+  // could hold podcasts, newsletters and forums the same way. An org belongs
+  // to the area of its first category and, through it, to every area above.
+  parent?: string
+  // A quiet area is not filled out on the zoomed-out map: the Gone Graveyard
+  // should not put closed orgs on the front page just because it has room.
+  quiet?: boolean
   // Where the label is drawn, in map grid units (the same units as a pin's
   // x and y). It marks the label only: an area has no outline of its own.
   x: number
@@ -34,9 +42,9 @@ export interface MapArea {
 }
 
 // Every area label drawn on /map. 'Research Range' has no category of its
-// own: it is the umbrella over the research areas (UMBRELLA_AREAS below).
+// own: it is the parent of the three research areas.
 export const MAP_AREAS: MapArea[] = [
-  { label: 'Conceptual Cliffs', x: 46, y: 5.5 },
+  { label: 'Conceptual Cliffs', parent: 'Research Range', x: 46, y: 5.5 },
   { label: 'Resource Rock', x: 3.5, y: 8 },
   { label: 'Support Shoreline', x: 13, y: 6.7 },
   { label: 'Newsletter Nook', x: 15.8, y: 14.5 },
@@ -46,14 +54,14 @@ export const MAP_AREAS: MapArea[] = [
   { label: 'Strategy Summit', x: 34.8, y: 19 },
   { label: 'Research Range', x: 45.3, y: 15.9 },
   { label: 'Training Town', x: 22.2, y: 17.2 },
-  { label: 'Empirical Escarpment', x: 53.5, y: 16 },
+  { label: 'Empirical Escarpment', parent: 'Research Range', x: 53.5, y: 16 },
   { label: 'Podcast Port', x: 9.5, y: 20.5 },
   { label: 'Blog Beach', x: 15, y: 25.8 },
   { label: 'Forecasting Falls', x: 39.2, y: 23.8 },
   { label: 'Career Castle', x: 30.5, y: 29.4 },
   { label: 'Advocacy Anchorage', x: 8, y: 31 },
-  { label: 'Capabilities Cove', x: 45, y: 27.1 },
-  { label: 'Gone Graveyard', x: 56, y: 30 },
+  { label: 'Capabilities Cove', parent: 'Research Range', x: 45, y: 27.1 },
+  { label: 'Gone Graveyard', quiet: true, x: 56, y: 30 },
 ]
 
 const CATEGORY_BY_MAP_AREA: Record<string, string> = Object.fromEntries(
@@ -69,21 +77,54 @@ export function categoryForMapArea(label: string): string | null {
   return CATEGORY_BY_MAP_AREA[label] ?? null
 }
 
-// An umbrella area spans other areas: its listings are theirs, and a search
-// pick frames them all together.
-const UMBRELLA_AREAS: Record<string, string[]> = {
-  'Research Range': [
-    'Conceptual research',
-    'Empirical research',
-    'Capabilities research',
-  ],
-}
-
-/** Every category whose pins count as inside an area: its own, or for an
- *  umbrella area the categories it spans. */
+/** Every category whose pins count as inside an area: its own, and those of
+ *  every area inside it. A parent's listings are its children's, and a search
+ *  pick frames them all together. */
 export function categoriesForMapArea(label: string): string[] {
   const own = categoryForMapArea(label)
-  return own ? [own] : (UMBRELLA_AREAS[label] ?? [])
+  const inside = MAP_AREAS.filter(area => area.parent === label).flatMap(area =>
+    categoriesForMapArea(area.label)
+  )
+  return own ? [own, ...inside] : inside
+}
+
+function mapAreaNamed(label: string): MapArea {
+  const area = MAP_AREAS.find(a => a.label === label)
+  if (!area) throw new Error(`[map-areas] No area named "${label}"`)
+  return area
+}
+
+/** How deep an area sits in the tree: 0 for a top-level area. */
+export function mapAreaDepth(label: string): number {
+  const { parent } = mapAreaNamed(label)
+  return parent ? mapAreaDepth(parent) + 1 : 0
+}
+
+/** Whether other areas sit inside this one. */
+export function mapAreaHasChildren(label: string): boolean {
+  return MAP_AREAS.some(area => area.parent === label)
+}
+
+/** The areas an org of this category belongs to, outermost first:
+ *  'Conceptual research' is in ['Research Range', 'Conceptual Cliffs'].
+ *  Empty for a category with no area. */
+export function mapAreaPath(category: string): string[] {
+  const label = MAP_AREA_BY_CATEGORY[category]
+  if (!label) return []
+  const path: string[] = []
+  for (
+    let area: MapArea | null = mapAreaNamed(label);
+    area;
+    area = area.parent ? mapAreaNamed(area.parent) : null
+  ) {
+    path.unshift(area.label)
+  }
+  return path
+}
+
+/** Whether an org of this category sits in a quiet area, at any depth. */
+export function isInQuietMapArea(category: string): boolean {
+  return mapAreaPath(category).some(label => mapAreaNamed(label).quiet === true)
 }
 
 // Words people type for an area that neither its name nor its category holds.

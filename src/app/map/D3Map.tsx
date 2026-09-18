@@ -15,7 +15,11 @@ import { MAP_BACKGROUND_URL } from '@/lib/map-images'
 import {
   MAP_AREAS,
   categoriesForMapArea,
+  isInQuietMapArea,
   mapAreaBounds,
+  mapAreaDepth,
+  mapAreaHasChildren,
+  mapAreaPath,
   primaryCategory,
   type MapArea,
 } from '@/lib/data/map-areas'
@@ -25,6 +29,7 @@ import {
   countOverlaps,
   labelMapScale,
   labelScaleCap,
+  labelShowsAt,
   layoutPins,
   pinMapScale,
   pinPositionAt,
@@ -321,6 +326,8 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
         y: number
         width: number
         height: number
+        depth: number
+        isParent: boolean
       }
     >()
 
@@ -342,6 +349,7 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
 
       const labelGroup = svgGroup
         .append('g')
+        .attr('class', 'mapFade')
         .attr('transform', `translate(${xPos}, ${yPos})`)
         .style('user-select', 'none')
         .style('pointer-events', 'none')
@@ -373,6 +381,8 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
           group: labelGroup,
           anchorX: xPos,
           anchorY: yPos,
+          depth: mapAreaDepth(label),
+          isParent: mapAreaHasChildren(label),
           x: bbox.x - finalPadX,
           y: bbox.y - finalPadY,
           width: bbox.width + finalPadX * 2,
@@ -404,7 +414,7 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
       // Create item group with translate, then link inside (matching Webflow structure)
       const itemGroup = svgGroup
         .append('g')
-        .attr('class', 'mapPin')
+        .attr('class', 'mapFade')
         .attr('transform', `translate(${xPos}, ${yPos})`)
       // QA: Items with no real link (e.g. "Last updated") should render
       // on the map but not be clickable
@@ -583,8 +593,12 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
             id: org.id,
             title: org.title,
             scale: org.scale,
-            // Map furniture (Merch, Last updated) belongs to no area.
-            area: org.isMagic ? null : primaryCategory(org.category),
+            // Every area the pin is in, outermost first. Map furniture
+            // (Merch, Last updated) belongs to none.
+            regions: org.isMagic
+              ? []
+              : mapAreaPath(primaryCategory(org.category) ?? ''),
+            quiet: isInQuietMapArea(primaryCategory(org.category) ?? ''),
             x: xPos,
             y: yPos,
             halfWidth: bridgeW / 2,
@@ -668,6 +682,8 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
       height: pill.height,
       anchorX: pill.anchorX,
       anchorY: pill.anchorY,
+      depth: pill.depth,
+      isParent: pill.isParent,
     }))
     const labelCap = labelScaleCap(obstacles)
     let layout: PinLayout | null = null
@@ -683,10 +699,12 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
       const s = pinMapScale(z, config)
       const labelScale = labelMapScale(z, config, labelCap)
       for (const pill of areaPills.values()) {
-        pill.group.attr(
-          'transform',
-          `translate(${pill.anchorX}, ${pill.anchorY}) scale(${labelScale})`
-        )
+        pill.group
+          .attr(
+            'transform',
+            `translate(${pill.anchorX}, ${pill.anchorY}) scale(${labelScale})`
+          )
+          .classed('mapFadeHidden', !labelShowsAt(pill, z, config))
       }
       // The pins on screen, where they are drawn, for the panel's readout.
       const showing: TierPin[] = []
@@ -698,7 +716,7 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
         else if (tier.scale === 'Large') largeHeldBack++
         group
           .attr('transform', `translate(${at.x}, ${at.y}) scale(${s})`)
-          .classed('mapPinHidden', !revealed && tier.id !== forcedPinId)
+          .classed('mapFadeHidden', !revealed && tier.id !== forcedPinId)
       }
       if (tierReadoutRef.current) {
         const { pairs, onObstacles } = countOverlaps(
@@ -821,11 +839,11 @@ export default function D3Map({ orgs, suggestEntryUrl }: D3MapProps) {
         // other. Any that still cannot fit at the framing zoom pull the view
         // in to the zoom where they can.
         measureScreenScale()
-        focus = { areas: categories, fromZoom: zoomOf(fitK) * FOCUS_MARGIN }
+        focus = { areas: [area.label], fromZoom: zoomOf(fitK) * FOCUS_MARGIN }
         applyTiers()
         let revealZ = 0
         for (const { tier } of pins) {
-          if (tier.area !== null && categories.includes(tier.area)) {
+          if (tier.regions.includes(area.label)) {
             revealZ = Math.max(revealZ, layout?.reveal.get(tier.id) ?? 0)
           }
         }

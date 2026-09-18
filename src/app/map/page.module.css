@@ -308,14 +308,14 @@
   transform: scale(1.2);
 }
 
-/* PROTOTYPE zoom tiers: pins fade as a zoom reveals or hides them. Hidden
-   pins also lose `visibility`, after the fade, so they can't be hovered,
-   clicked or tabbed to. */
-.map-container :global(.mapPin) {
+/* PROTOTYPE zoom tiers: pins and area names fade as a zoom reveals or hides
+   them. Hidden ones also lose `visibility`, after the fade, so a hidden pin
+   can't be hovered, clicked or tabbed to. */
+.map-container :global(.mapFade) {
   transition: opacity 0.2s;
 }
 
-.map-container :global(.mapPinHidden) {
+.map-container :global(.mapFadeHidden) {
   opacity: 0;
   visibility: hidden;
   transition:
