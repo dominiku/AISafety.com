@@ -313,7 +313,12 @@ export default function D3Map({
         realmBackdrop,
         GRID_SIZE,
         MAP_WIDTH,
-        MAP_HEIGHT
+        MAP_HEIGHT,
+        orgs.flatMap(org =>
+          org.x === null || org.y === null
+            ? []
+            : [{ x: org.x, y: org.y, furniture: org.isMagic === true }]
+        )
       )
     } else if (realmBackdrop) {
       drawRealmBackdrop(
