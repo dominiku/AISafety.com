@@ -188,6 +188,27 @@ export default function MapTuningPanel({
       >
         <p ref={readoutRef} className="paragraph-xs color-white" />
 
+        {/* Stacked: side by side they don't fit the panel's width. */}
+        <div className="flex flex-col gap-8px">
+          <button
+            type="button"
+            className="button-primary"
+            onClick={() => {
+              onChange(DEFAULT_ZOOM_TIER_CONFIG)
+              onShowAreaCounts(true)
+            }}
+          >
+            Reset to recommended
+          </button>
+          <button
+            type="button"
+            className="button-secondary"
+            onClick={() => onChange(TODAY_CONFIG)}
+          >
+            Compare: today&rsquo;s map
+          </button>
+        </div>
+
         {SLIDERS.map(({ key, label, hint, min, max, step }) => (
           <label key={key} className="flex flex-col gap-4px">
             <span className="paragraph-xs color-white">
@@ -247,23 +268,6 @@ export default function MapTuningPanel({
           />
           Show org counts on area labels
         </label>
-
-        <div className="flex gap-8px">
-          <button
-            type="button"
-            className="button-secondary"
-            onClick={() => onChange(DEFAULT_ZOOM_TIER_CONFIG)}
-          >
-            Prototype
-          </button>
-          <button
-            type="button"
-            className="button-secondary"
-            onClick={() => onChange(TODAY_CONFIG)}
-          >
-            Today&rsquo;s map
-          </button>
-        </div>
 
         <p className={`${styles.settings} paragraph-xs color-teal-300`}>
           {JSON.stringify(config)}
