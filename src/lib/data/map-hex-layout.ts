@@ -2,17 +2,21 @@
 // logos to a laid-out board.
 //
 // The tile map (map-hex-spec.ts) says which tile is which district's, and in
-// what order a district takes its tiles up. Here each district's logos are
-// put into fixed spots on its tiles, the first tile first, and a district
-// uses only as many tiles as its logos need. A listed tile nobody needs yet
-// is planned growth: it is sea while the sea can reach it, and bare land if
-// it is landlocked.
+// what order a district takes its tiles up. A district is one plateau: all
+// its tiles stand at the district's height and run into each other with no
+// border between them, so a district is told from its neighbors by its step
+// up or down, its rim and its tone. Here each district's logos are put into
+// fixed spots on that plateau, and a district uses only as many tiles as its
+// logos need. A listed tile nobody needs yet is planned growth: it is sea
+// while the sea can reach it, and bare land if it is landlocked.
 //
-// Logos are upright circles on a squashed tile, so their spots are worked out
-// on the tile's top as it is drawn: a fine fixed lattice over the top, tried
-// from the back of the tile forward, the largest logos first. A spot has to keep clear
-// of the tile's rim, of a taller tile standing in front, of the road or river
-// crossing the tile, and of the landmark standing on it.
+// Logos are upright circles on squashed tiles, so their spots are worked out
+// on the tiles' tops as they are drawn: a fine fixed lattice over each top,
+// tried tile by tile in the district's order and on each tile from the back
+// forward, the largest logos first. A logo may stand across the join of two
+// tiles of its district. A spot has to keep clear of the district's edge, of
+// a taller tile standing in front, of the road or river crossing the tile,
+// and of the landmark standing on it.
 //
 // Roads and rivers run tile to tile through the middle of the side two tiles
 // share, bending through the middle of each tile. Where one steps down a side
@@ -30,7 +34,6 @@ import {
   hexKey,
   hexNeighbor,
   hexSideMiddle,
-  insetConvex,
   insideConvex,
   parseHexGrid,
   projectPoint,
@@ -47,6 +50,9 @@ export interface HexDistrictSpec {
   // The District and Realm field values.
   district: string
   realm: string
+  // Levels above the sea every tile of the district stands at; halves are
+  // fine.
+  height: number
 }
 
 // A tile that is no district's: water inside the coast (a cove), or scenery
@@ -55,6 +61,8 @@ export interface HexFeatureSpec {
   code: string
   kind: 'water' | 'scenery'
   realm?: string
+  // Levels above the sea; 0 for water.
+  height: number
 }
 
 export interface HexLandmarkSpec {
@@ -85,7 +93,6 @@ export interface HexPathSpec {
 export interface HexMapSpec {
   view: HexView
   tiles: string
-  heights: string
   districts: HexDistrictSpec[]
   features: HexFeatureSpec[]
   landmarks: HexLandmarkSpec[]
@@ -127,6 +134,8 @@ export type HexTileState =
   | 'scenery'
 
 export interface HexLaidTile extends HexGridTile {
+  // Levels above the sea as drawn: 0 for sea, whatever is planned there.
+  height: number
   state: HexTileState
   district: string | null
   realm: string | null
@@ -136,6 +145,10 @@ export interface HexLaidTile extends HexGridTile {
   // NE), at the tile's height.
   center: Point
   top: Point[]
+  // Which of its sides (SE, S, SW, NW, N, NE, as the corners of `top` run)
+  // are the edge of its district: the other sides join tiles of the same
+  // district and carry no border.
+  edges: boolean[]
   landmark: (HexLandmarkSpec & { x: number; y: number }) | null
 }
 
@@ -174,6 +187,8 @@ export interface HexLayout {
   districtAt: (x: number, y: number) => string | null
 }
 
+type PlannedTile = HexGridTile & { height: number }
+
 interface Circle {
   x: number
   y: number
@@ -190,6 +205,8 @@ interface Ellipse {
 export const MOAT_RING = 0.76
 
 const CURVE_STEPS = 8
+// Map grid units: how finely a plateau's spare depth is measured.
+const CENTERING_STEP = 0.4
 
 // From a, bending through the control point, to b.
 function bend(a: Point, control: Point, b: Point): Point[] {
@@ -205,82 +222,126 @@ function bend(a: Point, control: Point, b: Point): Point[] {
   return points
 }
 
-/**
- * Spots for the circles, in the order given, on a fixed lattice over the
- * convex `room`, from its back edge forward.
- * Returns a spot or null for each circle. `placed` is added to.
- */
-export function packCircles(
-  room: Point[],
-  radii: number[],
-  placed: Circle[],
-  keepOff: {
-    lines: { points: Point[]; halfWidth: number }[]
-    areas: Ellipse[]
-  },
+// The sides of a tile in the order the corners of its top run.
+const SIDES: HexDirection[] = ['SE', 'S', 'SW', 'NW', 'N', 'NE']
+
+interface Plateau {
+  // The tiles logos may stand on, in the district's order.
+  tiles: { top: Point[]; center: Point }[]
+  // The edge of the plateau, and how far a logo's rim keeps from each
+  // stretch of it.
+  edge: { a: Point; b: Point; clear: number }[]
+  lines: { points: Point[]; halfWidth: number }[]
+  areas: Ellipse[]
+}
+
+// A plateau's lattice of spots, in the order they are tried, each with the
+// clear ground it has whatever else is placed: the largest circle that could
+// stand there.
+interface PlateauSpots {
+  spots: { at: Point; room: number }[]
+  back: number
+  areas: Ellipse[]
+}
+
+// Spots are a fixed lattice over each tile, tried from the back of the
+// plateau forward and in each row from its middle out.
+function plateauSpots(
+  plateau: Plateau,
   { gap, step }: HexPackOptions
-): (Point | null)[] {
-  if (room.length < 3) return radii.map(() => null)
-  const xs = room.map(p => p[0])
-  const ys = room.map(p => p[1])
-  const middle: Point = [
-    (Math.min(...xs) + Math.max(...xs)) / 2,
-    (Math.min(...ys) + Math.max(...ys)) / 2,
-  ]
-  const spots: Point[] = []
-  const across = Math.ceil((Math.max(...xs) - Math.min(...xs)) / 2 / step)
-  const deep = Math.ceil((Math.max(...ys) - Math.min(...ys)) / 2 / step)
-  for (let i = -across; i <= across; i++) {
-    for (let j = -deep; j <= deep; j++) {
-      const spot: Point = [middle[0] + i * step, middle[1] + j * step]
-      if (insideConvex(spot, room)) spots.push(spot)
+): PlateauSpots {
+  const found: Point[] = []
+  for (const { top, center } of plateau.tiles) {
+    const xs = top.map(p => p[0])
+    const ys = top.map(p => p[1])
+    const across = Math.ceil((Math.max(...xs) - Math.min(...xs)) / 2 / step)
+    const deep = Math.ceil((Math.max(...ys) - Math.min(...ys)) / 2 / step)
+    for (let i = -across; i <= across; i++) {
+      for (let j = -deep; j <= deep; j++) {
+        const spot: Point = [center[0] + i * step, center[1] + j * step]
+        if (insideConvex(spot, top)) found.push(spot)
+      }
     }
   }
-  // From the back of the tile forward, and in each row from the middle out:
-  // the largest logos, which come first, stand in a row at the back, and the
-  // smaller ones in rows in front of them, where none hides another.
-  const aside = (p: Point) => Math.abs(p[0] - middle[0])
-  spots.sort((a, b) => a[1] - b[1] || aside(a) - aside(b) || a[0] - b[0])
-
-  const fits = (spot: Point, radius: number) => {
-    for (let n = 0; n < room.length; n++) {
-      if (
-        distanceToStretch(spot, room[n], room[(n + 1) % room.length]) < radius
-      ) {
-        return false
-      }
+  if (found.length === 0) return { spots: [], back: 0, areas: plateau.areas }
+  const middle =
+    plateau.tiles.reduce((sum, tile) => sum + tile.center[0], 0) /
+    plateau.tiles.length
+  const back = Math.min(...found.map(p => p[1]))
+  const aside = (p: Point) => Math.abs(p[0] - middle)
+  // Rows a whisker apart count as one row (tiles of odd and even columns
+  // have lattices half a step out of line).
+  const rowOf = (p: Point) => Math.round((p[1] - back) / (step / 2))
+  found.sort(
+    (a, b) => rowOf(a) - rowOf(b) || aside(a) - aside(b) || a[0] - b[0]
+  )
+  const roomAt = (spot: Point) => {
+    let room = Infinity
+    for (const { a, b, clear } of plateau.edge) {
+      room = Math.min(room, distanceToStretch(spot, a, b) - clear)
     }
-    for (const other of placed) {
-      if (
-        Math.hypot(other.x - spot[0], other.y - spot[1]) <
-        other.radius + radius + gap
-      ) {
-        return false
-      }
-    }
-    for (const { points, halfWidth } of keepOff.lines) {
+    for (const { points, halfWidth } of plateau.lines) {
       for (let n = 0; n + 1 < points.length; n++) {
+        room = Math.min(
+          room,
+          distanceToStretch(spot, points[n], points[n + 1]) -
+            halfWidth -
+            gap / 2
+        )
+      }
+    }
+    return room
+  }
+  return {
+    spots: found.map(at => ({ at, room: roomAt(at) })).filter(s => s.room > 0),
+    back,
+    areas: plateau.areas,
+  }
+}
+
+/**
+ * A spot for each circle, in the order given (the largest first, so they
+ * stand at the back and the smaller ones in rows in front of them, where
+ * none hides another), or null where there is no room. `skip` leaves that
+ * much of the back of the plateau empty.
+ */
+function packPlateau(
+  { spots, back, areas }: PlateauSpots,
+  radii: number[],
+  { gap }: HexPackOptions,
+  skip = 0
+): (Point | null)[] {
+  const smallest = Math.min(...radii)
+  // Spots still worth trying: a placed circle rules out those it covers.
+  let open = spots.filter(
+    spot => spot.at[1] >= back + skip && spot.room >= smallest
+  )
+  const placed: Circle[] = []
+  return radii.map(radius => {
+    const spot = open.find(({ at, room }) => {
+      if (room < radius) return false
+      for (const other of placed) {
         if (
-          distanceToStretch(spot, points[n], points[n + 1]) <
-          radius + halfWidth + gap / 2
+          Math.hypot(other.x - at[0], other.y - at[1]) <
+          other.radius + radius + gap
         ) {
           return false
         }
       }
-    }
-    for (const area of keepOff.areas) {
-      const dx = (spot[0] - area.x) / (area.rx + radius)
-      const dy = (spot[1] - area.y) / (area.ry + radius)
-      if (dx * dx + dy * dy < 1) return false
-    }
-    return true
-  }
-
-  return radii.map(radius => {
-    const spot = spots.find(candidate => fits(candidate, radius))
+      for (const area of areas) {
+        const dx = (at[0] - area.x) / (area.rx + radius)
+        const dy = (at[1] - area.y) / (area.ry + radius)
+        if (dx * dx + dy * dy < 1) return false
+      }
+      return true
+    })
     if (!spot) return null
-    placed.push({ x: spot[0], y: spot[1], radius })
-    return spot
+    const [x, y] = spot.at
+    placed.push({ x, y, radius })
+    open = open.filter(
+      ({ at }) => Math.hypot(at[0] - x, at[1] - y) >= radius + smallest + gap
+    )
+    return spot.at
   })
 }
 
@@ -290,34 +351,30 @@ export function layoutHexMap(
   packing: HexPackOptions = DEFAULT_HEX_PACKING
 ): HexLayout {
   const { view } = spec
-  const grid = parseHexGrid(spec.tiles, spec.heights)
+  const districtByCode = new Map(spec.districts.map(d => [d.code, d]))
+  const featureByCode = new Map(spec.features.map(f => [f.code, f]))
+  for (const { code, height } of spec.districts) {
+    if (!(height > 0)) {
+      throw new Error(`Hex map: district "${code}" needs a height above 0`)
+    }
+  }
+  // Every tile at the height planned for it: its district's or feature's.
+  const grid: PlannedTile[] = parseHexGrid(spec.tiles).map(tile => {
+    if (tile.code === null) return { ...tile, height: 0 }
+    const of = districtByCode.get(tile.code) ?? featureByCode.get(tile.code)
+    if (!of) {
+      throw new Error(
+        `Hex map: tile "${tile.ref}" is of no district or feature in the spec`
+      )
+    }
+    return { ...tile, height: of.height }
+  })
   const columns = Math.max(...grid.map(tile => tile.col)) + 1
   const rows = Math.max(...grid.map(tile => tile.row)) + 1
   const byCell = new Map(grid.map(tile => [hexKey(tile), tile]))
   const byRef = new Map(
     grid.flatMap(tile => (tile.ref ? [[tile.ref, tile] as const] : []))
   )
-  const districtByCode = new Map(spec.districts.map(d => [d.code, d]))
-  const featureByCode = new Map(spec.features.map(f => [f.code, f]))
-
-  for (const tile of grid) {
-    if (
-      tile.code !== null &&
-      !districtByCode.has(tile.code) &&
-      !featureByCode.has(tile.code)
-    ) {
-      throw new Error(
-        `Hex map: tile "${tile.ref}" is of no district or feature in the spec`
-      )
-    }
-    if (
-      tile.code !== null &&
-      tile.height === 0 &&
-      districtByCode.has(tile.code)
-    ) {
-      throw new Error(`Hex map: land tile "${tile.ref}" has height 0`)
-    }
-  }
   const needTile = (ref: string, forWhat: string) => {
     const tile = byRef.get(ref)
     if (!tile)
@@ -328,7 +385,7 @@ export function layoutHexMap(
   }
 
   // Each district's tiles in its order, which must run 1, 2, 3...
-  const tilesOf = new Map<string, HexGridTile[]>()
+  const tilesOf = new Map<string, PlannedTile[]>()
   for (const { code } of spec.districts) {
     const own = grid
       .filter(tile => tile.code === code)
@@ -343,10 +400,10 @@ export function layoutHexMap(
     tilesOf.set(code, own)
   }
 
-  const flatCenter = (tile: HexGridTile) => hexCenter(tile, view.size)
-  const drawn = (tile: HexGridTile, point: Point) =>
+  const flatCenter = (tile: PlannedTile) => hexCenter(tile, view.size)
+  const drawn = (tile: PlannedTile, point: Point) =>
     projectPoint(view, point, tile.height)
-  const topOf = (tile: HexGridTile, scale = 1) =>
+  const topOf = (tile: PlannedTile, scale = 1) =>
     hexCorners(tile, view.size, scale).map(corner => drawn(tile, corner))
 
   // Landmarks, standing at the back of their tile or alone in its middle.
@@ -383,7 +440,7 @@ export function layoutHexMap(
       })
     }
     const sides = tiles.map((tile, n) => {
-      const side = (other: HexGridTile | undefined) => {
+      const side = (other: PlannedTile | undefined) => {
         if (!other) return null
         const direction = directionBetween(tile, other)
         if (!direction) {
@@ -445,31 +502,58 @@ export function layoutHexMap(
     })
   }
 
-  // Where logos may stand on a tile: its top, in from the rim, and in from
-  // whatever a taller tile in front covers.
-  const roomOf = (tile: HexGridTile) => {
-    const sides: HexDirection[] = ['SE', 'S', 'SW', 'NW', 'N', 'NE']
-    return insetConvex(
-      topOf(tile),
-      sides.map(side => {
-        const neighbor = byCell.get(hexKey(hexNeighbor(tile, side)))
-        const covered =
-          neighbor && SOUTH_FACING.includes(side)
-            ? Math.max(0, neighbor.height - tile.height) * view.lift
-            : 0
-        return packing.margin + covered
-      })
-    )
-  }
-
-  // Each district's logos onto its tiles: the largest first, each on the
-  // first of the district's tiles that has room.
+  // Each district's logos onto its plateau: the first of its tiles, then the
+  // first two, and so on until all its logos have room. A landmark's own
+  // tile is part of the district but no logo stands on it.
   const positions = new Map<string, { x: number; y: number }>()
   const unplaced: string[] = []
   const used = new Set<string>()
   const districtByName = new Map(spec.districts.map(d => [d.district, d]))
   for (const logo of logos) {
     if (!districtByName.has(logo.district)) unplaced.push(logo.id)
+  }
+  const plateauOf = (tiles: PlannedTile[]): Plateau => {
+    const open = tiles.filter(
+      tile => landmarkOn.get(tile.ref!)?.logos !== 'none'
+    )
+    const within = new Set(open.map(tile => hexKey(tile)))
+    return {
+      tiles: open.map(tile => ({
+        top: topOf(tile),
+        center: drawn(tile, flatCenter(tile)),
+      })),
+      edge: open.flatMap(tile => {
+        const top = topOf(tile)
+        return SIDES.flatMap((side, n) => {
+          const neighbor = byCell.get(hexKey(hexNeighbor(tile, side)))
+          if (neighbor && within.has(hexKey(neighbor))) return []
+          // A taller tile standing in front covers the ground behind it.
+          const covered =
+            neighbor && SOUTH_FACING.includes(side)
+              ? Math.max(0, neighbor.height - tile.height) * view.lift
+              : 0
+          return [
+            { a: top[n], b: top[(n + 1) % 6], clear: packing.margin + covered },
+          ]
+        })
+      }),
+      lines: pieces
+        .filter(piece => open.some(tile => tile.ref === piece.tile))
+        .map(piece => ({ points: piece.points, halfWidth: piece.width / 2 })),
+      areas: open.flatMap(tile => {
+        const landmark = landmarkOn.get(tile.ref!)
+        return landmark
+          ? [
+              {
+                x: landmark.x,
+                y: landmark.y + landmark.height * 0.22,
+                rx: landmark.width * 0.42,
+                ry: landmark.height * 0.26,
+              },
+            ]
+          : []
+      }),
+    }
   }
   for (const { code, district } of spec.districts) {
     const own = logos
@@ -480,64 +564,46 @@ export function layoutHexMap(
           a.name.localeCompare(b.name) ||
           a.id.localeCompare(b.id)
       )
+    if (own.length === 0) continue
     const tiles = tilesOf.get(code)!
-    const state = tiles.map(tile => {
-      const landmark = landmarkOn.get(tile.ref!)
-      return {
-        tile,
-        open: landmark?.logos !== 'none',
-        room: roomOf(tile),
-        placed: [] as Circle[],
-        keepOff: {
-          lines: pieces
-            .filter(piece => piece.tile === tile.ref)
-            .map(piece => ({
-              points: piece.points,
-              halfWidth: piece.width / 2,
-            })),
-          areas: landmark
-            ? [
-                {
-                  x: landmark.x,
-                  y: landmark.y + landmark.height * 0.22,
-                  rx: landmark.width * 0.42,
-                  ry: landmark.height * 0.26,
-                },
-              ]
-            : [],
-        },
+    const radii = own.map(logo => logo.radius)
+    const whole = (found: (Point | null)[]) =>
+      found.every(spot => spot !== null)
+    let spots: (Point | null)[] = own.map(() => null)
+    let taken = 0
+    for (let count = 1; count <= tiles.length; count++) {
+      taken = count
+      spots = packPlateau(
+        plateauSpots(plateauOf(tiles.slice(0, count)), packing),
+        radii,
+        packing
+      )
+      if (whole(spots)) break
+    }
+    // With room to spare, the logos stand in the middle of the plateau's
+    // depth, not all at its back: find how much of the back could be left
+    // empty, and leave half of that.
+    if (whole(spots)) {
+      const plateau = plateauSpots(plateauOf(tiles.slice(0, taken)), packing)
+      let spare = 0
+      while (
+        whole(packPlateau(plateau, radii, packing, spare + CENTERING_STEP))
+      ) {
+        spare += CENTERING_STEP
       }
-    })
-    let last = -1
-    for (const logo of own) {
-      let at: Point | null = null
-      for (let n = 0; n < state.length && !at; n++) {
-        if (!state[n].open) continue
-        ;[at] = packCircles(
-          state[n].room,
-          [logo.radius],
-          state[n].placed,
-          state[n].keepOff,
-          packing
-        )
-        if (at) last = Math.max(last, n)
-      }
+      if (spare > 0) spots = packPlateau(plateau, radii, packing, spare / 2)
+    }
+    own.forEach((logo, n) => {
+      const at = spots[n]
       if (at) positions.set(logo.id, { x: at[0], y: at[1] })
       else unplaced.push(logo.id)
-    }
-    // Every tile up to the last one needed is land, a landmark's own tile
-    // among them.
-    tiles.forEach((tile, n) => {
-      const alone = landmarkOn.get(tile.ref!)?.logos === 'none'
-      if (n <= last || (alone && own.length > 0 && n <= last + 1)) {
-        used.add(tile.ref!)
-      }
     })
+    tiles.slice(0, taken).forEach(tile => used.add(tile.ref!))
   }
 
   // The sea comes in from the edge of the map over open sea and over planned
   // growth nobody needs yet.
-  const floods = (tile: HexGridTile) =>
+  const floods = (tile: PlannedTile) =>
     tile.code === null ||
     (districtByCode.has(tile.code) && !used.has(tile.ref!))
   const flooded = new Set<string>()
@@ -591,10 +657,26 @@ export function layoutHexMap(
         : 0,
       center: drawn(laid, flatCenter(tile)),
       top: topOf(laid),
+      edges: [],
       landmark:
         state === 'sea' ? null : (landmarkOn.get(tile.ref ?? '') ?? null),
     }
   })
+
+  // A side is the edge of its district unless the tile across it is land of
+  // the same district.
+  const laidByCell = new Map(tiles.map(tile => [hexKey(tile), tile]))
+  for (const tile of tiles) {
+    tile.edges = SIDES.map(side => {
+      const neighbor = laidByCell.get(hexKey(hexNeighbor(tile, side)))
+      return !(
+        neighbor &&
+        neighbor.state !== 'sea' &&
+        tile.district !== null &&
+        neighbor.district === tile.district
+      )
+    })
+  }
 
   // The nearest tile is looked at first: it covers the ones behind it.
   const frontToBack = [...tiles].reverse()

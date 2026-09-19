@@ -15,8 +15,12 @@
 // the inland ones outward to the coast, and the island grows at its edges.
 // Lower-case tokens (cv1, mt1) are features, not districts: see FEATURES.
 //
-// The second block gives each tile's height in levels: 0 sea, 1 low ground
-// (the delta, the beaches), 2 ordinary land, 3 and up hills and mountains.
+// HEIGHTS belong to districts, not to tiles: a district is one plateau, all
+// its tiles at one height and with no border between them, so districts are
+// told apart by the step between them, their rim and their tone. Give
+// neighboring districts different heights. In levels: 1 is low ground (the
+// delta, the beaches), 2 to 3 ordinary land, 3.5 and up the mountains; halves
+// are fine. The river may never run uphill.
 //
 // The arrangement follows Rob's second sketch (see map-realm-spec.ts): the
 // castle (Career support) in the very middle, and one realm across each of
@@ -34,26 +38,13 @@ import { QUIET_REALM } from './map-realms'
 const TILES = `
 # 0    1    2    3    4    5    6    7    8    9    10   11   12
   ..   Fo6  Ne8  Ne7  ..   ..   ..   ..   Go2  Th5  ..   ..   ..
-  Fo4  Fo2  Ne5  Ne4  Ne6  Gr2  ..   Pa2  Go1  Th2  Th4  Lo3  ..
-  Fo3  Fo1  Ne3  Ne2  Fr2  Gr1  cv1  Pa1  Ma3  Th1  Th3  Lo2  ..
+  Fo4  Fo2  Ne5  Ne4  Ne6  Gr2  ..   Pa2  Go1  Th2  Th3  Th4  ..
+  Fo3  Fo1  Ne3  Ne2  Fr2  Gr1  cv1  Pa1  Ma3  Th1  Lo2  Lo3  ..
   Fo5  Fb1  Fb2  Pp1  Ne1  Fr1  cv2  Ma1  Ma2  St1  Lo1  mt1  ..
-  ..   In2  In1  Pp2  Tp1  Ca2  Ca1  Al1  Al2  Ev1  Ev2  Cp1  Cp2
-  ..   ..   Tp4  Tp3  Tp2  Ca3  Gm1  Gm3  Al3  Co1  Co2  Ip1  ..
-  Gy1  ..   Tp5  Op1  Op2  Hu1  Gm2  Gm4  Vc1  Co3  Co4  ..   ..
-  Gy2  Gy3  ..   ..   To1  To2  Gm5  Gm6  Vc2  ..   ..   ..   ..
-`
-
-// prettier-ignore
-const HEIGHTS = `
-# 0    1    2    3    4    5    6    7    8    9    10   11   12
-  0    1    1    1    0    0    0    0    2    2    0    0    0
-  1    1    1    1    1    1    0    1    2    2    2    2    0
-  1    1    1    1    1    1    0    1    3    2    2    2    0
-  1    2    2    2    1    1    0    2    2    2    2    6    0
-  0    2    2    2    2    2    2    2    3    3    4    4    3
-  0    0    2    2    2    2    1    1    3    3    4    3    0
-  1    0    2    1    1    1    1    1    1    3    3    0    0
-  1    1    0    0    1    1    1    1    1    0    0    0    0
+  ..   In2  In1  Pp2  Tp1  Ca2  Ca1  Al1  Al2  Al3  Ev1  Cp1  Cp2
+  ..   ..   Tp4  Tp3  Tp2  Ca3  Gm1  Gm3  Al4  Co1  Ev2  Ip1  ..
+  Gy1  ..   Tp5  Op1  Op2  Hu1  Gm2  Gm4  Vc1  Co2  Co3  ..   ..
+  Gy2  Gy3  ..   ..   To1  To2  Gm5  Gm6  Vc2  ..   Co4  ..   ..
 `
 
 export const MAP_35_HEX_SPEC: HexMapSpec = {
@@ -61,41 +52,40 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
   // grid units (the map is 60 wide).
   view: { size: 2.85, squash: 0.66, lift: 0.42, origin: [4.35, 2.9] },
   tiles: TILES,
-  heights: HEIGHTS,
   // prettier-ignore
   districts: [
-    { code: 'Fo', district: 'Foundational and explanatory', realm: 'Media and discourse' },
-    { code: 'Ne', district: 'News and commentary', realm: 'Media and discourse' },
-    { code: 'Fr', district: 'Forums and online communities', realm: 'Media and discourse' },
-    { code: 'Gr', district: 'Grassroots campaigns', realm: 'Advocacy and public engagement' },
-    { code: 'Pa', district: 'Professional advocacy and communication', realm: 'Advocacy and public engagement' },
-    { code: 'Fb', district: 'Field-building and local groups', realm: 'Talent pipeline' },
-    { code: 'In', district: 'Introductory learning', realm: 'Talent pipeline' },
-    { code: 'Pp', district: 'Policy and governance programs', realm: 'Talent pipeline' },
-    { code: 'Tp', district: 'Technical research programs', realm: 'Talent pipeline' },
-    { code: 'Ca', district: 'Career support and placement', realm: 'Talent pipeline' },
-    { code: 'Op', district: 'Operations and services', realm: 'Field infrastructure' },
-    { code: 'Hu', district: 'Hubs and coworking', realm: 'Field infrastructure' },
-    { code: 'To', district: 'Tools, databases and research infrastructure', realm: 'Field infrastructure' },
-    { code: 'Gm', district: 'Grantmakers and donor advisory', realm: 'Field infrastructure' },
-    { code: 'Vc', district: 'Venture capital and incubators', realm: 'Field infrastructure' },
-    { code: 'Go', district: 'Governments and multi-stakeholder bodies', realm: 'Policy and strategy' },
-    { code: 'Ma', district: 'Macrostrategy and forecasting', realm: 'Policy and strategy' },
-    { code: 'Th', district: 'Policy research and think tanks', realm: 'Policy and strategy' },
-    { code: 'St', district: 'Standards, assurance and verification', realm: 'Policy and strategy' },
-    { code: 'Lo', district: 'Policy advocacy and lobbying', realm: 'Policy and strategy' },
-    { code: 'Al', district: 'Alignment and control', realm: 'Technical research' },
-    { code: 'Ev', district: 'Evaluations and threat research', realm: 'Technical research' },
-    { code: 'Co', district: 'Conceptual and foundations research', realm: 'Technical research' },
-    { code: 'Ip', district: 'Interpretability and model understanding', realm: 'Technical research' },
-    { code: 'Cp', district: 'Capabilities research', realm: 'Technical research' },
-    { code: 'Gy', district: QUIET_REALM, realm: QUIET_REALM },
+    { code: 'Fo', district: 'Foundational and explanatory', realm: 'Media and discourse', height: 1 },
+    { code: 'Ne', district: 'News and commentary', realm: 'Media and discourse', height: 1.5 },
+    { code: 'Fr', district: 'Forums and online communities', realm: 'Media and discourse', height: 2 },
+    { code: 'Gr', district: 'Grassroots campaigns', realm: 'Advocacy and public engagement', height: 1 },
+    { code: 'Pa', district: 'Professional advocacy and communication', realm: 'Advocacy and public engagement', height: 1.5 },
+    { code: 'Fb', district: 'Field-building and local groups', realm: 'Talent pipeline', height: 1 },
+    { code: 'In', district: 'Introductory learning', realm: 'Talent pipeline', height: 1.5 },
+    { code: 'Pp', district: 'Policy and governance programs', realm: 'Talent pipeline', height: 2 },
+    { code: 'Tp', district: 'Technical research programs', realm: 'Talent pipeline', height: 2.5 },
+    { code: 'Ca', district: 'Career support and placement', realm: 'Talent pipeline', height: 3 },
+    { code: 'Op', district: 'Operations and services', realm: 'Field infrastructure', height: 1.5 },
+    { code: 'Hu', district: 'Hubs and coworking', realm: 'Field infrastructure', height: 1 },
+    { code: 'To', district: 'Tools, databases and research infrastructure', realm: 'Field infrastructure', height: 0.5 },
+    { code: 'Gm', district: 'Grantmakers and donor advisory', realm: 'Field infrastructure', height: 1.5 },
+    { code: 'Vc', district: 'Venture capital and incubators', realm: 'Field infrastructure', height: 1 },
+    { code: 'Go', district: 'Governments and multi-stakeholder bodies', realm: 'Policy and strategy', height: 2 },
+    { code: 'Ma', district: 'Macrostrategy and forecasting', realm: 'Policy and strategy', height: 3 },
+    { code: 'Th', district: 'Policy research and think tanks', realm: 'Policy and strategy', height: 2.5 },
+    { code: 'St', district: 'Standards, assurance and verification', realm: 'Policy and strategy', height: 2 },
+    { code: 'Lo', district: 'Policy advocacy and lobbying', realm: 'Policy and strategy', height: 1.5 },
+    { code: 'Al', district: 'Alignment and control', realm: 'Technical research', height: 3.5 },
+    { code: 'Ev', district: 'Evaluations and threat research', realm: 'Technical research', height: 4.5 },
+    { code: 'Co', district: 'Conceptual and foundations research', realm: 'Technical research', height: 4 },
+    { code: 'Ip', district: 'Interpretability and model understanding', realm: 'Technical research', height: 3.5 },
+    { code: 'Cp', district: 'Capabilities research', realm: 'Technical research', height: 5 },
+    { code: 'Gy', district: QUIET_REALM, realm: QUIET_REALM, height: 1 },
   ],
   features: [
     // The cove: water inside the coast, between the two arms of Advocacy.
-    { code: 'cv', kind: 'water' },
+    { code: 'cv', kind: 'water', height: 0 },
     // The high peak the river rises on.
-    { code: 'mt', kind: 'scenery', realm: 'Technical research' },
+    { code: 'mt', kind: 'scenery', realm: 'Technical research', height: 6 },
   ],
   // prettier-ignore
   landmarks: [
@@ -123,12 +113,13 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
       enter: 'SW',
     },
     // The river: down from the high peak in the east (it falls toward the
-    // viewer on its first steps), through the research country, round the
+    // viewer off the peak and again off the Evaluations plateau), through the
+    // research country, round the
     // castle as its moat, and out through Media.
     {
       kind: 'river',
       width: 0.46,
-      tiles: ['mt1', 'Ev2', 'Ev1', 'Al2', 'Al1', 'Ca1', 'Fr1', 'Ne1', 'Ne2'],
+      tiles: ['mt1', 'Ev1', 'Al3', 'Al2', 'Al1', 'Ca1', 'Fr1', 'Ne1', 'Ne2'],
     },
     // The delta: the river parts again and again on its way to the sea.
     { kind: 'river', width: 0.3, tiles: ['Ne2', 'Ne3', 'Fo2'], exit: 'NW' },

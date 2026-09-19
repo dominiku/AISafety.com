@@ -8,7 +8,7 @@
 // board toward the viewer, who looks from the south, and lifts a tile by its
 // height.
 //
-// Also here: reading the hand-editable tile map (parseHexGrid), two blocks of
+// Also here: reading the hand-editable tile map (parseHexGrid), a block of
 // text with one token per tile, laid out the way the tiles lie.
 //
 // Dependency-free, so it can be unit tested.
@@ -170,64 +170,34 @@ export interface HexGridTile extends HexCell {
   code: string | null
   // The number of the name: the tile's place in its district's order.
   order: number | null
-  // Levels above the sea; 0 for open sea.
-  height: number
 }
 
 const SEA_TOKEN = '..'
 
-function gridRows(text: string, what: string): string[][] {
-  const rows = text
+/**
+ * Reads the tile map: one token per tile ("..": open sea, or letters and a
+ * number such as "Gm2"), in rows of the same length. Lines starting with #
+ * are notes. Anything malformed throws, so a slip of the hand is caught when
+ * the map is built.
+ */
+export function parseHexGrid(tiles: string): HexGridTile[] {
+  const rows = tiles
     .split('\n')
     .map(line => line.trim())
     .filter(line => line !== '' && !line.startsWith('#'))
     .map(line => line.split(/\s+/))
-  if (rows.length === 0) throw new Error(`Hex map: the ${what} block is empty`)
-  const width = rows[0].length
-  rows.forEach((row, n) => {
-    if (row.length !== width) {
-      throw new Error(
-        `Hex map: row ${n} of the ${what} block has ${row.length} tiles, the first row has ${width}`
-      )
-    }
-  })
-  return rows
-}
-
-/**
- * Reads the tile map: `tiles` has one token per tile ("..": open sea, or
- * letters and a number such as "Gm2"), `heights` one whole number per tile, in
- * rows of the same length. Lines starting with # are notes. Anything malformed
- * throws, so a slip of the hand is caught when the map is built.
- */
-export function parseHexGrid(tiles: string, heights: string): HexGridTile[] {
-  const tokens = gridRows(tiles, 'tiles')
-  const levels = gridRows(heights, 'heights')
-  if (
-    tokens.length !== levels.length ||
-    tokens[0].length !== levels[0].length
-  ) {
-    throw new Error(
-      `Hex map: the tiles block is ${tokens[0].length} by ${tokens.length}, the heights block ${levels[0].length} by ${levels.length}`
-    )
-  }
+  if (rows.length === 0) throw new Error('Hex map: the tile map is empty')
   const seen = new Set<string>()
   const grid: HexGridTile[] = []
-  tokens.forEach((line, row) => {
+  rows.forEach((line, row) => {
+    if (line.length !== rows[0].length) {
+      throw new Error(
+        `Hex map: row ${row} of the tile map has ${line.length} tiles, the first row has ${rows[0].length}`
+      )
+    }
     line.forEach((token, col) => {
-      const height = Number(levels[row][col])
-      if (!Number.isInteger(height) || height < 0) {
-        throw new Error(
-          `Hex map: height "${levels[row][col]}" at column ${col}, row ${row} is not a whole number`
-        )
-      }
       if (token === SEA_TOKEN) {
-        if (height !== 0) {
-          throw new Error(
-            `Hex map: open sea at column ${col}, row ${row} has height ${height}`
-          )
-        }
-        grid.push({ col, row, ref: null, code: null, order: null, height: 0 })
+        grid.push({ col, row, ref: null, code: null, order: null })
         return
       }
       const match = /^([A-Za-z]+)(\d+)$/.exec(token)
@@ -246,7 +216,6 @@ export function parseHexGrid(tiles: string, heights: string): HexGridTile[] {
         ref: token,
         code: match[1],
         order: Number(match[2]),
-        height,
       })
     })
   })

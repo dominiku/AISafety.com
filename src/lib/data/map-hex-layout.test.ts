@@ -6,9 +6,10 @@ import {
   type HexMapSpec,
 } from './map-hex-layout'
 import { MAP_35_HEX_ISLETS, MAP_35_HEX_SPEC } from './map-hex-spec'
+import { HEX_DIRECTIONS, hexNeighbor } from './map-hex'
 
-// A little island: Alpha runs west to east with its third tile on the coast,
-// Beta lies south of it with a landlocked second tile, and a cove.
+// A little island: Alpha, the higher, runs west to east along the north with
+// its third tile on the coast; Beta lies south of it; and a cove.
 const SPEC: HexMapSpec = {
   view: { size: 3, squash: 0.6, lift: 0.4, origin: [5, 5] },
   tiles: `
@@ -18,18 +19,11 @@ const SPEC: HexMapSpec = {
     ..   Bb4  Bb5  Bb6  ..   ..
     ..   ..   ..   ..   ..   ..
   `,
-  heights: `
-    0 0 0 0 0 0
-    0 3 2 2 0 0
-    0 2 1 1 0 0
-    0 1 1 1 0 0
-    0 0 0 0 0 0
-  `,
   districts: [
-    { code: 'Aa', district: 'Alpha', realm: 'North' },
-    { code: 'Bb', district: 'Beta', realm: 'South' },
+    { code: 'Aa', district: 'Alpha', realm: 'North', height: 3 },
+    { code: 'Bb', district: 'Beta', realm: 'South', height: 2 },
   ],
-  features: [{ code: 'cv', kind: 'water' }],
+  features: [{ code: 'cv', kind: 'water', height: 0 }],
   landmarks: [],
   paths: [],
 }
@@ -71,13 +65,6 @@ describe('layoutHexMap', () => {
         ..   Aa4  Bb2  Aa5  ..
         ..   Aa6  Bb1  Aa7  ..
         ..   ..   ..   ..   ..
-      `,
-      heights: `
-        0 0 0 0 0
-        0 2 2 2 0
-        0 2 2 2 0
-        0 2 2 2 0
-        0 0 0 0 0
       `,
     }
     const layout = layoutHexMap(spec, [
@@ -133,8 +120,10 @@ describe('layoutHexMap', () => {
       ...SPEC,
       paths: [{ kind: 'road', width: 0.6, tiles: ['Aa2', 'Aa3'], enter: 'NW' }],
     }
-    const all = logos('Alpha', 12)
+    // Enough logos to need all three of Alpha's tiles.
+    const all = logos('Alpha', 18)
     const layout = layoutHexMap(spec, all)
+    expect(layout.unplaced).toEqual([])
     const [first, second] = layout.pieces
     expect(first.tile).toBe('Aa2')
     // Where the first piece ends is where the second begins: the two tiles
@@ -190,7 +179,7 @@ describe('layoutHexMap', () => {
     })
     expect(() => layoutHexMap(withPath(['Aa1', 'Aa3']), [])).toThrow(/touch/)
     expect(() => layoutHexMap(withPath(['Aa1', 'Zz9']), [])).toThrow(/Zz9/)
-    expect(() => layoutHexMap(withPath(['Aa2', 'Aa1'], 'river'), [])).toThrow(
+    expect(() => layoutHexMap(withPath(['Bb1', 'Aa1'], 'river'), [])).toThrow(
       /uphill/
     )
     expect(() =>
@@ -266,17 +255,10 @@ describe('the Map 3.5 hex map', () => {
   it('has one realm across each of the castle’s six sides', () => {
     const layout = layoutHexMap(MAP_35_HEX_SPEC, everywhere)
     const castle = layout.tiles.find(tile => tile.ref === 'Ca1')!
-    const around = layout.tiles.filter(
-      tile =>
-        tile !== castle &&
-        Math.abs(tile.col - castle.col) <= 1 &&
-        Math.abs(tile.row - castle.row) <= 1 &&
-        Math.hypot(
-          tile.center[0] - castle.center[0],
-          (tile.center[1] - castle.center[1]) / layout.view.squash
-        ) <
-          layout.view.size * 2
-    )
+    const around = HEX_DIRECTIONS.map(direction => {
+      const { col, row } = hexNeighbor(castle, direction)
+      return layout.tiles.find(tile => tile.col === col && tile.row === row)!
+    })
     expect(around).toHaveLength(6)
     const realms = new Set(
       around.map(tile => (tile.state === 'water' ? 'cove' : tile.realm))

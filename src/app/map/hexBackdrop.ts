@@ -1,8 +1,9 @@
 // PROTOTYPE Map 3.5, "Hex work" view: the board of hexagonal tiles laid out
 // by map-hex-layout.ts, drawn as a strategy board game seen from the south.
-// Each tile is a slab in the classic map's palette: a top, with a darker rim
-// round a lighter plate, and a darker face under each of its three sides that
-// look toward the viewer. Tiles stand at different heights and are drawn from
+// Each tile is a slab in the classic map's palette: a top, and a darker face
+// under each of its three sides that look toward the viewer. A district is
+// one plateau: its tiles stand at one height and run into each other, and a
+// darker rim runs round the district, not round each tile. Tiles stand at different heights and are drawn from
 // the back of the board to the front, so a nearer, taller tile covers what is
 // behind it.
 //
@@ -64,8 +65,8 @@ const QUIET_THEME: RealmTheme = {
 // than the other two (the light comes from the west).
 const RIM_SHADE = 0.2
 const FACE_SHADE = 0.16
-// Share of the tile the lighter plate takes.
-const PLATE = 0.88
+// Map grid units the rim reaches in from the edge of a district.
+const RIM_WIDTH = 0.3
 // Map grid units: the bright lip along the top of a face, and the dark foot
 // where it meets the sea.
 const FACE_LIP = 0.1
@@ -197,7 +198,11 @@ export function hexBackdropMarkup(
     top: Point[],
     level: number,
     tone: string,
-    cliff: RealmTheme['cliff']
+    cliff: RealmTheme['cliff'],
+    // Which sides (from corner n to corner n + 1) carry the darker rim, and
+    // the clip that keeps it on the top.
+    edges: boolean[],
+    clip: string
   ) => {
     const drop = level * view.lift
     // Corners run E, SE, SW, W, NW, NE: the faces are E-SE, SE-SW and SW-W.
@@ -221,20 +226,23 @@ export function hexBackdropMarkup(
         )
       }
     })
-    const middle: Point = [
-      top.reduce((sum, p) => sum + p[0], 0) / top.length,
-      top.reduce((sum, p) => sum + p[1], 0) / top.length,
-    ]
-    const plate = top.map(
-      ([x, y]): Point => [
-        middle[0] + (x - middle[0]) * PLATE,
-        middle[1] + (y - middle[1]) * PLATE,
-      ]
-    )
     out.push(
-      `<path d="${outline(top)}" fill="${tone}" stroke="${tone}" stroke-width="1"/>`,
-      `<path d="${outline(top)}${outline(plate)}" fill="${LINE}" fill-opacity="${RIM_SHADE}" fill-rule="evenodd"/>`
+      `<path d="${outline(top)}" fill="${tone}" stroke="${tone}" stroke-width="1"/>`
     )
+    // The rim: a darker band just inside the sides that are the edge of the
+    // tile's district. Tiles of one district run into each other without
+    // one. Drawn as one wide line along those sides, the outer half clipped
+    // away; round ends close the band where it turns onto the next tile.
+    const rim = edges
+      .flatMap((edge, n) =>
+        edge ? [`M${px(top[n])}L${px(top[(n + 1) % top.length])}`] : []
+      )
+      .join('')
+    if (rim) {
+      out.push(
+        `<g clip-path="url(#${clip})" opacity="${RIM_SHADE}"><path d="${rim}" fill="none" stroke="${LINE}" stroke-width="${(RIM_WIDTH * 2 * g).toFixed(1)}" stroke-linecap="round" stroke-linejoin="round"/></g>`
+      )
+    }
   }
 
   const clips: string[] = []
@@ -246,11 +254,16 @@ export function hexBackdropMarkup(
       )
     } else {
       const theme = themeFor(tile.realm)
+      clips.push(
+        `<clipPath id="hex-top-${n}"><path d="${outline(tile.top)}"/></clipPath>`
+      )
       drawSlab(
         tile.top,
         tile.height,
         theme.tones[tile.tone % theme.tones.length],
-        theme.cliff
+        theme.cliff,
+        tile.edges,
+        `hex-top-${n}`
       )
       drawGround(tile, n, theme)
     }
@@ -267,9 +280,6 @@ export function hexBackdropMarkup(
   function drawGround(tile: HexLaidTile, n: number, theme: RealmTheme) {
     const pieces = layout.pieces.filter(piece => piece.tile === tile.ref)
     if (pieces.length > 0) {
-      clips.push(
-        `<clipPath id="hex-top-${n}"><path d="${outline(tile.top)}"/></clipPath>`
-      )
       out.push(`<g clip-path="url(#hex-top-${n})">`)
       // Water under the road, so a bridge lies over its river.
       for (const piece of pieces) if (piece.kind === 'river') drawPiece(piece)
