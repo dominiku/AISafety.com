@@ -45,9 +45,10 @@ const SHELF_INNER = '#21463f'
 const SHALLOWS = '#2f5650'
 const LINE = '#112928'
 const ROAD = '#972f00'
-const ROAD_EDGE = '#571f02'
+const ROAD_PEBBLE = '#571f02'
 const FOOTPATH = '#ffd1bc'
 const WATER = '#7dd5c2'
+const WATER_STREAK = '#bbe8e1'
 const PLANK = '#972f00'
 const PLANK_GAP = '#571f02'
 const SAND = '#ffd1bc'
@@ -60,10 +61,12 @@ const MOUNTAIN_SHADE = '#972f00'
 const SHORE_DETAIL = '#d53d00'
 const STARFISH = '#ff4b00'
 
-// DESIGN DECISION, for review: each realm is a biome of its own, but quietly.
-// The colors stay the classic map's greens, sands and oranges. The three
-// green realms differ in shade and warmth (a deeper, bluer wetland; the
-// classic green along the road; a lighter, warmer grassland), the two sandy
+// DESIGN DECISION, for review: each realm is a biome of its own, but quietly,
+// and in the classic map's own hand. The colors are its greens, sands and
+// oranges and nothing else. The three green realms are told apart by shade
+// alone, as the classic map's regions are: its light minty green for the
+// delta, its mid green along the road, its dark green for the grassland. The
+// two sandy
 // ones in depth, and what grows or stands on each does the rest. A realm's
 // districts step through a few close tones of its ground, so a biome has some
 // variety inside it too. Matched on the first word of the realm's name.
@@ -97,13 +100,13 @@ const REALM_THEMES: Record<string, RealmTheme> = {
     terrain: 'trail',
     growth: '#008969',
   },
-  // Media and discourse: wetland, a deeper and bluer green
+  // Media and discourse: the delta, in the classic map's light minty green
   media: {
-    tones: ['#129a8e', '#1ea398', '#0c9085'],
+    tones: ['#2dc2a4', '#38c7aa', '#25ba9c'],
     cliff: CLIFF_EARTH,
     beach: true,
     terrain: 'delta',
-    growth: '#5cc9b8',
+    growth: '#008969',
     boats: true,
   },
   // Advocacy and public engagement: the harbour's pale sand
@@ -112,12 +115,12 @@ const REALM_THEMES: Record<string, RealmTheme> = {
     cliff: CLIFF_SAND,
     harbour: true,
   },
-  // Policy and strategy: grassland, a lighter and warmer green
+  // Policy and strategy: grassland, in the classic map's dark green
   policy: {
-    tones: ['#4fc592', '#5ccb9b', '#43bb88'],
+    tones: ['#008969', '#08917a', '#00805f'],
     cliff: CLIFF_EARTH,
     terrain: 'plains',
-    growth: '#1f9468',
+    growth: '#00ae85',
   },
   // Technical research: orange rock
   technical: {
@@ -143,6 +146,11 @@ const CORNER_RADIUS = 0.7
 const CLIFF_HEIGHT = 0.95
 const BEACH_WIDTH = 0.9
 const PIER_LENGTH = 1.7
+// The road: how many straight stretches it is drawn in, its width and how far
+// (map pixels) from each corner a bend starts.
+const ROAD_STRETCHES = 5
+const ROAD_WIDTH = 24
+const ROAD_BEND = 46
 
 // The map's frame, in grid units.
 const FRAME = { width: 60, height: 32.7 }
@@ -218,6 +226,33 @@ function landmarksFor(
     placed.push({ symbol: 'compass', ...middle(furniture), ...COMPASS })
   }
   return placed
+}
+
+// A path through the points in straight stretches, each corner eased into a
+// short curve that starts `bend` before it (or halfway along a short stretch).
+function easedLine(points: Point[], bend: number): string {
+  const d = [`M${points[0][0].toFixed(1)},${points[0][1].toFixed(1)}`]
+  for (let n = 1; n < points.length; n++) {
+    const [x, y] = points[n]
+    const next = points[n + 1]
+    if (!next) {
+      d.push(`L${x.toFixed(1)},${y.toFixed(1)}`)
+      break
+    }
+    const [px, py] = points[n - 1]
+    const before = Math.hypot(x - px, y - py)
+    const after = Math.hypot(next[0] - x, next[1] - y)
+    const cut = Math.min(bend, before / 2, after / 2)
+    const from = [x + ((px - x) / before) * cut, y + ((py - y) / before) * cut]
+    const to = [
+      x + ((next[0] - x) / after) * cut,
+      y + ((next[1] - y) / after) * cut,
+    ]
+    d.push(
+      `L${from[0].toFixed(1)},${from[1].toFixed(1)}Q${x.toFixed(1)},${y.toFixed(1)} ${to[0].toFixed(1)},${to[1].toFixed(1)}`
+    )
+  }
+  return d.join('')
 }
 
 // Points no more than half a grid unit apart along a line of straight
@@ -431,7 +466,7 @@ export function artBackdropMarkup(
     ]
     river.push({ points: [gate, head], width: 13 })
     for (const arm of deltaArms(head, mouths)) {
-      river.push({ points: arm.points, width: arm.depth === 0 ? 11 : 8 })
+      river.push({ points: arm.points, width: arm.depth === 0 ? 12 : 9 })
     }
     return river
   }
@@ -540,6 +575,12 @@ export function artBackdropMarkup(
       `<path d="M${stretch.points.map(px).join('L')}${stretch.closed ? 'Z' : ''}" fill="none" stroke="${WATER}" stroke-width="${stretch.width}" stroke-linecap="round" stroke-linejoin="round"/>`
     )
   }
+  // The light streaks the classic map draws on its river.
+  for (const stretch of river) {
+    out.push(
+      `<path d="M${stretch.points.map(px).join('L')}${stretch.closed ? 'Z' : ''}" fill="none" stroke="${WATER_STREAK}" stroke-width="2.5" stroke-dasharray="22 46" stroke-linecap="round" stroke-linejoin="round"/>`
+    )
+  }
   // The cove is water inside the coast, drawn over the land; its shallows
   // run into the shelf across its mouth.
   if (cove.length > 0) {
@@ -585,17 +626,34 @@ export function artBackdropMarkup(
     }
   }
 
-  // Sandy footpaths under a brown dirt road with darker verges.
+  // Sandy footpaths under the road.
   for (const trail of layout.trails) {
     out.push(
       `<path d="${curve(trail)}" fill="none" stroke="${FOOTPATH}" stroke-width="7" stroke-dasharray="16 12" stroke-linecap="round"/>`
     )
   }
+  // The road as the classic map draws its brown one: one flat brown, in a few
+  // straight stretches with eased bends (not a winding curve), and dark
+  // pebbles strewn along it.
   for (const road of layout.roads) {
-    out.push(
-      `<path d="${curve(road)}" fill="none" stroke="${ROAD_EDGE}" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>`,
-      `<path d="${curve(road)}" fill="none" stroke="${ROAD}" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>`
+    const every = Math.max(1, Math.round((road.length - 1) / ROAD_STRETCHES))
+    const corners = road.filter(
+      (_, n) => n % every === 0 || n === road.length - 1
     )
+    out.push(
+      `<path d="${easedLine(
+        corners.map(([x, y]): Point => [x * g, y * g]),
+        ROAD_BEND
+      )}" fill="none" stroke="${ROAD}" stroke-width="${ROAD_WIDTH}" stroke-linejoin="round"/>`
+    )
+    alongLine(corners).forEach(([x, y], n) => {
+      if (n % 2 === 1) return
+      const roll = Math.sin(n * 12.9898) * 43758.5453
+      const side = (roll - Math.floor(roll) - 0.5) * ROAD_WIDTH * 0.55
+      out.push(
+        `<circle cx="${(x * g + side * 0.3).toFixed(1)}" cy="${(y * g + side).toFixed(1)}" r="${n % 3 === 0 ? 3.2 : 2.2}" fill="${ROAD_PEBBLE}"/>`
+      )
+    })
   }
 
   // Planks: the boardwalk to the cove, and a pier out from the arrival
