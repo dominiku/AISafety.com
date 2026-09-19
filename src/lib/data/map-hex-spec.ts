@@ -68,8 +68,8 @@ const TILES = `
   ..  In! In  In  Fb  Pp  Pp  Pp  Fr~ Ca~ Ca  Ca  Ma  Ma  St  Co  Co  cr  ..
   ..  hb  hb  In= Fb= Pp= Pp= Tp= Tp= Ca= kp  Ca~ Al~ Al~ Al  Co  Ip  Ip  ..
   ..  In  hb  In  Fb  Tp  Tp  Tp  Tp  Hu  Ca  Al  Al  Al~ Co~ Co  Co  Cp  ..
-  ..  ..  In  Tp  Tp  Tp  Tp  Op  Hu  Gm  Gm  Al  Vc  Ev  Ev  Co! Cp  Cp! ..
-  Gy! Gy  ..  ..  ..  Op  Op  To  Hu  Gm  Gm  Vc  Vc  Ev  Ev  Gm  Cp  ..  ..
+  ..  ..  In  Tp  Tp  Tp  Tp  Hu  Hu  Gm  Gm  Al  Vc  Ev  Ev  Co! Cp  Cp! ..
+  Gy! Gy  ..  ..  Op  Op  Op  Op  To  Gm  Gm  Vc  Vc  Ev  Ev  Gm  Cp  ..  ..
   Gy  Gy  Gy  ..  ..  ..  ..  ..  To  To  Gm  Gm  Gm  Gm  Gm  ..  ..  ..  ..
   ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..
 `
@@ -103,7 +103,7 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
     // castle, between two arms of the Range: its walls are the Control Dam's
     // high ground to the west and north and the escarpment to the east, and
     // it is open to the south, where the viewer looks in.
-    { code: 'Op', district: 'Operations and services', realm: 'Field infrastructure', height: 1 },
+    { code: 'Op', district: 'Operations and services', realm: 'Field infrastructure', height: 1, beach: true },
     { code: 'Hu', district: 'Hubs and coworking', realm: 'Field infrastructure', height: 1.5, cover: 'hamlet' },
     { code: 'To', district: 'Tools, databases and research infrastructure', realm: 'Field infrastructure', height: 0.5 },
     { code: 'Gm', district: 'Grantmakers and donor advisory', realm: 'Field infrastructure', height: 1, cover: 'dunes' },
@@ -137,7 +137,7 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
   features: [
     // The cove: water inside the coast, between the two arms of Advocacy.
     { code: 'cv', kind: 'water', height: 0,
-      landmark: { symbol: 'boats', width: 3.4, height: 1.26 } },
+      landmark: { symbol: 'boats', width: 3.4, height: 1.26, shift: [1.5, 0.7] } },
     // The harbor the road starts from: a bay between the arms of the landing.
     { code: 'hb', kind: 'water', height: 0 },
     // The top of the volcano, in the Range's back corner, with only sea

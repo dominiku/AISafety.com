@@ -58,6 +58,8 @@ export interface HexLandmarkArt {
   symbol: string
   width: number
   height: number
+  // Moved this far from its usual place on its tile (map grid units).
+  shift?: [number, number]
 }
 
 export type HexCover =
@@ -97,6 +99,9 @@ export interface HexDistrictSpec {
   // An escarpment: its cliffs toward the viewer are not sheer but lean out,
   // a steep slope of bare banded rock down onto the land in front.
   scarp?: boolean
+  // A beach: where it meets the sea toward the viewer its sand runs gently
+  // down into the water, in place of a cliff.
+  beach?: boolean
   // The flank of a volcano: its sides toward the viewer slope, more gently
   // than an escarpment's, and smooth.
   cone?: boolean
@@ -184,6 +189,8 @@ export interface HexLaidTile extends HexGridTile {
   walled: boolean
   // Its district is an escarpment (see HexDistrictSpec.scarp).
   scarp: boolean
+  // Its district meets the sea with a beach (see HexDistrictSpec.beach).
+  beach: boolean
   // How far its sides toward the viewer lean out for each level they drop
   // (map grid units on the ground): an escarpment's, a volcano's, or 0 for
   // sheer cliffs.
@@ -669,8 +676,8 @@ export function layoutHexMap(
     const front = tile === keep ? neighborOf(tile, 'S') : undefined
     landmarkOn.set(tile.ref, {
       ...art,
-      x: cx,
-      y: cy + depth * 0.62 - art.height / 2,
+      x: cx + (art.shift?.[0] ?? 0),
+      y: cy + depth * 0.62 - art.height / 2 + (art.shift?.[1] ?? 0),
       after: front && kindOf(front) !== 'water' ? front.ref : tile.ref,
     })
   }
@@ -1295,6 +1302,7 @@ export function layoutHexMap(
       sunken: district?.sunken === true && state !== 'sea',
       walled: district?.walled === true && state !== 'sea',
       scarp: district?.scarp === true && state !== 'sea',
+      beach: district?.beach === true && state !== 'sea',
       slope: state === 'sea' || !plan ? 0 : slopeOf(plan),
       deck: state === 'sea' ? null : (deckOn.get(laid.ref) ?? null),
       cover: state === 'sea' ? null : (district?.cover ?? null),

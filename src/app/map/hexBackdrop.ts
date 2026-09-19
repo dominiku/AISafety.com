@@ -57,6 +57,8 @@ import {
   type RealmTheme,
 } from './realmArtBackdrop'
 import {
+  beachCornerMarkup,
+  beachMarkup,
   craterMarkup,
   deckMarkup,
   duneMarkup,
@@ -297,6 +299,15 @@ export function hexBackdropMarkup(
       `<path d="${d}" fill="none" stroke="${PLANK_GAP}" stroke-width="${across}"/>`,
       `<path d="${d}" fill="none" stroke="${PLANK}" stroke-width="${across}" stroke-dasharray="7 3"/>`
     )
+    // A rowboat tied up in the crook of the L.
+    if (end.kind === 'pier' && pins) {
+      const [w, h] = [0.95, 0.42]
+      const x = head[0] - tx * 0.55 + turn[0] * 0.5
+      const y = head[1] - ty * 0.55 + turn[1] * 0.5
+      out.push(
+        `<use href="#rowboat" x="${((x - w / 2) * g).toFixed(1)}" y="${((y - h / 2) * g).toFixed(1)}" width="${(w * g).toFixed(1)}" height="${(h * g).toFixed(1)}"/>`
+      )
+    }
   }
 
   // Points no more than a third of a grid unit apart along a line.
@@ -651,6 +662,8 @@ export function hexBackdropMarkup(
       // A side that slopes down onto land is drawn by drawSlopes, not as a
       // sheer face. (Down to the sea it stays a cliff.)
       if (drop <= 0 || (tile.slope > 0 && ground > 0)) return
+      // Nor a beach's side to the sea: drawBeach draws that.
+      if (tile.beach && ground === 0) return
       const [a, b] = [top[k], top[k + 1]]
       const band = (from: number, to: number, color: string) =>
         out.push(
@@ -755,6 +768,51 @@ export function hexBackdropMarkup(
           tile.col * 31 + tile.row * 7 + side.k
         )
       )
+    }
+  }
+
+  // A beach district's sides to the sea, toward the viewer: sand running
+  // gently down and out into the water, not a cliff.
+  const BEACH_RUN = 1.1
+  const drawBeach = (tile: HexLaidTile, layer: 'under' | 'over') => {
+    if (!tile.beach) return
+    // The dry sand is the district's own ground, running on down the beach.
+    const { tone: sand } = styleOf(tile)
+    const wet = mixHex(sand, SHALLOWS, 0.45)
+    const sides = faceDrops(tile)
+      .filter(face => face.drop > 0 && face.ground === 0)
+      .map(face => {
+        const run = BEACH_RUN * tile.height
+        const reach: Point = [
+          SLOPE_OUT[face.k][0] * run,
+          SLOPE_OUT[face.k][1] * run * view.squash + face.drop,
+        ]
+        return { ...face, reach }
+      })
+    sides.forEach(side => {
+      const next = sides.find(other => other.k === side.k + 1)
+      if (!next) return
+      out.push(
+        beachCornerMarkup(
+          tile.top[next.k],
+          side.reach,
+          next.reach,
+          g,
+          sand,
+          wet,
+          layer
+        )
+      )
+    })
+    for (const side of sides) {
+      const [a, b] = [tile.top[side.k], tile.top[side.k + 1]]
+      out.push(beachMarkup(a, b, side.reach, g, sand, wet, layer))
+      // No rim along the top of a beach: the ground runs straight on.
+      if (layer === 'over') {
+        out.push(
+          `<path d="M${xy(a)}L${xy(b)}" stroke="${sand}" stroke-width="${(RIM_WIDTH * 2 * g + BORDER_LINE.width * 2).toFixed(1)}"/>`
+        )
+      }
     }
   }
 
@@ -1142,7 +1200,10 @@ export function hexBackdropMarkup(
       }
     }
     for (const plateau of level) {
-      for (const tile of plateau.tiles) drawSlopes(tile)
+      for (const tile of plateau.tiles) {
+        drawSlopes(tile)
+        drawBeach(tile, 'under')
+      }
     }
     level.forEach((plateau, n) => {
       const { tone } = styleOf(plateau.tiles[0])
@@ -1222,6 +1283,9 @@ export function hexBackdropMarkup(
     // The river and the road on this level, over all its ground. A road that
     // climbs by a ramp is drawn with the level it climbs to, so that level's
     // cliff does not cover the ramp.
+    for (const plateau of level) {
+      for (const tile of plateau.tiles) drawBeach(tile, 'over')
+    }
     // The piers that stand at this height, over the water of their tiles.
     for (const tile of layout.tiles) {
       if (tile.deck?.height !== height) continue

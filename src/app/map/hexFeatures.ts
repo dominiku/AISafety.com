@@ -306,3 +306,63 @@ export function tuftMarkup(
   }
   return markup.join('')
 }
+
+/**
+ * A beach in place of a sea cliff: from the edge of a tile's side (`a` to
+ * `b`) the sand runs gently down and out to the water, `reach` away as drawn.
+ * Dry sand, then a band of wet sand, a line of foam where the sea meets it,
+ * and a little clear shallow water beyond. Drawn in two layers, so that where
+ * two beaches overlap in a bay of the coast the dry sand of both lies over
+ * the wet: "under" is the water, the wet sand and the foam, "over" the dry.
+ */
+export function beachMarkup(
+  a: Point,
+  b: Point,
+  reach: Point,
+  g: number,
+  sand: string,
+  wet: string,
+  layer: 'under' | 'over'
+): string {
+  const at = (t: number, down: number) =>
+    `${((a[0] + (b[0] - a[0]) * t + reach[0] * down) * g).toFixed(1)},${((a[1] + (b[1] - a[1]) * t + reach[1] * down) * g).toFixed(1)}`
+  const band = (from: number, to: number) =>
+    `M${at(0, from)}L${at(1, from)}L${at(1, to)}L${at(0, to)}Z`
+  if (layer === 'over') {
+    return `<path d="${band(0, BEACH_DRY)}" fill="${sand}" stroke="${sand}" stroke-width="1" stroke-linejoin="round"/>`
+  }
+  return [
+    `<path d="${band(1, 1.22)}" fill="${WATER}" fill-opacity="0.35"/>`,
+    `<path d="${band(0, 1)}" fill="${wet}" stroke="${wet}" stroke-width="1" stroke-linejoin="round"/>`,
+    `<path d="M${at(0, 1)}L${at(1, 1)}" stroke="${WATER_STREAK}" stroke-width="3.5" stroke-linecap="round"/>`,
+    `<path d="M${at(0.05, 1.12)}L${at(0.95, 1.12)}" stroke="${WATER_STREAK}" stroke-opacity="0.7" stroke-width="2" stroke-dasharray="14 9" stroke-linecap="round"/>`,
+  ].join('')
+}
+
+// The share of a beach, from the land out, that is dry sand.
+const BEACH_DRY = 0.68
+
+/** The beach round a corner, between the beaches of two sides that meet
+ *  there. */
+export function beachCornerMarkup(
+  corner: Point,
+  first: Point,
+  second: Point,
+  g: number,
+  sand: string,
+  wet: string,
+  layer: 'under' | 'over'
+): string {
+  const xy = (by: Point, share: number) =>
+    `${((corner[0] + by[0] * share) * g).toFixed(1)},${((corner[1] + by[1] * share) * g).toFixed(1)}`
+  const fan = (share: number) =>
+    `M${xy(first, 0)}L${xy(first, share)}L${xy(second, share)}Z`
+  if (layer === 'over') {
+    return `<path d="${fan(BEACH_DRY)}" fill="${sand}" stroke="${sand}" stroke-width="1" stroke-linejoin="round"/>`
+  }
+  return [
+    `<path d="${fan(1.22)}" fill="${WATER}" fill-opacity="0.35"/>`,
+    `<path d="${fan(1)}" fill="${wet}" stroke="${wet}" stroke-width="1" stroke-linejoin="round"/>`,
+    `<path d="M${xy(first, 1)}L${xy(second, 1)}" stroke="${WATER_STREAK}" stroke-width="3.5" stroke-linecap="round"/>`,
+  ].join('')
+}
