@@ -93,3 +93,34 @@ export function buildRealmScheme(pins: RealmPin[]): MapAreaScheme {
 
   return { areas, areaByCategory }
 }
+
+/** The same areas under the names the map shows for them: `names` gives a
+ *  label for a realm's or district's data name, and any area it does not name
+ *  keeps its own. The data fields keep their plain names; only the labels, and
+ *  the tree built from them, change. Two areas may not end up with one name. */
+export function renameAreas(
+  scheme: MapAreaScheme,
+  names: Record<string, string>
+): MapAreaScheme {
+  const shown = (label: string) => names[label] ?? label
+  const areas = scheme.areas.map(area => ({
+    ...area,
+    label: shown(area.label),
+    ...(area.parent === undefined ? {} : { parent: shown(area.parent) }),
+  }))
+  const twice = areas.find(
+    (area, n) => areas.findIndex(other => other.label === area.label) !== n
+  )
+  if (twice) {
+    throw new Error(`[map-realms] two areas are both named "${twice.label}"`)
+  }
+  return {
+    areas,
+    areaByCategory: Object.fromEntries(
+      Object.entries(scheme.areaByCategory).map(([category, label]) => [
+        category,
+        shown(label),
+      ])
+    ),
+  }
+}

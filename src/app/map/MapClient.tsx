@@ -17,11 +17,19 @@ import { placementsById } from '@/lib/placements'
 import { filterItems, optionCounts } from '@/lib/filter-counts'
 import { isPlacedOnMap } from '@/lib/map-images'
 import { CLASSIC_MAP_SCHEME } from '@/lib/data/map-areas'
-import { buildRealmScheme, QUIET_REALM } from '@/lib/data/map-realms'
+import {
+  buildRealmScheme,
+  renameAreas,
+  QUIET_REALM,
+} from '@/lib/data/map-realms'
 import { layoutRealmMap, type LayoutPin } from '@/lib/data/map-realm-layout'
 import { MAP_35_GRAVEYARD_MOVE, MAP_35_SPEC } from '@/lib/data/map-realm-spec'
 import { layoutHexMap } from '@/lib/data/map-hex-layout'
-import { MAP_35_HEX_SPEC, hexLogoRadius } from '@/lib/data/map-hex-spec'
+import {
+  MAP_35_HEX_NAMES,
+  MAP_35_HEX_SPEC,
+  hexLogoRadius,
+} from '@/lib/data/map-hex-spec'
 import type { MapOrg } from '@/lib/data/map'
 import { SITE_PAGES } from '@/lib/site-pages'
 import styles from './page.module.css'
@@ -297,7 +305,8 @@ export default function MapClient({
           y: org.y,
         }))
     )
-    return { orgs, scheme, layout }
+    // The map's own names for the areas; the data keeps its plain ones.
+    return { orgs, scheme: renameAreas(scheme, MAP_35_HEX_NAMES), layout }
   }, [isIaWork, dataSource, mapOrgs])
 
   const categoryCounts = useMemo(

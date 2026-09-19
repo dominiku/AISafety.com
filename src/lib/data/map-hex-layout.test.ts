@@ -5,7 +5,11 @@ import {
   type HexLogo,
   type HexMapSpec,
 } from './map-hex-layout'
-import { MAP_35_HEX_ISLETS, MAP_35_HEX_SPEC } from './map-hex-spec'
+import {
+  MAP_35_HEX_ISLETS,
+  MAP_35_HEX_NAMES,
+  MAP_35_HEX_SPEC,
+} from './map-hex-spec'
 import { HEX_DIRECTIONS, hexNeighbor } from './map-hex'
 
 // A little island: Alpha, the higher, along the north; Beta south of it; and
@@ -392,6 +396,13 @@ describe('the Map 3.5 hex map', () => {
       expect(tile.sunken).toBe(true)
       expect(tile.height).toBe(0)
     }
+  })
+
+  it('has a working name, all different, for every realm and district', () => {
+    const named = MAP_35_HEX_SPEC.districts.flatMap(d => [d.realm, d.district])
+    for (const name of named) expect(MAP_35_HEX_NAMES[name]).toBeTruthy()
+    const labels = Object.values(MAP_35_HEX_NAMES)
+    expect(new Set(labels).size).toBe(labels.length)
   })
 
   it('is one island, but for the closed orgs’ islet', () => {

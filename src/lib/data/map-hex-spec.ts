@@ -149,3 +149,55 @@ export function hexLogoRadius(scale: string | null): number {
   const size = (scale ?? 'Medium').toLowerCase()
   return size === 'large' ? 0.62 : size === 'small' ? 0.31 : 0.46
 }
+
+// WORKING NAMES, not final: what the map calls each realm and district. The
+// data fields keep their plain names (Realm "Technical research", District
+// "Alignment and control"); these labels are separate and can change without
+// touching the data. Names that describe a position (Landing, Pier,
+// Escarpment) only hold while the layout does, so they are frozen last.
+// prettier-ignore
+export const MAP_35_HEX_NAMES: Record<string, string> = {
+  'Talent pipeline': 'Pipeline Path',
+  'Field infrastructure': 'Support Shoreline',
+  // Or "Media Moor"; this map draws a delta.
+  'Media and discourse': 'Discourse Delta',
+  'Advocacy and public engagement': 'Advocacy Anchorage',
+  'Policy and strategy': 'Policy Plains',
+  'Technical research': 'Research Range',
+  [QUIET_REALM]: 'Gone Graveyard',
+
+  'Field-building and local groups': 'Community Commons',
+  'Introductory learning': 'Learning Landing',
+  'Technical research programs': 'Fellowship Fields',
+  'Policy and governance programs': 'Statecraft School',
+  // Or "Career Crossing".
+  'Career support and placement': 'Career Castle',
+
+  'Tools, databases and research infrastructure': 'Toolshed Terrace',
+  'Operations and services': 'Service Station',
+  'Hubs and coworking': 'Hub Hamlet',
+  'Grantmakers and donor advisory': 'Grant Grove',
+  'Venture capital and incubators': 'Venture Valley',
+
+  'Foundational and explanatory': 'Foundation Forest',
+  'News and commentary': 'Commentary Coast',
+  'Forums and online communities': 'The Forum',
+
+  'Grassroots campaigns': 'Campaign Cutters',
+  'Professional advocacy and communication': 'Persuasion Pier',
+
+  'Macrostrategy and forecasting': 'Foresight Foothills',
+  'Policy research and think tanks': 'Think-Tank Town',
+  // Or "Parliament Plaza".
+  'Governments and multi-stakeholder bodies': 'Capitol Court',
+  'Standards, assurance and verification': 'Verification Vale',
+  // Or "Legislation Lookout".
+  'Policy advocacy and lobbying': 'Lobby Landing',
+
+  'Alignment and control': 'Control Dam',
+  'Evaluations and threat research': 'Evaluation Escarpment',
+  // Or "Interpretability Inlet".
+  'Interpretability and model understanding': 'Circuit Cove',
+  'Conceptual and foundations research': 'Theory Thicket',
+  'Capabilities research': 'Capabilities Cove',
+}
