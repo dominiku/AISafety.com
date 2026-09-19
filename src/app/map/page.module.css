@@ -315,6 +315,12 @@
   transition: opacity 0.2s;
 }
 
+/* Explorer: a pin the column's search and filters don't match (the "dim"
+   treatment). Before .mapFadeHidden so a pin that is also hidden stays so. */
+.map-container :global(.mapDimmed) {
+  opacity: 0.25;
+}
+
 .map-container :global(.mapFadeHidden) {
   opacity: 0;
   visibility: hidden;
@@ -362,5 +368,151 @@
        mobile browser chrome so the View cards button stays on-screen. */
     height: calc(100dvh - 88px);
     min-height: 0;
+  }
+}
+
+/* ===============================
+   Explorer: the column (search, chips, sort, cards) beside the map.
+   Utilities can't express two independently scrolling panes of fixed and
+   fluid width, so the frame is written here; everything inside the column
+   uses the shared components and utilities.
+   =============================== */
+
+/* Fills the viewport under the 88px navbar, with 24px to spare, so both
+   panes are fully on screen once the title has scrolled away. */
+.explorer {
+  display: flex;
+  height: calc(100vh - 112px);
+  min-height: 600px;
+  border-radius: 16px;
+  background-color: var(--teal-900);
+  overflow: hidden;
+}
+
+.explorer-list {
+  flex: none;
+  width: 600px;
+  padding: 24px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--teal-700) transparent;
+}
+
+.explorer-list ul {
+  list-style: none;
+}
+
+.explorer-collapsed .explorer-list {
+  display: none;
+}
+
+.explorer-map {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+/* The map fills its pane instead of the viewport. */
+.explorer-map .map-container {
+  height: 100%;
+  min-height: 0;
+}
+
+/* The tab on the seam between the panes. Same z-index reasoning as
+   .map-controls: below the assistant scrim/panel/pill (96-100). */
+.explorer-edge-tab {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  z-index: 95;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 64px;
+  transform: translateY(-50%);
+  border: 1px solid var(--teal-bright-800);
+  border-left: none;
+  border-radius: 0 8px 8px 0;
+  background-color: var(--teal-bright-850);
+  color: var(--teal-300);
+  cursor: pointer;
+  transition: all var(--hover-transition);
+}
+
+.explorer-edge-tab:hover {
+  border-color: var(--teal-bright-750);
+  color: var(--white);
+}
+
+.explorer-show-list {
+  position: absolute;
+  top: 24px;
+  left: 24px;
+  z-index: 95;
+}
+
+/* PROTOTYPE dim/hide switch: bottom-left of the map. */
+.explorer-nonmatching {
+  position: absolute;
+  bottom: 24px;
+  left: 24px;
+  z-index: 95;
+}
+
+.explorer-pane-switch {
+  display: none;
+}
+
+/* "Clear all" reads as a text link; this only removes the browser's button
+   box. Its type, color and underline are utilities. */
+.explorer-clear {
+  padding: 0;
+  border: none;
+  background: none;
+}
+
+.explorer-sort {
+  width: auto;
+}
+
+.explorer-card-selected {
+  outline: 2px solid var(--teal-bright-400);
+}
+
+/* One pane at a time, chosen with the List / Map switch. The collapse toggle
+   is a two-pane idea and is not offered here. */
+@media (max-width: 991px) {
+  .explorer {
+    flex-direction: column;
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+  }
+
+  .explorer-pane-switch {
+    display: flex;
+    justify-content: center;
+    padding: 16px;
+  }
+
+  .explorer-list,
+  .explorer-collapsed .explorer-list {
+    display: block;
+    width: 100%;
+    padding: 0 16px 16px;
+    overflow-y: visible;
+  }
+
+  .explorer-map {
+    flex: none;
+    height: calc(100dvh - 88px - 72px);
+  }
+
+  .explorer[data-pane='map'] .explorer-list,
+  .explorer[data-pane='list'] .explorer-map,
+  .explorer-edge-tab,
+  .explorer-show-list {
+    display: none;
   }
 }

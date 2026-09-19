@@ -9,6 +9,7 @@ import ContributeButtons from '@/components/ContributeButtons'
 import RelativeDate from '@/components/RelativeDate'
 import ModeToggle from '@/components/ModeToggle'
 import MapOrgCard from './MapOrgCard'
+import MapExplorer from './MapExplorer'
 import SearchBar from '@/components/SearchBar'
 import { trackCardsButtonClick } from '@/lib/analytics'
 import CardsViewTracker from '@/components/CardsViewTracker'
@@ -19,6 +20,7 @@ import { CLASSIC_MAP_SCHEME } from '@/lib/data/map-areas'
 import { buildRealmScheme, QUIET_REALM } from '@/lib/data/map-realms'
 import { layoutRealmMap, type LayoutPin } from '@/lib/data/map-realm-layout'
 import { MAP_35_GRAVEYARD_MOVE, MAP_35_SPEC } from '@/lib/data/map-realm-spec'
+import type { MapOrg } from '@/lib/data/map'
 import { SITE_PAGES } from '@/lib/site-pages'
 import styles from './page.module.css'
 
@@ -56,30 +58,6 @@ const categories = [
   'Training and education',
   'Video',
 ]
-
-interface MapOrg {
-  id: string
-  title: string
-  tooltipTitle: string
-  shortName: string | null
-  description: string
-  category: string
-  status: string
-  logo: string | null
-  mapLogo: string | null
-  link: string
-  x: number | null
-  y: number | null
-  scale: string | null
-  isMagic: boolean
-  // PROTOTYPE Map 3.5: the draft placement, on IA_work records only.
-  draft?: {
-    x: number | null
-    y: number | null
-    realm: string | null
-    district: string | null
-  }
-}
 
 interface MapDataset {
   orgs: MapOrg[]
@@ -306,6 +284,42 @@ export default function MapClient({
     }
   }, [filteredOrgs])
 
+  const dataToggle = iaWork && (
+    <div className={styles['map-data-toggle']}>
+      <ModeToggle
+        mode={dataSource}
+        onChange={setDataSource}
+        ariaLabel="Map data source"
+        tabs={[
+          {
+            value: 'production',
+            icon: '/images/icons/map.svg',
+            label: 'UI work',
+          },
+          {
+            value: 'ia',
+            icon: '/images/icons/table.svg',
+            label: 'IA work',
+          },
+        ]}
+      />
+    </div>
+  )
+
+  // UI work: the explorer (a column of search, filters and cards beside the
+  // map). IA work keeps the plain map-over-cards layout below, untouched.
+  if (!isIaWork) {
+    return (
+      <MapExplorer
+        orgs={orgs}
+        lastUpdatedIso={lastUpdatedIso}
+        suggestEntryLink={suggestEntryLink}
+        suggestCorrectionLink={suggestCorrectionLink}
+        dataToggle={dataToggle}
+      />
+    )
+  }
+
   return (
     <>
       {/* The map is the page, so its heading is for screen readers and
@@ -322,27 +336,7 @@ export default function MapClient({
             realmBackdrop={realmMap?.backdrop}
             suggestEntryUrl={suggestEntryLink}
           />
-          {iaWork && (
-            <div className={styles['map-data-toggle']}>
-              <ModeToggle
-                mode={dataSource}
-                onChange={setDataSource}
-                ariaLabel="Map data source"
-                tabs={[
-                  {
-                    value: 'production',
-                    icon: '/images/icons/map.svg',
-                    label: 'UI work',
-                  },
-                  {
-                    value: 'ia',
-                    icon: '/images/icons/table.svg',
-                    label: 'IA work',
-                  },
-                ]}
-              />
-            </div>
-          )}
+          {dataToggle}
           <button
             onClick={() => {
               trackCardsButtonClick('Map', 'View cards')
