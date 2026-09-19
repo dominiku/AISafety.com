@@ -191,21 +191,28 @@ export function slopeMarkup(
     `<path d="${face}" fill="${cliff.face}" stroke="${cliff.face}" stroke-width="1" stroke-linejoin="round"/>`,
   ]
   if (beds) {
-    const count = Math.max(3, Math.round(drop / 0.15))
-    for (let n = 1; n < count; n++) {
-      const down = n / count
-      const thick = 0.32 / count
+    // As the classic map draws its escarpment: broad flat bands of a lighter
+    // orange slanting down the dark slope, no two the same width, and a few
+    // sharp rocks fallen at its foot.
+    const slant = 0.16
+    const clamp = (t: number) => Math.min(1, Math.max(0, t))
+    let from = -slant + roll(seed) * 0.12
+    for (let n = 0; from < 1; n++) {
+      const width = 0.16 + roll(seed * 5 + n) * 0.14
+      const to = from + width
       markup.push(
-        `<path d="M${at(0, down - thick)}L${at(1, down - thick)}L${at(1, down)}L${at(0, down)}Z" fill="${cliff.lip}" fill-opacity="${n % 2 ? 0.7 : 0.35}"/>`,
-        `<path d="M${at(0, down)}L${at(1, down)}" stroke="${cliff.foot}" stroke-width="1.4"/>`
+        `<path d="M${at(clamp(from), 0)}L${at(clamp(to), 0)}L${at(clamp(to + slant), 1)}L${at(clamp(from + slant), 1)}Z" fill="${cliff.lip}" fill-opacity="0.8"/>`
       )
+      from = to + 0.14 + roll(seed * 9 + n) * 0.16
     }
-    // Gullies down the slope, none the same length.
-    for (let n = 0; n < 4; n++) {
-      const t = (n + 0.25 + roll(seed + n) * 0.5) / 4
-      const end = 0.4 + roll(seed * 3 + n) * 0.55
+    for (let n = 0; n < 2; n++) {
+      const t = 0.18 + n * 0.5 + roll(seed * 7 + n) * 0.2
+      const size = (0.16 + roll(seed * 11 + n) * 0.12) * g
+      const [x, y] = at(t, 1).split(',').map(Number)
+      const foot = y + size * 0.35
       markup.push(
-        `<path d="M${at(t, 0)}L${at(t + 0.02, end * 0.5)}L${at(t - 0.01, end)}" fill="none" stroke="${LINE}" stroke-opacity="0.4" stroke-width="1.6"/>`
+        `<path d="M${(x - size * 0.6).toFixed(1)},${foot.toFixed(1)}L${(x - size * 0.1).toFixed(1)},${(foot - size).toFixed(1)}L${(x + size * 0.15).toFixed(1)},${foot.toFixed(1)}Z" fill="${cliff.lip}"/>`,
+        `<path d="M${(x - size * 0.1).toFixed(1)},${(foot - size).toFixed(1)}L${(x + size * 0.7).toFixed(1)},${(foot - size * 0.25).toFixed(1)}L${(x + size * 0.15).toFixed(1)},${foot.toFixed(1)}Z" fill="${cliff.foot}"/>`
       )
     }
   } else {

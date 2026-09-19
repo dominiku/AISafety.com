@@ -67,10 +67,10 @@ const TILES = `
   ..  ..  Ne~ Ne! Ne  Fo  Fo~ Fo~ Fr  Gr  cv  Pa  Ma  Ma  Ma! St  Lo  ..  ..
   ..  In! In  In  Fb  Pp  Pp  Pp  Fr~ Ca~ Ca  Ca  Ma  Ma  St  Co  Co  cr  ..
   ..  hb  hb  In= Fb= Pp= Pp= Tp= Tp= Ca= kp  Ca~ Al~ Al~ Al  Co  Ip  Ip  ..
-  ..  In  hb  In  Fb  Tp  Tp  Tp  Tp  Hu  Ca  Al  Al  Al~ Co~ Co  Co  Ip  ..
+  ..  In  hb  In  Fb  Tp  Tp  Tp  Tp  Hu  Ca  Al  Al  Al~ Co~ Co  Co  Cp  ..
   ..  ..  In  Tp  Tp  Tp  Tp  Op  Hu  Gm  Gm  Al  Vc  Ev  Ev  Co! Cp  Cp! ..
-  Gy! Gy  ..  ..  ..  Op  Op  To  Hu  Gm  Gm  Vc  Vc  Ev  Ev  Cp  Cp  ..  ..
-  Gy  Gy  Gy  ..  ..  ..  ..  ..  To  Gm  Gm  Gm  Gm  Gm  Gm  ..  ..  ..  ..
+  Gy! Gy  ..  ..  ..  Op  Op  To  Hu  Gm  Gm  Vc  Vc  Ev  Ev  Gm  Cp  ..  ..
+  Gy  Gy  Gy  ..  ..  ..  ..  ..  To  To  Gm  Gm  Gm  Gm  Gm  ..  ..  ..  ..
   ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..
 `
 
