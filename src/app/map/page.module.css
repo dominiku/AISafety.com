@@ -314,6 +314,33 @@
   color: var(--teal-bright-300);
 }
 
+/* Explorer: the map's keyboard focus. The pane shows a ring when it is the
+   Tab stop; inside it a pin shows its own ring (drawn with the pin, so it
+   follows its size) and a place name a white outline. */
+.map-container:focus-visible {
+  outline: 2px solid var(--teal-bright-400);
+  outline-offset: -2px;
+}
+
+.map-container :global(.mapFocusRing) {
+  display: none;
+}
+
+.map-container :global(.mapItem:focus),
+.map-container :global([data-area]:focus) {
+  outline: none;
+}
+
+.map-container :global(.mapItem:focus-visible .mapFocusRing) {
+  display: inline;
+}
+
+.map-container :global([data-area]:focus-visible) > rect {
+  stroke: var(--white);
+  stroke-width: 3px;
+  stroke-dasharray: none;
+}
+
 /* Map icon hover effect (matching Webflow) */
 .map-container :global(.mapItem) {
   transition: transform 0.3s;

@@ -179,6 +179,7 @@ export default function MapExplorer({
   const searchRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const listPillRef = useRef<HTMLButtonElement>(null)
+  const paneButtonRef = useRef<HTMLButtonElement>(null)
   const selectedIdRef = useRef<string | null>(null)
   // The org whose card has just closed: focus goes back to where it was
   // opened from, once the render without the card has happened.
@@ -393,7 +394,10 @@ export default function MapExplorer({
         .filter((c): c is string => c !== null)
       setCategories(linkedCategories)
       // A link to a category shows its list, as picking one here does.
-      if (linkedCategories.length > 0) setDrawerOpen(true)
+      if (linkedCategories.length > 0) {
+        setDrawerOpen(true)
+        setLegendOpen(false)
+      }
       const urlStatuses = state.filters.status
       setStatuses(
         !urlStatuses
@@ -414,6 +418,7 @@ export default function MapExplorer({
       // On a phone a shared link lands on the map, with the details sheet
       // over it.
       if (linked && isSinglePane()) setPane('map')
+      if (linked) setLegendOpen(false)
       setTuning(new URLSearchParams(params).get('tuning') === '1')
       if (first) {
         // What this visitor chose last time. Storage can be blocked; the
@@ -421,6 +426,7 @@ export default function MapExplorer({
         try {
           if (localStorage.getItem(COLLAPSED_STORAGE_KEY) === '0') {
             setDrawerOpen(true)
+            setLegendOpen(false)
           }
         } catch {
           // Storage blocked: the drawer keeps to what the link asked for.
@@ -551,6 +557,19 @@ export default function MapExplorer({
     else if (!mapApiRef.current.focusPin(id)) listPillRef.current?.focus()
   }, [selectedId, showRow])
 
+  // Esc inside the map hands the keyboard back to the button that lists
+  // everything on it: the List pill, or on a phone the list button.
+  const leaveMap = useCallback(() => {
+    const pill = listPillRef.current
+    ;(pill && pill.offsetParent !== null
+      ? pill
+      : paneButtonRef.current
+    )?.focus()
+  }, [])
+
+  // The legend sits over the map's corner: it makes way for the keyboard.
+  const closeLegend = useCallback(() => setLegendOpen(false), [])
+
   // A shared link's pin is shown once the map is there to show it.
   const onMapReady = useCallback(() => {
     if (selectedIdRef.current) mapApiRef.current.panTo(selectedIdRef.current)
@@ -611,6 +630,8 @@ export default function MapExplorer({
       highlightedId,
       onSelect: select,
       onClear: clearSelection,
+      onLeaveMap: leaveMap,
+      onKeyboardMove: closeLegend,
       leftInset: overlayOpen && !singlePane ? OVERLAY_WIDTH : 0,
       topInset: singlePane ? PHONE_TOP_INSET : 0,
       bottomInset: singlePane && selectedId ? SHEET_HEIGHT : 0,
@@ -631,6 +652,8 @@ export default function MapExplorer({
       highlightedId,
       select,
       clearSelection,
+      leaveMap,
+      closeLegend,
       overlayOpen,
       singlePane,
       onMapReady,
@@ -675,53 +698,6 @@ export default function MapExplorer({
         data-sheet={selected ? 'open' : undefined}
         data-filters={filtersOpen || categories.length > 0 ? 'open' : undefined}
       >
-        <section aria-label="Map" className={styles['explorer-map']}>
-          <D3Map
-            orgs={mapOrgs}
-            suggestEntryUrl={suggestEntryLink}
-            tuning={tuning}
-            explorer={explorerLink}
-          />
-          {tuning && dataToggle}
-          {!overlayOpen && (
-            <aside
-              id={LEGEND_ID}
-              aria-label="How to read the map"
-              className={`border-plus-fill ${styles['explorer-legend']}`}
-              hidden={!legendOpen}
-            >
-              <p className="paragraph-small-bold padding-bottom-8px">
-                How to read the map
-              </p>
-              <ul className="paragraph-xs color-teal-300">
-                <li>
-                  Place names are categories: select one to filter the map.
-                </li>
-                <li>A bigger logo marks a larger organization.</li>
-                <li>
-                  A number such as +12 after a place name counts the
-                  organizations that appear when zooming in.
-                </li>
-                <li>Selecting a logo shows its details.</li>
-              </ul>
-            </aside>
-          )}
-        </section>
-
-        {fitted && !selected && (
-          <p
-            className={`border-plus-fill drop-shadow-dark paragraph-small color-teal-300 ${styles['explorer-fitted']}`}
-            data-overlay={overlayOpen ? 'open' : undefined}
-          >
-            <Icon src="/images/icons/scan.svg" size={16} />
-            <span>
-              Map fitted to{' '}
-              <strong className="color-white">{fitted.place}</strong> ·{' '}
-              {fitted.rest}
-            </span>
-          </p>
-        )}
-
         {/* Over the map's left side: search and filters with the results
             drawer under them, or the selected org's details in their place. */}
         <div
@@ -761,6 +737,7 @@ export default function MapExplorer({
               type="button"
               className={`border-plus-fill ${styles['explorer-pane-button']}`}
               aria-label={pane === 'map' ? 'Show the list' : 'Show the map'}
+              ref={paneButtonRef}
               onClick={() => setPane(pane === 'map' ? 'list' : 'map')}
             >
               <Icon
@@ -973,6 +950,54 @@ export default function MapExplorer({
             </div>
           </section>
         </div>
+        {/* After the overlay in the page, though under it on screen: Tab
+            goes search, pills, list, then the map. */}
+        <section aria-label="Map" className={styles['explorer-map']}>
+          <D3Map
+            orgs={mapOrgs}
+            suggestEntryUrl={suggestEntryLink}
+            tuning={tuning}
+            explorer={explorerLink}
+          />
+          {tuning && dataToggle}
+          {/* Always in the page, shown or not, so the link that opens it has
+              something to point at. Opening the drawer or a card closes it. */}
+          <div
+            id={LEGEND_ID}
+            role="note"
+            aria-label="How to read the map"
+            className={`border-plus-fill ${styles['explorer-legend']}`}
+            hidden={!legendOpen}
+          >
+            <p className="paragraph-small-bold padding-bottom-8px">
+              How to read the map
+            </p>
+            <ul className="paragraph-xs color-teal-300">
+              <li>Place names are categories: select one to filter the map.</li>
+              <li>
+                Bigger logos are larger organizations; +12 after a place name
+                means 12 more appear when zooming in.
+              </li>
+              <li>
+                Keyboard: Tab to the map, arrow keys between organizations,
+                Enter for details.
+              </li>
+            </ul>
+          </div>
+          {fitted && !selected && (
+            <p
+              className={`border-plus-fill drop-shadow-dark paragraph-small color-teal-300 ${styles['explorer-fitted']}`}
+              data-overlay={overlayOpen ? 'open' : undefined}
+            >
+              <Icon src="/images/icons/scan.svg" size={16} />
+              <span>
+                Map fitted to{' '}
+                <strong className="color-white">{fitted.place}</strong> ·{' '}
+                {fitted.rest}
+              </span>
+            </p>
+          )}
+        </section>
       </div>
       {lastUpdatedIso && (
         <div className="container-wide padding-top-8px padding-bottom-40px">

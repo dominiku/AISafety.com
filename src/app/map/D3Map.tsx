@@ -110,6 +110,10 @@ export interface MapExplorerLink {
   // phone's details sheet).
   topInset: number
   bottomInset: number
+  // Where the keyboard's focus goes when Esc leaves the map (the List pill).
+  onLeaveMap: () => void
+  // The arrow keys have moved the focus inside the map.
+  onKeyboardMove: () => void
   // Filled in by the map: bring a pin to the middle of the free view, and
   // put the keyboard's focus on a pin (false when it is not showing).
   apiRef: MutableRefObject<{
@@ -156,6 +160,7 @@ const REALM_SUB_LABEL_ZOOM = 1.5
 const EXPLORER_SHOW_ALL_MAX = 60
 // The explorer's selected pin is drawn this much bigger than its neighbors.
 const SELECTED_PIN_SCALE = 1.25
+const MAP_KEYS_ID = 'map-keyboard-instructions'
 // Closed orgs carry this as their first category; it places them in the Gone
 // Graveyard.
 const INACTIVE_CATEGORY = 'No longer active'
@@ -198,6 +203,8 @@ export default function D3Map({
     applyExplorerRef.current()
   }, [explorer])
   const tooltipRef = useRef<HTMLDivElement>(null)
+  // Explorer: where the keyboard's moves between places are announced.
+  const liveRef = useRef<HTMLParagraphElement>(null)
   // Zoom actions live in the d3 pipeline inside useEffect; the buttons reach
   // them through this ref.
   const controlsRef = useRef({
@@ -419,7 +426,7 @@ export default function D3Map({
     // pan does not reach here because the drag cancels the synthetic click.
     svg.on('click.mapsearch', event => {
       if (!isMobile()) return
-      if ((event.target as Element | null)?.closest('a')) return
+      if ((event.target as Element | null)?.closest('.mapItem')) return
       searchControlRef.current.close()
     })
 
@@ -454,7 +461,8 @@ export default function D3Map({
     // labels live inside <a>; a pan does not reach here because the drag
     // cancels the synthetic click.
     svg.on('click.explorer', event => {
-      if ((event.target as Element | null)?.closest('a, [data-area]')) return
+      if ((event.target as Element | null)?.closest('.mapItem, [data-area]'))
+        return
       explorerRef.current?.onClear()
     })
 
@@ -580,8 +588,9 @@ export default function D3Map({
       const badge = pill.badge
       if (badge) {
         badge.group.style('display', badge.count > 0 ? 'inline' : 'none')
+        // No stale figure left in a hidden badge for a screen reader to find.
+        badge.text.text(badge.count > 0 ? `+${badge.count}` : '')
         if (badge.count > 0) {
-          badge.text.text(`+${badge.count}`)
           const textBox = badge.text.node()?.getBBox()
           const badgeWidth = (textBox?.width ?? 0) + finalPadX
           const badgeHeight = box.height + finalPadY * 0.5
@@ -645,15 +654,10 @@ export default function D3Map({
         labelGroup
           .attr('data-area', label)
           .attr('role', 'button')
-          .attr('tabindex', 0)
+          .attr('tabindex', -1)
           .style('pointer-events', 'auto')
           .style('cursor', 'pointer')
           .on('click', activate)
-          .on('keydown', (event: KeyboardEvent) => {
-            if (event.key !== 'Enter' && event.key !== ' ') return
-            event.preventDefault()
-            activate()
-          })
       }
 
       const badgeGroup =
@@ -767,93 +771,112 @@ export default function D3Map({
       // but the dashboard groups map hovers/clicks by a single area. May be
       // '' for uncategorized items, which analytics receives as undefined.
       const firstCategory = org.category.split(',')[0].trim()
+      // In the explorer a pin is a button, not a link: it selects, and the
+      // one link to the org's site is in the details card.
+      const isLink = hasLink && !hasExplorer
       const linkEl = itemGroup
-        .append(hasLink ? 'a' : 'g')
+        .append(isLink ? 'a' : 'g')
         .attr('class', 'mapItem')
-      if (hasLink) {
+      if (isLink) {
         linkEl
           .attr('xlink:href', withUtm(org.link, 'Map'))
           .attr('target', '_blank')
           .attr('rel', 'noopener noreferrer')
-          .style('cursor', 'pointer')
-          .on('click', event => {
-            // In the explorer a pin selects its org, on a phone too (the
-            // details sheet has the link); nothing on the map opens a site.
-            // (Not tracked as a listing click: nothing was opened.)
-            if (explorerRef.current) {
-              event.preventDefault()
-              hideTooltip()
-              explorerRef.current.onSelect(org.id)
-              return
+      }
+      if (hasLink) {
+        linkEl.style('cursor', 'pointer').on('click', event => {
+          // In the explorer a pin selects its org, on a phone too (the
+          // details sheet has the link); nothing on the map opens a site.
+          // (Not tracked as a listing click: nothing was opened.)
+          if (explorerRef.current) {
+            event.preventDefault()
+            hideTooltip()
+            explorerRef.current.onSelect(org.id)
+            return
+          }
+          // Mobile: first tap shows the tooltip instead of opening the
+          // link. Second tap of the tooltip itself opens it. Matches the
+          // pattern used on the /communities map.
+          if (isMobile()) {
+            event.preventDefault()
+            const tt = tooltipRef.current
+            const container = containerRef.current
+            if (!tt || !container) return
+            // Only a tap on a DIFFERENT pin (re)opens the tooltip — a
+            // repeat tap on the already-open pin just repositions it below.
+            // Same guard as the /communities map, and it's what keeps the
+            // hover count honest: one open gesture, one recorded hover.
+            if (tappedOrgId !== org.id) {
+              tt.querySelector('strong')!.textContent = org.tooltipTitle
+              tt.querySelector('span')!.textContent = org.description
+              tt.setAttribute('data-link-url', org.link)
+              tt.setAttribute('data-link-title', org.title)
+              // Stash id + area too, so the tooltip's second-tap click can
+              // report them — the tooltip click handler has no org in scope.
+              tt.setAttribute('data-listing-id', org.id)
+              tt.setAttribute('data-area', firstCategory)
+              tt.style.visibility = 'visible'
+              tt.style.opacity = '1'
+              tappedOrgId = org.id
+              // A mobile "hover" is the first tap that opens the tooltip —
+              // there's no cursor to dwell, so it counts immediately.
+              // (hasLink is guaranteed: this handler only exists on links.)
+              trackListingHover(
+                'Map',
+                org.title,
+                org.link,
+                org.id,
+                firstCategory || undefined
+              )
             }
-            // Mobile: first tap shows the tooltip instead of opening the
-            // link. Second tap of the tooltip itself opens it. Matches the
-            // pattern used on the /communities map.
-            if (isMobile()) {
-              event.preventDefault()
-              const tt = tooltipRef.current
-              const container = containerRef.current
-              if (!tt || !container) return
-              // Only a tap on a DIFFERENT pin (re)opens the tooltip — a
-              // repeat tap on the already-open pin just repositions it below.
-              // Same guard as the /communities map, and it's what keeps the
-              // hover count honest: one open gesture, one recorded hover.
-              if (tappedOrgId !== org.id) {
-                tt.querySelector('strong')!.textContent = org.tooltipTitle
-                tt.querySelector('span')!.textContent = org.description
-                tt.setAttribute('data-link-url', org.link)
-                tt.setAttribute('data-link-title', org.title)
-                // Stash id + area too, so the tooltip's second-tap click can
-                // report them — the tooltip click handler has no org in scope.
-                tt.setAttribute('data-listing-id', org.id)
-                tt.setAttribute('data-area', firstCategory)
-                tt.style.visibility = 'visible'
-                tt.style.opacity = '1'
-                tappedOrgId = org.id
-                // A mobile "hover" is the first tap that opens the tooltip —
-                // there's no cursor to dwell, so it counts immediately.
-                // (hasLink is guaranteed: this handler only exists on links.)
-                trackListingHover(
-                  'Map',
-                  org.title,
-                  org.link,
-                  org.id,
-                  firstCategory || undefined
-                )
-              }
-              positionTooltip(event.clientX, event.clientY, tt, container, {
-                minLeftMargin: 20,
-              })
-              return
-            }
-            trackListingClick(
-              'Map',
-              org.title,
-              org.link,
-              org.id,
-              undefined,
-              'map',
-              firstCategory || undefined
-            )
-            // Clicking a pin leaves the browser's focus ring on the link, and
-            // it is still sitting there when you come back from the tab that
-            // opened. A mouse click does not need a focus ring. detail > 0
-            // means a real pointer click, so a keyboard Enter on a focused
-            // pin keeps its ring and the user keeps their place.
-            if (event.detail > 0) {
-              ;(event.currentTarget as SVGElement | null)?.blur?.()
-            }
-          })
+            positionTooltip(event.clientX, event.clientY, tt, container, {
+              minLeftMargin: 20,
+            })
+            return
+          }
+          trackListingClick(
+            'Map',
+            org.title,
+            org.link,
+            org.id,
+            undefined,
+            'map',
+            firstCategory || undefined
+          )
+          // Clicking a pin leaves the browser's focus ring on the link, and
+          // it is still sitting there when you come back from the tab that
+          // opened. A mouse click does not need a focus ring. detail > 0
+          // means a real pointer click, so a keyboard Enter on a focused
+          // pin keeps its ring and the user keeps their place.
+          if (event.detail > 0) {
+            ;(event.currentTarget as SVGElement | null)?.blur?.()
+          }
+        })
       }
 
-      // Beside the explorer column a pin is a button named after its org.
-      // It is kept out of the tab order: 369 pins in map order make no sane
-      // keyboard route, and the card list reaches every one of them.
+      // In the explorer a pin is a button named after its org, its category
+      // and its place. It is out of the Tab order: the map is one Tab stop,
+      // and the arrow keys move among its pins (see the keyboard model).
       if (hasLink && hasExplorer) {
+        const place = mapAreaPath(firstCategory, scheme).at(-1)
+        const pinName = [org.tooltipTitle, firstCategory, place]
+          .filter(Boolean)
+          .join(', ')
         linkEl
           .attr('role', 'button')
-          .attr('aria-label', org.tooltipTitle)
+          .attr('data-name', pinName)
+          .attr('aria-label', pinName)
           .attr('tabindex', -1)
+        // The keyboard's focus ring, shown by :focus-visible.
+        linkEl
+          .append('circle')
+          .attr('class', 'mapFocusRing')
+          .attr('r', iconSize / 2 + 5)
+          .attr('fill', 'none')
+          .attr('stroke', 'var(--teal-bright-400)')
+          .attr('stroke-width', 2)
+          .attr('vector-effect', 'non-scaling-stroke')
+          .style('pointer-events', 'none')
       }
 
       // White circle background
@@ -1271,11 +1294,26 @@ export default function D3Map({
         .call(zoom.transform, fitTransform())
     }
     controlsRef.current = {
+      // Someone who asked for less motion gets the new zoom at once.
       zoomIn: () => {
-        svg.transition().duration(300).call(zoom.scaleBy, 1.5)
+        svg
+          .transition()
+          .duration(
+            window.matchMedia('(prefers-reduced-motion: reduce)').matches
+              ? 0
+              : 300
+          )
+          .call(zoom.scaleBy, 1.5)
       },
       zoomOut: () => {
-        svg.transition().duration(300).call(zoom.scaleBy, 0.75)
+        svg
+          .transition()
+          .duration(
+            window.matchMedia('(prefers-reduced-motion: reduce)').matches
+              ? 0
+              : 300
+          )
+          .call(zoom.scaleBy, 0.75)
       },
       reset: resetView,
     }
@@ -1709,6 +1747,170 @@ export default function D3Map({
       explorerRef.current.onReady?.()
     }
 
+    // Explorer: the map's keyboard model. The map is one Tab stop; inside
+    // it the arrow keys move a roving focus over the place names and the
+    // pins showing, place by place (A to Z) and name by name: Left and Right
+    // step through them all, Up and Down jump from place to place, Home and
+    // End go to the first and last, Enter or Space activates, + and - zoom,
+    // and Esc leaves the map.
+    const container = containerRef.current
+    const announce = (text: string) => {
+      if (liveRef.current) liveRef.current.textContent = text
+    }
+    let lastFocusedPlace: string | null = null
+    const keyboardStops = () => {
+      const stops: { el: SVGElement; place: string; isPlace: boolean }[] = []
+      const places = [...areaPills.entries()]
+        .filter(
+          ([, pill]) =>
+            pill.category !== null && !pill.group.classed('mapFadeHidden')
+        )
+        .sort(([a], [b]) => a.localeCompare(b))
+      for (const [place, pill] of places) {
+        const node = pill.group.node()
+        if (node) stops.push({ el: node, place, isPlace: true })
+        pins
+          .filter(
+            pin =>
+              pin.link?.getAttribute('role') === 'button' &&
+              pin.tier.regions.at(-1) === place &&
+              !pin.group.classed('mapFadeHidden') &&
+              !pin.group.classed('mapDimmed')
+          )
+          .sort((a, b) => a.tier.title.localeCompare(b.tier.title))
+          .forEach(pin => {
+            if (pin.link) stops.push({ el: pin.link, place, isPlace: false })
+          })
+      }
+      return stops
+    }
+    const focusStop = (
+      stops: ReturnType<typeof keyboardStops>,
+      index: number
+    ) => {
+      const stop = stops[index]
+      if (!stop) return
+      if (!stop.isPlace) {
+        // "BlueDot Impact, Training and education, Training Town, 3 of 12".
+        const inPlace = stops.filter(s => s.place === stop.place && !s.isPlace)
+        stop.el.setAttribute(
+          'aria-label',
+          `${stop.el.getAttribute('data-name')}, ${inPlace.indexOf(stop) + 1} of ${inPlace.length}`
+        )
+      }
+      stop.el.focus({ preventScroll: true })
+      if (stop.place !== lastFocusedPlace) {
+        lastFocusedPlace = stop.place
+        const count = stops.filter(
+          s => s.place === stop.place && !s.isPlace
+        ).length
+        announce(`${stop.place}, ${count} organizations showing`)
+      }
+      // A stop outside the view is brought into it, at the visitor's zoom.
+      const pane = svgNode.getBoundingClientRect()
+      const box = stop.el.getBoundingClientRect()
+      const link = explorerRef.current
+      const left = pane.left + (link?.leftInset ?? 0)
+      if (
+        box.left < left ||
+        box.right > pane.right ||
+        box.top < pane.top + (link?.topInset ?? 0) ||
+        box.bottom > pane.bottom - (link?.bottomInset ?? 0)
+      ) {
+        const t = d3.zoomTransform(svgNode)
+        const unit =
+          Math.min(pane.width / PADDED_WIDTH, pane.height / PADDED_HEIGHT) || 1
+        // The stop's middle, from screen pixels back to map pixels.
+        const viewX =
+          (box.left + box.width / 2 - pane.left - pane.width / 2) / unit +
+          PADDED_WIDTH / 2
+        const viewY =
+          (box.top + box.height / 2 - pane.top - pane.height / 2) / unit +
+          PADDED_HEIGHT / 2
+        flyToPoint(
+          (viewX - offsetX - t.x) / t.k,
+          (viewY - offsetY - t.y) / t.k,
+          t.k,
+          link?.leftInset ?? 0,
+          link?.topInset ?? 0,
+          link?.bottomInset ?? 0
+        )
+      }
+    }
+    const handleMapKey = (event: KeyboardEvent) => {
+      const link = explorerRef.current
+      if (!link || event.altKey || event.ctrlKey || event.metaKey) return
+      const stops = keyboardStops()
+      const at = stops.findIndex(stop => stop.el === document.activeElement)
+      const nextPlace = (from: number, step: 1 | -1) => {
+        for (let i = from + step; i >= 0 && i < stops.length; i += step) {
+          if (stops[i].isPlace) return i
+        }
+        return from
+      }
+      let to: number | null = null
+      switch (event.key) {
+        case 'ArrowRight':
+          to = Math.min(at + 1, stops.length - 1)
+          break
+        case 'ArrowLeft':
+          to = Math.max(at - 1, 0)
+          break
+        case 'ArrowDown':
+          to = at < 0 ? 0 : nextPlace(at, 1)
+          break
+        case 'ArrowUp':
+          // From inside a place, first to that place's own name.
+          to =
+            at < 0
+              ? 0
+              : stops[at].isPlace
+                ? nextPlace(at, -1)
+                : nextPlace(at + 1, -1)
+          break
+        case 'Home':
+          to = 0
+          break
+        case 'End':
+          to = stops.length - 1
+          break
+        case 'Enter':
+        case ' ':
+          if (at < 0) to = 0
+          else {
+            event.preventDefault()
+            stops[at].el.dispatchEvent(
+              new MouseEvent('click', { bubbles: true })
+            )
+          }
+          break
+        case '+':
+        case '=':
+          event.preventDefault()
+          controlsRef.current.zoomIn()
+          break
+        case '-':
+          event.preventDefault()
+          controlsRef.current.zoomOut()
+          break
+        case 'Escape':
+          // Leaving the map comes before everything else Esc does here.
+          event.stopPropagation()
+          hideTooltip()
+          lastFocusedPlace = null
+          link.onLeaveMap()
+          break
+      }
+      if (to !== null) {
+        event.preventDefault()
+        link.onKeyboardMove()
+        focusStop(stops, to)
+      }
+    }
+    if (hasExplorer && container) {
+      container.addEventListener('keydown', handleMapKey)
+    }
+
     // ESC resets the view, same as the recenter button. Skip while typing in
     // a form field — ESC there shouldn't yank the map.
     const handleEscKey = (e: KeyboardEvent) => {
@@ -1791,8 +1993,8 @@ export default function D3Map({
     }
     document.addEventListener('click', handleDocumentClick)
 
-    const container = containerRef.current
     return () => {
+      container?.removeEventListener('keydown', handleMapKey)
       // A pending hover dwell must not fire after unmount.
       cancelHoverTimer()
       // The ring is removed with the SVG; the fns must not outlive the zoom
@@ -1823,7 +2025,27 @@ export default function D3Map({
 
   return (
     <>
-      <div ref={containerRef} className={styles['map-container']} />
+      {hasExplorer ? (
+        <>
+          <div
+            ref={containerRef}
+            className={styles['map-container']}
+            role="group"
+            aria-label="Map"
+            aria-describedby={MAP_KEYS_ID}
+            tabIndex={0}
+          />
+          <p id={MAP_KEYS_ID} className="visually-hidden">
+            Arrow keys move between place names and organizations: left and
+            right step through them, up and down jump between places, Home and
+            End go to the first and last. Enter selects, plus and minus zoom,
+            Escape leaves the map.
+          </p>
+          <p ref={liveRef} aria-live="polite" className="visually-hidden" />
+        </>
+      ) : (
+        <div ref={containerRef} className={styles['map-container']} />
+      )}
 
       <MapControls
         className={styles['map-controls']}
