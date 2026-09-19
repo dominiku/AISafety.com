@@ -470,93 +470,120 @@ export function canopyMarkup(
 }
 
 /**
- * A volcano standing on its tile: a cone from a wide foot up to a broken rim,
- * lit from the left, gullies down its flanks, ash pale round its top, a lake
- * in the crater seen over the near lip, and steam rising from it. `foot` is
- * the middle of its base, `radius` half the width of the base, `height` how
- * far up the screen the rim stands (map grid units).
+ * A volcano rising from its tile: the tile's own six sides are the foot of
+ * the cone, and its flanks go up from them to a rim the same shape, smaller
+ * and higher. `top` is the tile's top (corners E, SE, SW, W, NW, NE), so the
+ * three flanks toward the viewer stand on its sides SE, S and SW; they are
+ * lit from the left. Gullies run down them, ash lies pale round the rim, a
+ * lake fills the crater, and steam rises from it. `height` is how far up the
+ * screen the rim stands (map grid units).
  */
 export function volcanoMarkup(
-  foot: Point,
-  radius: number,
+  top: Point[],
   height: number,
-  squash: number,
   g: number,
   cliff: CliffColors
 ): string {
-  const [cx, cy] = [foot[0] * g, foot[1] * g]
-  const [rx, ry] = [radius * g, radius * squash * g]
-  const top = cy - height * g
-  const [tx, ty] = [rx * 0.42, ry * 0.42]
-  const n = (value: number) => value.toFixed(1)
-  // The flank between two shares of the way from the rim (0) to the foot (1),
-  // from the left edge across to `right` (-1 the left edge, 1 the right).
-  const flank = (from: number, to: number, right: number) => {
-    const half = (t: number) => tx + (rx - tx) * t
-    const level = (t: number) => top + (cy - top) * t
-    const bulge = (t: number) => (ty + (ry - ty) * t) * (1 - Math.abs(right))
-    return `M${n(cx - half(from))},${n(level(from))}L${n(cx + right * half(from))},${n(level(from) + bulge(from))}L${n(cx + right * half(to))},${n(level(to) + bulge(to))}L${n(cx - half(to))},${n(level(to))}Z`
-  }
-  const body = `M${n(cx - rx)},${n(cy)}L${n(cx - tx)},${n(top)}L${n(cx + tx)},${n(top)}L${n(cx + rx)},${n(cy)}A${n(rx)},${n(ry)} 0 0 1 ${n(cx - rx)},${n(cy)}Z`
-  const markup = [
-    `<path d="${body}" fill="${cliff.face}"/>`,
-    // The lit side: from the left edge to a little short of the middle.
-    `<path d="${flank(0, 1, -0.12)}" fill="${cliff.lip}" fill-opacity="0.55"/>`,
-    // Ash round the top, paler.
-    `<path d="M${n(cx - tx)},${n(top)}L${n(cx + tx)},${n(top)}L${n(cx + tx + (rx - tx) * 0.2)},${n(top + (cy - top) * 0.2)}L${n(cx + tx * 0.5)},${n(top + (cy - top) * 0.13 + ty)}L${n(cx)},${n(top + (cy - top) * 0.24 + ty)}L${n(cx - tx * 0.6)},${n(top + (cy - top) * 0.14 + ty)}L${n(cx - tx - (rx - tx) * 0.2)},${n(top + (cy - top) * 0.2)}Z" fill="${SNOW_ASH}" fill-opacity="0.85"/>`,
+  const middle: Point = [
+    top.reduce((sum, point) => sum + point[0], 0) / 6,
+    top.reduce((sum, point) => sum + point[1], 0) / 6,
   ]
-  // Gullies, fanning out toward the foot.
-  for (let k = 0; k < 7; k++) {
-    const across = (k + 0.5) / 7 - 0.5
-    const start = 0.2 + roll(k + 11) * 0.12
-    const end = 0.7 + roll(k + 23) * 0.28
-    const at = (t: number): [number, number] => [
-      cx + across * 2 * (tx + (rx - tx) * t),
-      top +
-        (cy - top) * t +
-        (ty + (ry - ty) * t) * (1 - Math.abs(across * 2)) * 0.9,
+  const RIM = 0.36
+  const rim = top.map(
+    ([x, y]): Point => [
+      middle[0] + (x - middle[0]) * RIM,
+      middle[1] + (y - middle[1]) * RIM - height,
     ]
-    const [a, b] = [at(start), at(end)]
-    markup.push(
-      `<path d="M${n(a[0])},${n(a[1])}L${n(b[0])},${n(b[1])}" stroke="${cliff.foot}" stroke-opacity="0.6" stroke-width="2.2" stroke-linecap="round"/>`
-    )
-  }
-  // The crater: the far wall inside the rim, the lake, and the rim's lip. A
-  // few crags stand on the far rim.
-  markup.push(
-    `<ellipse cx="${n(cx)}" cy="${n(top)}" rx="${n(tx)}" ry="${n(ty)}" fill="${cliff.foot}"/>`,
-    `<ellipse cx="${n(cx)}" cy="${n(top + ty * 0.3)}" rx="${n(tx * 0.78)}" ry="${n(ty * 0.62)}" fill="${WATER}"/>`,
-    `<path d="M${n(cx - tx * 0.4)},${n(top + ty * 0.3)}h${n(tx * 0.45)}" stroke="${WATER_STREAK}" stroke-width="2.4" stroke-linecap="round"/>`,
-    `<ellipse cx="${n(cx)}" cy="${n(top)}" rx="${n(tx)}" ry="${n(ty)}" fill="none" stroke="${cliff.lip}" stroke-width="3"/>`
   )
-  for (let k = 0; k < 5; k++) {
-    const angle = Math.PI * (1.12 + (0.76 * k) / 4)
-    const px = cx + Math.cos(angle) * tx
-    const py = top + Math.sin(angle) * ty
-    const w = tx * (0.3 + roll(k + 31) * 0.14)
-    const h = ty * (0.55 + roll(k + 41) * 0.5)
+  const xy = ([x, y]: Point) => `${(x * g).toFixed(1)},${(y * g).toFixed(1)}`
+  const path = (points: Point[]) => `M${points.map(xy).join('L')}Z`
+  const between = (a: Point, b: Point, t: number): Point => [
+    a[0] + (b[0] - a[0]) * t,
+    a[1] + (b[1] - a[1]) * t,
+  ]
+  const markup: string[] = []
+  // The three flanks toward the viewer: SE in shade, S, SW in the light.
+  const tones = [cliff.foot, cliff.face, cliff.lip]
+  ;[0, 1, 2].forEach(k => {
+    const [a, b, c, d] = [top[k], top[k + 1], rim[k + 1], rim[k]]
     markup.push(
-      `<path d="M${n(px - w / 2)},${n(py)}L${n(px - w * 0.05)},${n(py - h)}L${n(px + w / 2)},${n(py)}Z" fill="${cliff.lip}"/>`,
-      `<path d="M${n(px - w * 0.05)},${n(py - h)}L${n(px + w / 2)},${n(py)}L${n(px + w * 0.12)},${n(py)}Z" fill="${cliff.foot}"/>`
+      `<path d="${path([a, b, c, d])}" fill="${cliff.face}" stroke="${cliff.face}" stroke-width="1" stroke-linejoin="round"/>`,
+      `<path d="${path([a, b, c, d])}" fill="${tones[k]}" fill-opacity="${k === 1 ? 0 : 0.55}"/>`,
+      // Ash round the top of the flank.
+      `<path d="${path([between(d, a, 0.24), between(c, b, 0.24), c, d])}" fill="${SNOW_ASH}" fill-opacity="0.8"/>`
     )
-  }
-  markup.push(steamMarkup(cx + tx * 0.15, top - ty * 0.2, tx * 1.5, 0.75))
+    for (let n = 0; n < 3; n++) {
+      const t = (n + 0.5 + (roll(k * 5 + n) - 0.5) * 0.4) / 3
+      const from = between(between(d, c, t), between(a, b, t), 0.3)
+      const to = between(
+        between(d, c, t),
+        between(a, b, t),
+        0.72 + roll(k * 7 + n) * 0.25
+      )
+      markup.push(
+        `<path d="M${xy(from)}L${xy(to)}" stroke="${cliff.foot}" stroke-opacity="0.6" stroke-width="2.2" stroke-linecap="round"/>`
+      )
+    }
+  })
+  // The crater: the wall inside the far rim, the lake, the rim's lip.
+  const rimMiddle: Point = [middle[0], middle[1] - height]
+  const lake = rim.map(
+    ([x, y]): Point => [
+      rimMiddle[0] + (x - rimMiddle[0]) * 0.74,
+      rimMiddle[1] +
+        (y - rimMiddle[1]) * 0.6 +
+        (rim[1][1] - rimMiddle[1]) * 0.3,
+    ]
+  )
+  markup.push(
+    `<path d="${path(rim)}" fill="${cliff.foot}"/>`,
+    `<path d="${path(lake)}" fill="${WATER}" stroke="${WATER}" stroke-width="3" stroke-linejoin="round"/>`,
+    `<path d="M${xy([lake[3][0] + 0.12, lake[3][1]])}h${((lake[0][0] - lake[3][0]) * 0.4 * g).toFixed(1)}" stroke="${WATER_STREAK}" stroke-width="2.4" stroke-linecap="round"/>`,
+    `<path d="${path(rim)}" fill="none" stroke="${cliff.lip}" stroke-width="3" stroke-linejoin="round"/>`
+  )
+  // Crags on the far rim.
+  ;[3, 4, 5].forEach(k => {
+    const at = between(rim[k], rim[(k + 1) % 6], 0.5)
+    const w = Math.abs(rim[0][0] - rim[3][0]) * 0.2
+    const h = w * (0.9 + roll(k + 41) * 0.6)
+    markup.push(
+      `<path d="${path([
+        [at[0] - w / 2, at[1]],
+        [at[0] - w * 0.05, at[1] - h],
+        [at[0] + w / 2, at[1]],
+      ])}" fill="${cliff.lip}"/>`,
+      `<path d="${path([
+        [at[0] - w * 0.05, at[1] - h],
+        [at[0] + w / 2, at[1]],
+        [at[0] + w * 0.12, at[1]],
+      ])}" fill="${cliff.foot}"/>`
+    )
+  })
+  markup.push(
+    steamMarkup(
+      (rimMiddle[0] + 0.1) * g,
+      (rimMiddle[1] - 0.1) * g,
+      Math.abs(rim[0][0] - rim[3][0]) * 0.7 * g,
+      0.75
+    )
+  )
   return markup.join('')
 }
 
 /**
- * A house on stilts, of timber and thatch, as they stand along tropical
- * rivers and shores: `kind` 0 a small hut with a steep thatched roof and a
+ * A house of timber and thatch, as they stand along tropical rivers and
+ * shores, on posts of its own (`raised`) or straight on a deck that is: `kind` 0 a small hut with a steep thatched roof and a
  * ladder, 1 a long house with a low roof and a veranda, 2 a tall-roofed house
  * whose ridge sweeps up at both ends. `size` is its width in map grid units;
  * its posts stand at x, y.
  */
-export function stiltHouseMarkup(
+export function thatchHouseMarkup(
   x: number,
   y: number,
   size: number,
   g: number,
-  kind: number
+  kind: number,
+  raised: boolean
 ): string {
   const w = size * g * (kind === 1 ? 1.45 : 1)
   const [cx, fy] = [x * g, y * g]
@@ -572,12 +599,12 @@ export function stiltHouseMarkup(
     `<rect x="${px(left)}" y="${py(bottom + up)}" width="${(across * w).toFixed(1)}" height="${(up * size * g).toFixed(1)}" fill="${fill}"/>`
   const poly = (points: [number, number][], fill: string) =>
     `<path d="M${points.map(([dx, up]) => `${px(dx)},${py(up)}`).join('L')}Z" fill="${fill}"/>`
-  const floor = 0.26
+  const floor = raised ? 0.26 : 0.04
   const wall = kind === 2 ? 0.24 : 0.34
   const eaves = floor + wall
   const markup = [
     // Posts, the floor they carry, and the timber walls with their boards.
-    ...[-0.4, -0.13, 0.13, 0.4].map(
+    ...(raised ? [-0.4, -0.13, 0.13, 0.4] : []).map(
       dx =>
         `<path d="M${px(dx)},${py(floor)}V${py(0)}" stroke="${PLANK_GAP}" stroke-width="2.6"/>`
     ),
@@ -641,7 +668,7 @@ export function stiltHouseMarkup(
       `<path d="M${px(dx)},${py(eaves - 0.04)}v${(size * g * 0.06).toFixed(1)}" stroke="${THATCH.shade}" stroke-width="2"/>`
     )
   }
-  if (kind === 0) {
+  if (kind === 0 && raised) {
     // The ladder up to the door.
     markup.push(
       `<path d="M${px(-0.08)},${py(floor)}L${px(-0.2)},${py(0)}M${px(0.06)},${py(floor)}L${px(-0.06)},${py(0)}" stroke="${THATCH.shade}" stroke-width="1.6"/>`,

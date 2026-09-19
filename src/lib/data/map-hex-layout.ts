@@ -105,8 +105,12 @@ export interface HexDistrictSpec {
   // A village on stilts: its ground is a deck of planks, and what shows
   // under its edges toward the viewer is not cliff but the posts it stands on.
   stilts?: boolean
-  // A building of its own stands in the roomiest gap its logos leave.
+  // A building of its own stands in the middle of its most central tile,
+  // and its logos round it.
   building?: 'capitol' | 'school' | 'forum'
+  // A footpath leads from its building to the landmark of the district
+  // with this code.
+  pathTo?: string
   // A beach: along its sides to the sea its top has a band of damp sand in
   // place of a rim, and its face is wet sand with foam at the waterline. It
   // keeps to its tiles' outlines, as every district does.
@@ -302,6 +306,18 @@ export interface HexLayout {
   springs: { tile: string; at: Point; width: number }[]
   // Planks where the road crosses the moat, drawn once `tile` is.
   bridges: { tile: string; a: Point; b: Point; width: number }[]
+  // Districts' own buildings: the middle of the foot, the width, and the
+  // level the building stands at.
+  buildings: {
+    district: string
+    kind: 'capitol' | 'school' | 'forum'
+    x: number
+    y: number
+    width: number
+    height: number
+  }[]
+  // Footpaths from a building to another district's landmark.
+  paths: { points: Point[]; width: number }[]
   districtAt: (x: number, y: number) => string | null
 }
 
@@ -410,6 +426,10 @@ const SIDES: HexDirection[] = ['SE', 'S', 'SW', 'NW', 'N', 'NE']
 // ground): an escarpment's, and a volcano's.
 const SCARP_RUN = 0.3
 const CONE_RUN = 0.35
+
+// How wide a district's building stands, and a footpath (map grid units).
+const BUILDING_WIDTH = { capitol: 1.7, school: 1.7, forum: 1.1 }
+const PATH_WIDTH = 0.26
 
 // A pier's deck: half its width, and how far past the middle of its last tile
 // its head reaches (map grid units).
@@ -1108,6 +1128,53 @@ export function layoutHexMap(
     })
   }
 
+  // A district's building stands in the middle of a tile: the one nearest
+  // the middle of the district (of the tiles with no river, road or
+  // landmark) that leaves all its logos room.
+  const buildingOf = new Map<string, HexLayout['buildings'][number]>()
+  // Where it might stand: the middle of each such tile, the most central
+  // first. It takes the first where all the district's logos still fit.
+  const sitesOf = new Map<string, HexLayout['buildings']>()
+  for (const { code, district, building } of spec.districts) {
+    const tiles = tilesOf.get(code) ?? []
+    if (!building || tiles.length === 0) continue
+    const free = tiles.filter(tile => tile.mark === null)
+    if (free.length === 0) {
+      throw new Error(
+        `Hex map: district "${code}" has no tile free of river, road and landmark for its ${building}`
+      )
+    }
+    const centers = tiles.map(tile => drawn(tile, flatCenter(tile)))
+    const heart: Point = [
+      centers.reduce((sum, point) => sum + point[0], 0) / centers.length,
+      centers.reduce((sum, point) => sum + point[1], 0) / centers.length,
+    ]
+    const away = (tile: PlannedTile) => {
+      const [x, y] = drawn(tile, flatCenter(tile))
+      return Math.hypot(x - heart[0], y - heart[1])
+    }
+    const width = BUILDING_WIDTH[building]
+    sitesOf.set(
+      code,
+      [...free]
+        .sort((a, b) => away(a) - away(b))
+        .map(site => {
+          const [x, y] = drawn(site, flatCenter(site))
+          return {
+            district,
+            kind: building,
+            x,
+            y: y + width * 0.24,
+            width,
+            height: site.height,
+          }
+        })
+    )
+    buildingOf.set(code, sitesOf.get(code)![0])
+  }
+  // A footpath from a building to another district's landmark, in an easy
+  // curve. Logos of both districts keep off it.
+  const paths: (HexLayout['paths'][number] & { codes: string[] })[] = []
   // Each district's logos onto its plateau: its first tiles, then one more,
   // and so on until all its logos have room. Tiles the river, the road or a
   // landmark are on are part of the plateau from the start.
@@ -1187,20 +1254,48 @@ export function layoutHexMap(
           points: piece.points,
           halfWidth: piece.width / 2,
           closed: piece.closed,
-        })),
-      // The castle is larger than the keep's tile.
-      areas:
-        keep && landmarkOn.has(keep.ref)
+        }))
+        .concat(
+          paths
+            .filter(path => path.codes.includes(tiles[0]?.code ?? ''))
+            .map(path => ({
+              points: path.points,
+              halfWidth: path.width / 2,
+              closed: undefined,
+            }))
+        ),
+      // The castle is larger than the keep's tile; and a district's building
+      // stands among its logos.
+      areas: [
+        ...(keep && landmarkOn.has(keep.ref)
           ? [landmarkOn.get(keep.ref)!].map(mark => ({
               x: mark.x,
               y: mark.y + mark.height * 0.12,
               rx: mark.width * 0.47,
               ry: mark.height * 0.4,
             }))
-          : [],
+          : []),
+        ...[buildingOf.get(tiles[0]?.code ?? '')].flatMap(building =>
+          building
+            ? [
+                {
+                  x: building.x,
+                  y: building.y - building.width * 0.22,
+                  rx: building.width * 0.5,
+                  ry: building.width * 0.3,
+                },
+              ]
+            : []
+        ),
+      ],
     }
   }
-  for (const { code, district, minTiles = 1, overWater } of spec.districts) {
+  const packDistrict = ({
+    code,
+    district,
+    minTiles = 1,
+    overWater,
+  }: HexDistrictSpec) => {
     const tiles = tilesOf.get(code)!
     const fixed = tiles.filter(tile => tile.mark !== null)
     const own = logos
@@ -1215,8 +1310,7 @@ export function layoutHexMap(
       tiles.filter((tile, n) => n < count || fixed.includes(tile))
     if (own.length === 0) {
       // Nobody lives there yet, but its river, road and landmark stand.
-      fixed.forEach(tile => used.add(tile.ref))
-      continue
+      return { own, spots: [] as (Point | null)[], tiles: fixed }
     }
     const radii = own.map(logo => logo.radius)
     const whole = (found: (Point | null)[]) =>
@@ -1255,12 +1349,60 @@ export function layoutHexMap(
         spots = packPlateau(plateau, radii, packing)
       }
     }
+    return { own, spots, tiles: plateauTiles(taken) }
+  }
+  // Buildings first: each tries its sites until its district's logos all fit
+  // (and keeps the most central if none does; the logos left over are
+  // reported as unplaced).
+  for (const district of spec.districts) {
+    const sites = sitesOf.get(district.code)
+    if (!sites) continue
+    const fits = sites.find(site => {
+      buildingOf.set(district.code, site)
+      return packDistrict(district).spots.every(spot => spot !== null)
+    })
+    buildingOf.set(district.code, fits ?? sites[0])
+  }
+  const buildings = [...buildingOf.values()]
+  for (const { code, pathTo } of spec.districts) {
+    if (!pathTo) continue
+    const from = buildingOf.get(code)
+    const target = (tilesOf.get(pathTo) ?? []).find(tile =>
+      landmarkOn.has(tile.ref)
+    )
+    if (!from || !target) {
+      throw new Error(
+        `Hex map: district "${code}" has a path to "${pathTo}", which needs a building here and a landmark there`
+      )
+    }
+    const mark = landmarkOn.get(target.ref)!
+    // It ends at the landmark's near corner, on the side it comes from.
+    const side = Math.sign(from.x - mark.x) || 1
+    const to: Point = [
+      mark.x + side * mark.width * 0.42,
+      mark.y + mark.height * 0.42,
+    ]
+    const [dx, dy] = [to[0] - from.x, to[1] - from.y]
+    const length = Math.hypot(dx, dy)
+    const points = Array.from({ length: 13 }, (_, n): Point => {
+      const t = n / 12
+      const sway = Math.sin(t * Math.PI * 2) * 0.18
+      return [
+        from.x + dx * t - (dy / length) * sway,
+        from.y + dy * t + (dx / length) * sway,
+      ]
+    })
+    paths.push({ points, width: PATH_WIDTH, codes: [code, pathTo] })
+  }
+
+  for (const district of spec.districts) {
+    const { own, spots, tiles } = packDistrict(district)
     own.forEach((logo, n) => {
       const at = spots[n]
       if (at) positions.set(logo.id, { x: at[0], y: at[1] })
       else unplaced.push(logo.id)
     })
-    plateauTiles(taken).forEach(tile => used.add(tile.ref))
+    tiles.forEach(tile => used.add(tile.ref))
   }
 
   // The sea comes in from the edge of the map over open sea and over planned
@@ -1401,6 +1543,8 @@ export function layoutHexMap(
     ends,
     springs,
     bridges,
+    buildings,
+    paths: paths.map(({ points, width }) => ({ points, width })),
     districtAt,
   }
 }

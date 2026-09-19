@@ -64,7 +64,7 @@ import {
   geyserMarkup,
   palmMarkup,
   parasolMarkup,
-  stiltHouseMarkup,
+  thatchHouseMarkup,
   volcanoMarkup,
   beachHutMarkup,
   sulphurPoolMarkup,
@@ -1064,26 +1064,6 @@ export function hexBackdropMarkup(
       `<use href="#${symbol}" x="${((x - w / 2) * g).toFixed(1)}" y="${((y - h) * g).toFixed(1)}" width="${(w * g).toFixed(1)}" height="${(h * g).toFixed(1)}"/>`
     const level = plateau.height
 
-    const building = plateau.tiles[0].building
-    if (building) {
-      const [site] = scatterSpots(inside, [...logos, ...fixed], extent, {
-        spacing: 0.3,
-        minRoom: 0.42,
-        maxRoom: 1.5,
-      }).sort((a, b) => b.room - a.room)
-      if (site) {
-        const across = Math.min(2.8, site.room * 2.1)
-        const foot = site.y + across * 0.2
-        stand(foot, level, buildingMarkup(building, site.x, foot, across, g))
-        // Nothing else stands where it does.
-        fixed.push({ x: site.x, y: site.y, radius: across * 0.6 })
-      } else {
-        console.warn(
-          `Hex map: no gap large enough for the ${building} of "${plateau.tiles[0].district}"`
-        )
-      }
-    }
-
     if (cover === 'dunes') {
       // Great dunes, wherever the river and the road leave room, whatever
       // logos stand there (the logos are drawn over them). Each stands whole
@@ -1122,7 +1102,11 @@ export function hexBackdropMarkup(
         const foot = spot.y + 0.38
         const kind =
           spot.room > 0.5 && spot.roll > 0.55 ? 1 : spot.roll > 0.3 ? 0 : 2
-        stand(foot, level, stiltHouseMarkup(spot.x, foot, 0.98, g, kind))
+        stand(
+          foot,
+          level,
+          thatchHouseMarkup(spot.x, foot, 0.98, g, kind, false)
+        )
       })
       return
     }
@@ -1426,16 +1410,14 @@ export function hexBackdropMarkup(
       drawRelief(plateau, tone, id)
       for (const tile of plateau.tiles) {
         if (tile.state === 'crater') {
-          const depth = (Math.sqrt(3) / 2) * view.size * view.squash
-          const foot: Point = [tile.center[0], tile.center[1] + depth * 0.18]
+          // The cone stands on the whole of its tile, so it is drawn with
+          // what stands, at the depth of the tile's near side.
           stand(
-            foot[1] + depth * 0.6,
+            tile.top[1][1],
             height,
             volcanoMarkup(
-              foot,
+              tile.top,
               view.size * 0.8,
-              view.size * 0.95,
-              view.squash,
               g,
               styleOf(tile).theme.cliff
             )
@@ -1584,6 +1566,24 @@ export function hexBackdropMarkup(
             stamp(mark.symbol, 0.9, 0.35, 0.7, 152)
         : stamp(mark.symbol, 0, 0, 1, 0)
     )
+  }
+  // Footpaths, over the ground of every level; then the districts' buildings
+  // among what stands.
+  for (const path of layout.paths) {
+    const d = `M${path.points.map(xy).join('L')}`
+    out.push(
+      `<path d="${d}" fill="none" stroke="${ROAD_PEBBLE}" stroke-width="${(path.width * g + 3).toFixed(1)}" stroke-linecap="round" stroke-linejoin="round"/>`,
+      `<path d="${d}" fill="none" stroke="${ROAD}" stroke-width="${(path.width * g).toFixed(1)}" stroke-linecap="round" stroke-linejoin="round"/>`
+    )
+  }
+  if (pins) {
+    for (const building of layout.buildings) {
+      stand(
+        building.y,
+        building.height,
+        buildingMarkup(building.kind, building.x, building.y, building.width, g)
+      )
+    }
   }
   standing.sort((a, b) => a.depth - b.depth)
   for (const item of standing) out.push(item.markup)

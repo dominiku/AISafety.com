@@ -372,6 +372,16 @@ describe('layoutHexMap', () => {
     expect(platform.deck).toBe(null)
     expect(layout.unplaced).toEqual([])
     expect(at(layout, 2, 1).building).toBe('school')
+    // The school stands in the middle of Alpha's middle tile, and Alpha's
+    // logo keeps off it.
+    expect(layout.buildings).toHaveLength(1)
+    const [school] = layout.buildings
+    expect(school.kind).toBe('school')
+    expect(school.x).toBeCloseTo(at(layout, 2, 1).center[0])
+    const logo = layout.positions.get('Alpha-0')!
+    expect(
+      Math.hypot(logo.x - school.x, logo.y - (school.y - 0.4))
+    ).toBeGreaterThan(0.45)
     expect(at(layout, 2, 1).stilts).toBe(false)
     expect(platform.building).toBe(null)
   })

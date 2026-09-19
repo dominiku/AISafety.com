@@ -112,7 +112,7 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
     { code: 'To', district: 'Tools, databases and research infrastructure', realm: 'Field infrastructure', height: 1.4, stilts: true, cover: 'huts', ground: '#d98a5a' },
     { code: 'Gm', district: 'Grantmakers and donor advisory', realm: 'Field infrastructure', height: 1, cover: 'dunes', beach: true },
     { code: 'Vc', district: 'Venture capital and incubators', realm: 'Field infrastructure', height: 2, cover: 'tropical' },
-    { code: 'Go', district: 'Governments and multi-stakeholder bodies', realm: 'Policy and strategy', height: 2, building: 'capitol' },
+    { code: 'Go', district: 'Governments and multi-stakeholder bodies', realm: 'Policy and strategy', height: 2, building: 'capitol', pathTo: 'Th' },
     { code: 'Ma', district: 'Macrostrategy and forecasting', realm: 'Policy and strategy', height: 3.5,
       landmark: { symbol: 'summit', width: 3, height: 1.9 } },
     { code: 'Th', district: 'Policy research and think tanks', realm: 'Policy and strategy', height: 2.5,
