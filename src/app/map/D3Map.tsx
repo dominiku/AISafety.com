@@ -1322,14 +1322,18 @@ export default function D3Map({
         onReset={() => controlsRef.current.reset()}
       />
 
-      <MapTuningPanel
-        className={styles['map-tuning']}
-        config={tierConfig}
-        onChange={setTierConfig}
-        showAreaCounts={showAreaCounts}
-        onShowAreaCounts={setShowAreaCounts}
-        readoutRef={tierReadoutRef}
-      />
+      {/* The Hex work view keeps the zoom tiers at their recommended
+          settings, with no panel to adjust them. */}
+      {!hexBackdrop && (
+        <MapTuningPanel
+          className={styles['map-tuning']}
+          config={tierConfig}
+          onChange={setTierConfig}
+          showAreaCounts={showAreaCounts}
+          onShowAreaCounts={setShowAreaCounts}
+          readoutRef={tierReadoutRef}
+        />
+      )}
 
       {/* Beside the explorer column the search lives in the column. */}
       {!hasExplorer && (
