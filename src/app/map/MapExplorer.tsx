@@ -10,6 +10,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from 'react'
 import type { ReactNode } from 'react'
 import Icon from '@/components/Icon'
@@ -41,6 +42,7 @@ import {
 import type { MapOrg } from '@/lib/data/map'
 import type { MapExplorerLink } from './D3Map'
 import { mapAreaFor } from '@/lib/data/map-areas'
+import MapListCard from './MapListCard'
 import MapListingDetails from './MapListingDetails'
 import MapResultRow from './MapResultRow'
 import styles from './page.module.css'
@@ -92,15 +94,27 @@ const COLLAPSED_STORAGE_KEY = 'map-list-collapsed'
 const LIST_ID = 'map-explorer-list'
 const LEGEND_ID = 'map-explorer-legend'
 // Every row of the results drawer is this tall, which is what lets only the
-// rows in view be rendered (.result-row in page.module.css).
+// rows in view be rendered (.result-row in page.module.css). A phone's list
+// is cards: 184px and the 12px between them (.list-card).
 const ROW_HEIGHT = 64
+const CARD_ROW_HEIGHT = 196
+// A phone's map: what the floating search covers at the top, and the details
+// sheet at the bottom (.details-card).
+const PHONE_TOP_INSET = 72
+const SHEET_HEIGHT = 372
 // The overlay on the map's left side: a 376px column, 16px in from the edge.
 const OVERLAY_WIDTH = 408
 
 const sameValues = (a: string[], b: string[]) =>
   a.length === b.length && a.every(value => b.includes(value))
 
-const isSinglePane = () => window.matchMedia('(max-width: 991px)').matches
+const SINGLE_PANE_QUERY = '(max-width: 991px)'
+const isSinglePane = () => window.matchMedia(SINGLE_PANE_QUERY).matches
+const subscribeToSinglePane = (onChange: () => void) => {
+  const query = window.matchMedia(SINGLE_PANE_QUERY)
+  query.addEventListener('change', onChange)
+  return () => query.removeEventListener('change', onChange)
+}
 
 // useSearchParams lives in its own null-rendering leaf behind a Suspense
 // boundary so it doesn't bail the statically-generated page out to client
@@ -148,8 +162,16 @@ export default function MapExplorer({
   // ?tuning=1 shows the developers' tools: the zoom-tier panel and the
   // prototype's data source switch.
   const [tuning, setTuning] = useState(false)
-  // Below the breakpoint there is one pane at a time.
-  const [pane, setPane] = useState<'list' | 'map'>('list')
+  // Below the breakpoint there is one pane at a time, and the map comes
+  // first: the list is a button away.
+  const [pane, setPane] = useState<'list' | 'map'>('map')
+  const singlePane = useSyncExternalStore(
+    subscribeToSinglePane,
+    isSinglePane,
+    () => false
+  )
+  // A phone's map keeps the filter pills behind a button in the search field.
+  const [filtersOpen, setFiltersOpen] = useState(false)
   // PROTOTYPE: which treatment of non-matching pins reads better is an open
   // question in the handover, so both can be tried.
   const [nonMatching, setNonMatching] = useState<'hide' | 'dim'>('dim')
@@ -454,12 +476,17 @@ export default function MapExplorer({
     return () => observer.disconnect()
   }, [measureList])
   // Until it has been measured (the drawer is closed), a screenful's worth.
+  const rowHeight = singlePane ? CARD_ROW_HEIGHT : ROW_HEIGHT
   const rows = visibleRange(
     listView.top,
     listView.height || 800,
-    ROW_HEIGHT,
+    rowHeight,
     shown.length
   )
+  const rowHeightRef = useRef(rowHeight)
+  useEffect(() => {
+    rowHeightRef.current = rowHeight
+  }, [rowHeight])
 
   const shownRef = useRef(shown)
   useEffect(() => {
@@ -471,19 +498,17 @@ export default function MapExplorer({
   // scrolls because something was selected. False when there is no such row
   // on screen (the drawer is closed, or the org is filtered out).
   const showRow = useCallback(
-    (id: string) => {
+    (id: string, toTop = false) => {
       const list = listRef.current
       const index = shownRef.current.findIndex(org => org.id === id)
       if (!list || list.offsetParent === null || index < 0) return false
-      // On a phone the page scrolls, not the list: there is nothing to do.
-      if (list.scrollHeight > list.clientHeight) {
-        const top = index * ROW_HEIGHT
-        if (top < list.scrollTop) list.scrollTop = top
-        else if (top + ROW_HEIGHT > list.scrollTop + list.clientHeight) {
-          list.scrollTop = top + ROW_HEIGHT - list.clientHeight
-        }
-        measureList()
+      const height = rowHeightRef.current
+      const top = index * height
+      if (toTop || top < list.scrollTop) list.scrollTop = top
+      else if (top + height > list.scrollTop + list.clientHeight) {
+        list.scrollTop = top + height - list.clientHeight
       }
+      measureList()
       return true
     },
     [measureList]
@@ -503,6 +528,14 @@ export default function MapExplorer({
     // After the render, so the map pans clear of the details card.
     requestAnimationFrame(() => mapApiRef.current.panTo(id))
   }, [])
+  // A phone's list: a tapped card is marked, and stays in the list; its
+  // "Show on map" goes over to the map, where the details sheet opens.
+  const showInList = useCallback(() => {
+    setPane('list')
+    const id = selectedIdRef.current
+    // Once the list is on screen.
+    if (id) requestAnimationFrame(() => showRow(id, true))
+  }, [showRow])
   const clearSelection = useCallback(() => {
     closedIdRef.current = selectedIdRef.current
     setSelectedId(null)
@@ -578,7 +611,9 @@ export default function MapExplorer({
       highlightedId,
       onSelect: select,
       onClear: clearSelection,
-      leftInset: overlayOpen && !isSinglePane() ? OVERLAY_WIDTH : 0,
+      leftInset: overlayOpen && !singlePane ? OVERLAY_WIDTH : 0,
+      topInset: singlePane ? PHONE_TOP_INSET : 0,
+      bottomInset: singlePane && selectedId ? SHEET_HEIGHT : 0,
       apiRef: mapApiRef,
       onReady: onMapReady,
     }),
@@ -597,6 +632,7 @@ export default function MapExplorer({
       select,
       clearSelection,
       overlayOpen,
+      singlePane,
       onMapReady,
     ]
   )
@@ -636,19 +672,9 @@ export default function MapExplorer({
         className={`container-wide ${styles.explorer}`}
         data-pane={pane}
         data-drawer={drawerOpen ? 'open' : 'closed'}
+        data-sheet={selected ? 'open' : undefined}
+        data-filters={filtersOpen || categories.length > 0 ? 'open' : undefined}
       >
-        <div className={styles['explorer-pane-switch']}>
-          <ModeToggle
-            mode={pane}
-            onChange={setPane}
-            ariaLabel="Show the list or the map"
-            tabs={[
-              { value: 'list', icon: '/images/icons/list.svg', label: 'List' },
-              { value: 'map', icon: '/images/icons/map.svg', label: 'Map' },
-            ]}
-          />
-        </div>
-
         <section aria-label="Map" className={styles['explorer-map']}>
           <D3Map
             orgs={mapOrgs}
@@ -704,21 +730,48 @@ export default function MapExplorer({
         >
           <CardsViewTracker page="Map" />
           <div
-            role="search"
-            className={`${styles['explorer-search']} ${styles['explorer-controls']}`}
+            className={`${styles['explorer-search-row']} ${styles['explorer-controls']}`}
           >
-            <span
-              className={styles['explorer-search-icon']}
-              aria-hidden="true"
-            />
-            <SearchBar
-              className={styles['explorer-search-input']}
-              value={query}
-              onChange={setQuery}
-              inputRef={searchRef}
-              aria-label="Search organizations"
-              placeholder={`Search ${total} organizations…`}
-            />
+            <div role="search" className={styles['explorer-search']}>
+              <span
+                className={styles['explorer-search-icon']}
+                aria-hidden="true"
+              />
+              <SearchBar
+                className={styles['explorer-search-input']}
+                value={query}
+                onChange={setQuery}
+                inputRef={searchRef}
+                aria-label="Search organizations"
+                placeholder={`Search ${total} organizations…`}
+              />
+              {/* A phone's map: the filter pills wait behind this button. */}
+              <button
+                type="button"
+                className={styles['explorer-filter-button']}
+                aria-label="Filters"
+                aria-expanded={filtersOpen || categories.length > 0}
+                onClick={() => setFiltersOpen(open => !open)}
+              >
+                <Icon src="/images/icons/filter-alt-2.svg" size={16} />
+              </button>
+            </div>
+            {/* A phone shows the map or the list; this goes to the other. */}
+            <button
+              type="button"
+              className={`border-plus-fill ${styles['explorer-pane-button']}`}
+              aria-label={pane === 'map' ? 'Show the list' : 'Show the map'}
+              onClick={() => setPane(pane === 'map' ? 'list' : 'map')}
+            >
+              <Icon
+                src={
+                  pane === 'map'
+                    ? '/images/icons/list.svg'
+                    : '/images/icons/map.svg'
+                }
+                size={16}
+              />
+            </button>
           </div>
 
           <div
@@ -792,6 +845,7 @@ export default function MapExplorer({
               placeCount={inSelectedPlace.length}
               suggestCorrectionUrl={suggestCorrectionLink}
               onSelect={select}
+              onShowInList={showInList}
               onSeeAllInPlace={() => {
                 setCategories([firstCategory(selected)])
                 setSelectedId(null)
@@ -806,7 +860,7 @@ export default function MapExplorer({
             id={LIST_ID}
             aria-label="Organizations"
             className={`border-plus-fill drop-shadow-dark ${styles['explorer-drawer']}`}
-            hidden={selected !== null}
+            hidden={selected !== null && !singlePane}
           >
             <div className={styles['explorer-drawer-head']}>
               <p
@@ -864,12 +918,12 @@ export default function MapExplorer({
               {shown.length > 0 ? (
                 <ul
                   className={styles['explorer-rows']}
-                  style={{ height: shown.length * ROW_HEIGHT }}
+                  style={{ height: shown.length * rowHeight }}
                 >
                   {shown.slice(rows.start, rows.end).map((org, offset) => (
                     <li
                       key={org.id}
-                      style={{ top: (rows.start + offset) * ROW_HEIGHT }}
+                      style={{ top: (rows.start + offset) * rowHeight }}
                       aria-setsize={shown.length}
                       aria-posinset={rows.start + offset + 1}
                       onMouseEnter={() => setHighlightedId(org.id)}
@@ -877,12 +931,21 @@ export default function MapExplorer({
                       onFocus={() => setHighlightedId(org.id)}
                       onBlur={() => setHighlightedId(null)}
                     >
-                      <MapResultRow
-                        id={org.id}
-                        org={org}
-                        selected={org.id === selectedId}
-                        onSelect={() => select(org.id)}
-                      />
+                      {singlePane ? (
+                        <MapListCard
+                          org={org}
+                          selected={org.id === selectedId}
+                          onSelect={() => setSelectedId(org.id)}
+                          onShowOnMap={() => select(org.id)}
+                        />
+                      ) : (
+                        <MapResultRow
+                          id={org.id}
+                          org={org}
+                          selected={org.id === selectedId}
+                          onSelect={() => select(org.id)}
+                        />
+                      )}
                     </li>
                   ))}
                 </ul>

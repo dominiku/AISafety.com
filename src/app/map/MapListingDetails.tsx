@@ -18,6 +18,8 @@ interface MapListingDetailsProps {
   placeCount: number
   suggestCorrectionUrl: string
   onSelect: (id: string) => void
+  // A phone's sheet: go over to the list, at this org's card.
+  onShowInList: () => void
   onSeeAllInPlace: () => void
   onClose: () => void
 }
@@ -32,10 +34,12 @@ export default function MapListingDetails({
   placeCount,
   suggestCorrectionUrl,
   onSelect,
+  onShowInList,
   onSeeAllInPlace,
   onClose,
 }: MapListingDetailsProps) {
   const headingRef = useRef<HTMLHeadingElement>(null)
+  const dragFromRef = useRef<number | null>(null)
   // Which org's link was copied: moving on to another org clears the note.
   const [copiedFor, setCopiedFor] = useState<string | null>(null)
   const copied = copiedFor === org.id
@@ -68,7 +72,21 @@ export default function MapListingDetails({
       aria-label={`${org.title} details`}
       className={`border-plus-fill drop-shadow-dark ${styles['details-card']}`}
     >
-      <div className={styles['details-head']}>
+      {/* A phone's sheet has a handle here: dragging it down closes the
+          sheet, as the close button does. */}
+      <div
+        className={styles['details-head']}
+        onTouchStart={event => {
+          dragFromRef.current = event.touches[0].clientY
+        }}
+        onTouchEnd={event => {
+          const from = dragFromRef.current
+          dragFromRef.current = null
+          if (from !== null && event.changedTouches[0].clientY - from > 48) {
+            onClose()
+          }
+        }}
+      >
         <p className={`paragraph-xs-bold ${styles['details-place']}`}>
           <Icon src="/images/icons/map.svg" size={16} />
           {place ? `${place} · ${categories[0]}` : categories[0]}
@@ -98,9 +116,22 @@ export default function MapListingDetails({
               }}
             />
           )}
-          <h2 ref={headingRef} tabIndex={-1} className={styles['details-name']}>
-            {org.title}
-          </h2>
+          <div>
+            <h2
+              ref={headingRef}
+              tabIndex={-1}
+              className={styles['details-name']}
+            >
+              {org.title}
+            </h2>
+            {/* A phone's sheet has no room for the chip above: the place is
+                a line under the name. */}
+            <p
+              className={`paragraph-xs color-teal-300 ${styles['details-place-line']}`}
+            >
+              {place ? `${place} · ${categories[0]}` : categories[0]}
+            </p>
+          </div>
         </div>
         <p className={styles['details-description']}>{org.description}</p>
 
@@ -142,7 +173,16 @@ export default function MapListingDetails({
               <Icon src="/images/icons/arrow-up-right.svg" />
             </a>
           )}
+          <button
+            type="button"
+            className={`button-secondary ${styles['details-show-in-list']}`}
+            onClick={onShowInList}
+          >
+            <Icon src="/images/icons/list.svg" size={16} />
+            Show in list
+          </button>
           <button type="button" className="button-secondary" onClick={copyLink}>
+            <Icon src="/images/icons/link.svg" size={16} />
             {copied ? 'Link copied' : 'Copy link'}
           </button>
           {/* Said once it has happened, for those who can't see the label. */}

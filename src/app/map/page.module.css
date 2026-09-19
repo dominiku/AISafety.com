@@ -844,8 +844,102 @@ select.explorer-sort {
   padding-left: 16px;
 }
 
-.explorer-pane-switch {
+/* The search field's row. On a desktop it is the field alone; a phone adds
+   the filter button inside the field and the list / map button beside it. */
+.explorer-search-row {
+  display: flex;
+  flex: none;
+  gap: 8px;
+}
+
+.explorer-search-row .explorer-search {
+  flex: 1;
+  min-width: 0;
+}
+
+.explorer-filter-button,
+.explorer-pane-button,
+.details-actions .details-show-in-list,
+.details-place-line {
   display: none;
+}
+
+/* A phone's list of organizations: a card each, all one height so that only
+   the cards in view need rendering (MapExplorer's CARD_ROW_HEIGHT is this
+   plus the 12px between cards). */
+.list-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 184px;
+  padding: 16px;
+  border: 1px solid transparent;
+  border-radius: 16px;
+  background-color: var(--teal-bright-850);
+  cursor: pointer;
+}
+
+.list-card-selected {
+  border-color: var(--teal-bright-400);
+}
+
+.list-card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.list-card-name {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--white);
+  font-size: 17px;
+  font-weight: 400;
+  line-height: 22px;
+  /* Inside the line, or the two-line clamp would cut the underline off. */
+  text-underline-offset: 3px;
+  text-wrap: pretty;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.list-card-description {
+  display: -webkit-box;
+  flex: 1;
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 300;
+  line-height: 22px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.list-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 24px;
+}
+
+/* "Show on map" belongs to the selected card; on the others it is there for
+   the keyboard, and seen once it has the focus. */
+.list-card-show {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--white);
+  cursor: pointer;
+  opacity: 0;
+}
+
+.list-card-selected .list-card-show,
+.list-card-show:focus-visible {
+  opacity: 1;
 }
 
 /* On a desktop the details card takes the whole column: the search and the
@@ -857,15 +951,17 @@ select.explorer-sort {
   }
 }
 
-/* A phone shows one thing at a time, chosen with the List / Map switch: the
-   search and chips stay on top, then the list or the map. The details card
-   is a sheet over the bottom of the screen. */
+/* A phone shows the map or the list, one at a time, in the same pane. On the
+   map the search floats at the top and the details are a sheet at the bottom;
+   the list takes the pane over, with its search, pills, count and sort held
+   above the cards, which scroll inside it. */
 @media (max-width: 991px) {
   .explorer-title-row {
-    height: auto;
-    flex-direction: column;
-    gap: 4px;
-    padding-bottom: 8px;
+    height: 56px;
+  }
+
+  .explorer-title-row p {
+    display: none;
   }
 
   .explorer-title {
@@ -874,73 +970,203 @@ select.explorer-sort {
   }
 
   .explorer {
-    display: flex;
-    flex-direction: column;
-    height: auto;
-    min-height: 0;
-    border: none;
-    overflow: visible;
+    height: calc(100dvh - 88px - 56px - 12px);
+    min-height: 560px;
   }
 
-  .explorer-pane-switch {
-    display: flex;
-    justify-content: center;
-    order: -2;
-    padding: 0 16px 16px;
-  }
-
+  /* The overlay spans the pane, so the sheet can sit at its bottom; it still
+     lets touches through to the map wherever it has nothing of its own. */
   .explorer-overlay {
-    position: static;
-    order: -1;
-    width: 100%;
-    padding: 0 16px 16px;
-    pointer-events: auto;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: auto;
+    padding: 12px 12px 0;
   }
 
-  .explorer-map {
-    position: relative;
-    inset: auto;
-    height: calc(100dvh - 88px - 72px);
-  }
-
-  .explorer-drawer,
-  .explorer[data-drawer='closed'] .explorer-drawer {
+  .explorer-filter-button,
+  .explorer-pane-button {
     display: flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    color: var(--white);
+    cursor: pointer;
   }
 
-  .explorer-drawer[hidden] {
-    display: none;
+  /* 44px to the touch, inside the 48px field. */
+  .explorer-filter-button {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 44px;
+    height: 44px;
+    border: 4px solid var(--teal-850);
+    border-radius: 50%;
+    background-color: var(--teal-bright-800);
   }
 
-  .explorer-drawer-list {
-    overflow-y: visible;
+  .explorer-pane-button {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    box-shadow: var(--shadow-dark);
   }
 
-  .explorer[data-pane='map'] .explorer-drawer,
-  .explorer[data-pane='list'] .explorer-map,
-  .explorer-pill,
-  .explorer-fitted,
-  .explorer-legend {
-    display: none;
+  .explorer-search-input {
+    padding-right: 52px;
   }
 
+  /* The pills: behind the filter button on the map, always in the list. The
+     List pill's work is done by the button beside the search. */
   .explorer-pills {
     width: auto;
     max-width: none;
   }
 
+  .explorer[data-pane='map']:not([data-filters]) .explorer-pills,
+  .explorer-pills [aria-controls='map-explorer-list'] {
+    display: none;
+  }
+
+  /* Touch targets of 44px (the shared pill and zoom buttons are 40px). */
+  .explorer-pills button,
+  .explorer-pill {
+    min-height: 44px;
+  }
+
+  /* Bottom right, above the assistant's pill; above the sheet when open. */
+  .explorer .map-controls {
+    top: auto;
+    right: 12px;
+    bottom: 84px;
+  }
+
+  .explorer[data-sheet] .map-controls {
+    bottom: 384px;
+  }
+
+  .explorer .map-controls > div {
+    width: 44px;
+  }
+
+  .explorer .map-controls button {
+    height: 44px;
+  }
+
+  .explorer-fitted,
+  .explorer-legend,
+  .explorer[data-pane='map'] .explorer-drawer,
+  .explorer[data-pane='list'] .explorer-map,
+  .explorer[data-pane='list'] .details-card {
+    display: none;
+  }
+
+  /* The list takes the pane over. */
+  .explorer[data-pane='list'] .explorer-drawer {
+    display: flex;
+    border: none;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+  }
+
+  .explorer-drawer-head {
+    padding: 4px 4px 12px;
+  }
+
+  .explorer-drawer-others {
+    padding: 8px 4px;
+  }
+
+  .explorer-drawer-list {
+    padding: 12px 0;
+  }
+
+  /* The details sheet: over the bottom of the map, 372px with its handle. */
   .details-card {
-    position: fixed;
+    position: absolute;
     right: 0;
     bottom: 0;
     left: 0;
-    z-index: 95;
-    max-height: 372px;
+    z-index: 96;
+    height: 372px;
     border-radius: 16px 16px 0 0;
   }
 
-  /* The sheet is short: what else is nearby is left to the list. */
+  .details-head {
+    justify-content: center;
+    padding: 8px 0 0;
+  }
+
+  .details-head::before {
+    width: 36px;
+    height: 4px;
+    border-radius: 2px;
+    background-color: var(--teal-500);
+    content: '';
+  }
+
+  .details-place,
+  .details-chips,
   .details-nearby {
     display: none;
+  }
+
+  .details-close {
+    position: absolute;
+    top: 12px;
+    right: 8px;
+    width: 44px;
+    height: 44px;
+  }
+
+  .details-title {
+    align-items: flex-start;
+    gap: 12px;
+    padding-right: 28px;
+  }
+
+  .details-logo {
+    width: 48px;
+    height: 48px;
+  }
+
+  .details-body {
+    gap: 12px;
+    padding-top: 8px;
+  }
+
+  .details-name {
+    font-size: 16px;
+    line-height: 21px;
+    letter-spacing: -0.32px;
+  }
+
+  .details-place-line {
+    display: block;
+    padding-top: 4px;
+  }
+
+  /* "Visit website" across the sheet, the other two half each, all 48px. */
+  .details-actions {
+    align-self: stretch;
+  }
+
+  .details-actions > a,
+  .details-actions > button {
+    flex: 1 1 40%;
+    gap: 8px;
+    justify-content: center;
+    height: 48px;
+  }
+
+  .details-actions > a {
+    flex-basis: 100%;
+  }
+
+  .details-actions .details-show-in-list {
+    display: flex;
   }
 }

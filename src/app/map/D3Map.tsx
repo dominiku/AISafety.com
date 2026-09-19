@@ -106,6 +106,10 @@ export interface MapExplorerLink {
   // Pixels of the map's left side covered by the overlay (search, details
   // card, results drawer). A pin is brought to the middle of what is left.
   leftInset: number
+  // The same for the top (a phone's floating search) and the bottom (a
+  // phone's details sheet).
+  topInset: number
+  bottomInset: number
   // Filled in by the map: bring a pin to the middle of the free view, and
   // put the keyboard's focus on a pin (false when it is not showing).
   apiRef: MutableRefObject<{
@@ -165,6 +169,12 @@ const MOBILE_MIN_PIN_PX = 26
 // Explorer, on a phone: pins carry no names at the resting view; they all do
 // from this many times closer in.
 const MOBILE_LABEL_ZOOM = 1.6
+// Explorer, on a phone: the island is fitted to the pane's width and hung this
+// far below its top, clear of the floating search, not centered in the tall
+// pane; and a selected pin is shown from at least this zoom, where its
+// neighbors can be told apart.
+const PHONE_FIT_TOP_PX = 76
+const PHONE_PIN_ZOOM = 3.5
 const FIT_SIDE_ROOM = 48
 const FIT_BOTTOM_ROOM = 112
 
@@ -287,6 +297,8 @@ export default function D3Map({
     // Read live so behavior adapts when the viewport is resized (e.g.
     // dev tools mobile mode toggled after load).
     const isMobile = () => window.innerWidth < 768
+    // The explorer's one-pane layout (the site's one breakpoint).
+    const isSinglePane = () => window.matchMedia('(max-width: 991px)').matches
     const maxZoom = isMobile() ? 25 : 8
 
     // Tracks which org's tooltip is currently shown from a mobile tap, so
@@ -425,10 +437,14 @@ export default function D3Map({
         width / (MAP_WIDTH * unit),
         height / (MAP_HEIGHT * unit)
       )
+      // The pane's top edge in viewBox units (the viewBox is centered in it).
+      const paneTop = PADDED_HEIGHT / 2 - height / 2 / unit
       return d3.zoomIdentity
         .translate(
           PADDED_WIDTH / 2 - offsetX - (k * MAP_WIDTH) / 2,
-          PADDED_HEIGHT / 2 - offsetY - (k * MAP_HEIGHT) / 2
+          isSinglePane()
+            ? paneTop + PHONE_FIT_TOP_PX / unit - offsetY
+            : PADDED_HEIGHT / 2 - offsetY - (k * MAP_HEIGHT) / 2
         )
         .scale(k)
     }
@@ -1043,15 +1059,21 @@ export default function D3Map({
     }
     const zoomOf = (k: number) =>
       (k * screenScaleAtRest) / REFERENCE_SCREEN_SCALE
-    // Explorer, on a phone: the smallest pin (Small, 0.4 of the base logo) is
-    // never drawn under MOBILE_MIN_PIN_PX. The floor is part of the config,
-    // so the layout keeps the bigger pins apart too.
-    const tierConfig = () => {
-      const config = tierConfigRef.current
-      if (!hasExplorer || !isMobile()) return config
-      const smallest = BASE_LOGO_SIZE * SIZE_TO_SCALE.Small
-      const floor = MOBILE_MIN_PIN_PX / (smallest * REFERENCE_SCREEN_SCALE)
-      return { ...config, minPinScale: Math.max(config.minPinScale, floor) }
+    // Explorer, on a phone: no pin is drawn under MOBILE_MIN_PIN_PX across,
+    // so the Small and Medium ones are drawn up to it (see applyPins). For
+    // the layout to keep them apart all the same, every pin there takes up
+    // the room of a Large one.
+    const phoneFloor = () => hasExplorer && isMobile()
+    const largeDisc = BASE_LOGO_SIZE * SIZE_TO_SCALE.Large
+    const tierForLayout = (tier: TierPin): TierPin => {
+      if (!phoneFloor()) return tier
+      const grow = largeDisc / (-tier.top * 2)
+      return {
+        ...tier,
+        halfWidth: tier.halfWidth * grow,
+        top: tier.top * grow,
+        bottom: tier.bottom * grow,
+      }
     }
     // Pins slide off the area names; the names themselves never move.
     const obstacles: MapObstacle[] = [...areaPills.values()].map(pill => ({
@@ -1086,13 +1108,13 @@ export default function D3Map({
     applyPins = (k: number) => {
       appliedK = k
       if (!layout) return
-      const config = tierConfig()
+      const config = tierConfigRef.current
       const z = zoomOf(k)
       const s = pinMapScale(z, config)
       // Explorer: screen pixels per unit of a pin's own drawing, for the
       // square that keeps it clickable; and which pins carry names here.
-      const pinUnitPx = screenScaleAtRest * k * s
       const phone = isMobile()
+      const floorPx = phoneFloor() ? MOBILE_MIN_PIN_PX : 0
       const namesOnPhone = k >= fitTransform().k * MOBILE_LABEL_ZOOM
       // Pins held back at this zoom, by the place they stand in.
       const heldBack = new Map<string, number>()
@@ -1129,7 +1151,11 @@ export default function D3Map({
         if (revealed) showing.push({ ...tier, ...at })
         else if (tier.scale === 'Large') largeHeldBack++
         const isSelected = tier.id === link?.selectedId
-        const size = isSelected ? s * SELECTED_PIN_SCALE : s
+        const disc = -tier.top * 2
+        // A phone's floor: the scale at which this disc is floorPx across.
+        const floored = Math.max(s, floorPx / (disc * screenScaleAtRest * k))
+        const size = isSelected ? floored * SELECTED_PIN_SCALE : floored
+        const pinUnitPx = screenScaleAtRest * k * size
         if (link) {
           const showing = revealed || isSelected || tier.id === forcedPinId
           const place = tier.regions.at(-1)
@@ -1148,7 +1174,6 @@ export default function D3Map({
               : tier.scale !== 'Small' || z >= config.smallZoom)
           label.style('display', named ? 'inline' : 'none')
           if (hit) {
-            const disc = -tier.top * 2
             const side = Math.max(disc, MIN_HIT_PX / (pinUnitPx || 1))
             hit
               .attr('x', -side / 2)
@@ -1215,9 +1240,9 @@ export default function D3Map({
               !goneFromMap(pin.tier.id) &&
               (!hiding || matchesExplorer(pin.tier.id))
           )
-          .map(pin => pin.tier),
+          .map(pin => tierForLayout(pin.tier)),
         obstacles,
-        tierConfig(),
+        tierConfigRef.current,
         zoomOf(1),
         focus
       )
@@ -1277,12 +1302,27 @@ export default function D3Map({
     // Centers map point (px, py) in the rendered viewBox area at zoom k: the
     // group transform places map point p at viewBox coordinate
     // t + offset + k*p.
-    const flyToPoint = (px: number, py: number, k: number, leftInset = 0) => {
+    const flyToPoint = (
+      px: number,
+      py: number,
+      k: number,
+      leftInset = 0,
+      topInset = 0,
+      bottomInset = 0
+    ) => {
       // The overlay covers the map's left side: the middle of what is left
-      // lies half its width to the right, in viewBox units.
+      // lies half its width to the right, in viewBox units. The same goes
+      // for what a phone's search and details sheet cover, top and bottom.
       const { width, height } = svgNode.getBoundingClientRect()
       const unit = Math.min(width / PADDED_WIDTH, height / PADDED_HEIGHT) || 1
       const shift = Math.min(leftInset, width / 2) / 2 / unit
+      const covered = Math.min(topInset + bottomInset, height * 0.8)
+      const shiftY =
+        topInset + bottomInset > 0
+          ? ((covered / (topInset + bottomInset)) * (topInset - bottomInset)) /
+            2 /
+            unit
+          : 0
       svg
         .transition()
         // Someone who asked for less motion gets the new view at once.
@@ -1296,7 +1336,7 @@ export default function D3Map({
           d3.zoomIdentity
             .translate(
               PADDED_WIDTH / 2 + shift - offsetX - k * px,
-              PADDED_HEIGHT / 2 - offsetY - k * py
+              PADDED_HEIGHT / 2 + shiftY - offsetY - k * py
             )
             .scale(k)
         )
@@ -1323,7 +1363,8 @@ export default function D3Map({
       const { width, height } = svgNode.getBoundingClientRect()
       const unit = Math.min(width / PADDED_WIDTH, height / PADDED_HEIGHT) || 1
       const freeWidth = Math.max(width - leftInset - FIT_SIDE_ROOM, 200)
-      const freeHeight = Math.max(height - FIT_BOTTOM_ROOM, 200)
+      const topInset = explorerRef.current?.topInset ?? 0
+      const freeHeight = Math.max(height - FIT_BOTTOM_ROOM - topInset, 200)
       // Never further out than the whole island, never closer than a pin.
       const k = Math.max(
         fitTransform().k,
@@ -1340,7 +1381,8 @@ export default function D3Map({
         ((bounds.minX + bounds.maxX) / 2) * GRID_SIZE,
         ((bounds.minY + bounds.maxY) / 2) * GRID_SIZE,
         k,
-        leftInset
+        leftInset,
+        topInset
       )
     }
 
@@ -1587,11 +1629,14 @@ export default function D3Map({
             .attr('stroke-dasharray', dashed ? '8 6' : null)
           pill.group.attr('aria-pressed', pressed)
         }
+        // The selected pin's name is outlined, so that it can be told from
+        // its place's name when the two (both teal then) overlap.
         for (const pin of pins) {
-          pin.labelRect.attr(
-            'fill',
-            pin.tier.id === link.selectedId ? 'var(--teal-bright-400)' : '#fff'
-          )
+          const isSelected = pin.tier.id === link.selectedId
+          pin.labelRect
+            .attr('fill', isSelected ? 'var(--teal-bright-400)' : '#fff')
+            .attr('stroke', isSelected ? 'var(--teal-900)' : 'none')
+            .attr('vector-effect', 'non-scaling-stroke')
         }
       }
       const filterChanged =
@@ -1637,11 +1682,22 @@ export default function D3Map({
           if (!org || org.x === null || org.y === null) return
           // Keep the visitor's zoom unless it is too far out to tell the pin
           // from its neighbors.
-          const k = Math.max(d3.zoomTransform(svgNode).k, 2)
+          const k = Math.max(
+            d3.zoomTransform(svgNode).k,
+            isSinglePane() ? PHONE_PIN_ZOOM : 2
+          )
           const at = layout?.positions.has(id)
             ? pinPositionAt(layout, id, zoomOf(k))
             : { x: org.x * GRID_SIZE, y: org.y * GRID_SIZE }
-          flyToPoint(at.x, at.y, k, explorerRef.current?.leftInset ?? 0)
+          const link = explorerRef.current
+          flyToPoint(
+            at.x,
+            at.y,
+            k,
+            link?.leftInset ?? 0,
+            link?.topInset ?? 0,
+            link?.bottomInset ?? 0
+          )
         },
         focusPin: id => {
           const pin = pins.find(({ tier }) => tier.id === id)
