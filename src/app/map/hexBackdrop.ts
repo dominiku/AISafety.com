@@ -965,7 +965,7 @@ export function hexBackdropMarkup(
   }
 
   // What lies under the logos, so that it reads however crowded the
-  // district: a forest's canopy, hot springs, or a field of great dunes.
+  // district: a forest's canopy, or hot springs.
   const drawRelief = (
     plateau: { tiles: HexLaidTile[]; height: number },
     tone: string,
@@ -1035,32 +1035,6 @@ export function hexBackdropMarkup(
         )
       out.push('</g>')
     }
-    if (cover === 'dunes' && pins) {
-      const { inside, fixed } = canvasOf(plateau)
-      const extent = { width: width / g, height: height / g }
-      out.push(`<g clip-path="url(#${clip})">`)
-      scatterSpots(inside, fixed, extent, {
-        spacing: 1.9,
-        minRoom: 0.3,
-        maxRoom: 1.2,
-      })
-        .sort((a, b) => a.y - b.y)
-        .forEach((spot, n) =>
-          out.push(
-            duneMarkup(
-              spot.x,
-              spot.y + 0.45,
-              1.9 + spot.roll * 0.9,
-              g,
-              mixHex(tone, '#ffffff', 0.38),
-              mixHex(tone, LINE, 0.3),
-              VINE,
-              n
-            )
-          )
-        )
-      out.push('</g>')
-    }
   }
 
   // What stands on a plateau: its district's cover where the spec gives one
@@ -1108,8 +1082,34 @@ export function hexBackdropMarkup(
       }
     }
 
-    // (Dunes and terraces lie under the logos: see drawRelief.)
-    if (cover === 'dunes') return
+    if (cover === 'dunes') {
+      // Great dunes, wherever the river and the road leave room, whatever
+      // logos stand there (the logos are drawn over them). Each stands whole
+      // on its district's ground: far enough in from the edge that none is
+      // cut off by it, and, standing up, in front of the foot of whatever
+      // rises behind.
+      scatterSpots(inside, fixed, extent, {
+        spacing: 1.45,
+        minRoom: 0.55,
+        maxRoom: 1.2,
+      }).forEach((spot, n) =>
+        stand(
+          spot.y + 0.2,
+          level,
+          duneMarkup(
+            spot.x,
+            spot.y + 0.2,
+            1.25 + spot.roll * 0.45,
+            g,
+            mixHex(tone, '#ffffff', 0.38),
+            mixHex(tone, LINE, 0.3),
+            VINE,
+            seed * 97 + n
+          )
+        )
+      )
+      return
+    }
     if (cover === 'huts') {
       // A stilt village's huts, and now and then one of the classic cottages.
       scatterSpots(inside, [...logos, ...fixed], extent, {
