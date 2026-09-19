@@ -90,8 +90,12 @@ export interface MapExplorerLink {
   // Pixels of the map's left side covered by the overlay (search, details
   // card, results drawer). A pin is brought to the middle of what is left.
   leftInset: number
-  // Filled in by the map: bring a pin to the middle of the free view.
-  apiRef: MutableRefObject<{ panTo: (id: string) => void }>
+  // Filled in by the map: bring a pin to the middle of the free view, and
+  // put the keyboard's focus on a pin (false when it is not showing).
+  apiRef: MutableRefObject<{
+    panTo: (id: string) => void
+    focusPin: (id: string) => boolean
+  }>
   // Called once apiRef is filled in, so a shared link's pin can be shown.
   onReady?: () => void
 }
@@ -130,6 +134,8 @@ const REALM_SUB_LABEL_ZOOM = 1.5
 // dozen orgs, a visitor should not have to zoom in to find five of them. Past
 // this the zoom tiers thin them as usual, or the map would crowd again.
 const EXPLORER_SHOW_ALL_MAX = 60
+// The explorer's selected pin is drawn this much bigger than its neighbors.
+const SELECTED_PIN_SCALE = 1.25
 
 export default function D3Map({
   orgs,
@@ -269,8 +275,56 @@ export default function D3Map({
       }
     }
 
+    // The explorer's hover tooltip (WCAG 1.4.13). It stands beside its pin
+    // rather than following the cursor, so the pointer can move onto it
+    // without it going away (a short grace covers the gap between the two);
+    // it stays until the pointer leaves both; and Esc dismisses it. A click
+    // on it selects the org, like the pin.
+    let tooltipHideTimer: ReturnType<typeof setTimeout> | null = null
+    const cancelTooltipHide = () => {
+      if (tooltipHideTimer !== null) clearTimeout(tooltipHideTimer)
+      tooltipHideTimer = null
+    }
+    const scheduleTooltipHide = () => {
+      cancelTooltipHide()
+      tooltipHideTimer = setTimeout(hideTooltip, 200)
+    }
+    const tooltipShowing = () =>
+      tooltipRef.current?.style.visibility === 'visible'
+    const showExplorerTooltip = (org: MapOrg, pin: SVGElement) => {
+      const tt = tooltipRef.current
+      const container = containerRef.current
+      const disc = pin.querySelector('circle')
+      if (!tt || !container || !disc) return
+      cancelTooltipHide()
+      const category = primaryCategory(org.category)
+      const place = mapAreaPath(category ?? '', scheme).at(-1)
+      tt.querySelector('strong')!.textContent = org.tooltipTitle
+      tt.querySelector('span')!.textContent = [category, place]
+        .filter(Boolean)
+        .join(' · ')
+      tt.setAttribute('data-listing-id', org.id)
+      // Above the pin's disc, or below its name where there is no room.
+      const bounds = container.getBoundingClientRect()
+      const discRect = disc.getBoundingClientRect()
+      const pinRect = pin.getBoundingClientRect()
+      const gap = 6
+      const above = discRect.top - gap - tt.offsetHeight
+      const top = above >= bounds.top + 2 ? above : pinRect.bottom + gap
+      const center = discRect.left + discRect.width / 2
+      const left = Math.min(
+        Math.max(center - tt.offsetWidth / 2, bounds.left + 2),
+        bounds.right - tt.offsetWidth - 2
+      )
+      tt.style.left = `${left}px`
+      tt.style.top = `${top}px`
+      tt.style.visibility = 'visible'
+      tt.style.opacity = '1'
+    }
+
     function hideTooltip() {
       cancelHoverTimer()
+      cancelTooltipHide()
       if (tooltipRef.current) {
         tooltipRef.current.style.visibility = 'hidden'
         tooltipRef.current.style.opacity = '0'
@@ -416,6 +470,7 @@ export default function D3Map({
         .text('Map of AI Existential Safety')
 
     // Add area labels
+    const AREA_PILL_FILL = 'rgba(27, 43, 62, 0.6)'
     const labelScale = 1.75
     const baseFontSize = 14
     const basePadX = 14
@@ -487,7 +542,7 @@ export default function D3Map({
           .attr('height', bbox.height + finalPadY * 2)
           .attr('rx', (bbox.height + finalPadY * 2) / 2)
           .attr('ry', (bbox.height + finalPadY * 2) / 2)
-          .attr('fill', 'rgba(27, 43, 62, 0.6)')
+          .attr('fill', AREA_PILL_FILL)
         areaPills.set(label, {
           group: labelGroup,
           anchorX: xPos,
@@ -518,6 +573,10 @@ export default function D3Map({
     const pins: {
       tier: TierPin
       group: d3.Selection<SVGGElement, unknown, null, undefined>
+      // The pin's focusable element and the pill behind its name, which the
+      // explorer's selection restyles.
+      link: SVGElement | null
+      labelRect: d3.Selection<SVGRectElement, unknown, null, undefined>
     }[] = []
 
     // Render organization logos
@@ -555,6 +614,15 @@ export default function D3Map({
           .attr('rel', 'noopener noreferrer')
           .style('cursor', 'pointer')
           .on('click', event => {
+            // In the explorer a pin selects its org, on a phone too (the
+            // details sheet has the link); nothing on the map opens a site.
+            // (Not tracked as a listing click: nothing was opened.)
+            if (explorerRef.current) {
+              event.preventDefault()
+              hideTooltip()
+              explorerRef.current.onSelect(org.id)
+              return
+            }
             // Mobile: first tap shows the tooltip instead of opening the
             // link. Second tap of the tooltip itself opens it. Matches the
             // pattern used on the /communities map.
@@ -593,16 +661,6 @@ export default function D3Map({
               positionTooltip(event.clientX, event.clientY, tt, container, {
                 minLeftMargin: 20,
               })
-              return
-            }
-            // Beside the explorer column a pin selects its card (a phone keeps
-            // the tap-for-tooltip above, which has the link in it); the way to
-            // the org's site is the card's title. (Not tracked as a listing
-            // click: nothing was opened.)
-            if (explorerRef.current) {
-              event.preventDefault()
-              hideTooltip()
-              explorerRef.current.onSelect(org.id)
               return
             }
             trackListingClick(
@@ -704,7 +762,7 @@ export default function D3Map({
         const rectW = bbox.width + padX * 2
         const rectH = bbox.height + padY * 2
 
-        labelG
+        const labelRect = labelG
           .insert('rect', 'text')
           .attr('x', -rectW / 2)
           .attr('y', -rectH / 2)
@@ -731,6 +789,8 @@ export default function D3Map({
 
         pins.push({
           group: itemGroup,
+          link: linkEl.node() as SVGElement | null,
+          labelRect,
           tier: {
             id: org.id,
             title: org.title,
@@ -778,6 +838,10 @@ export default function D3Map({
           const tt = tooltipRef.current
           const container = containerRef.current
           if (!tt || !container) return
+          if (explorerRef.current) {
+            showExplorerTooltip(org, event.currentTarget as SVGElement)
+            return
+          }
           // QA: Use tooltipTitle ('Long name') not title ('Long name for cards')
           // so bracketed acronyms like "(CARMA)" don't appear in the tooltip
           tt.querySelector('strong')!.textContent = org.tooltipTitle
@@ -789,6 +853,8 @@ export default function D3Map({
         .on('mousemove', event => {
           if (isMobile()) return
           if (isZooming) return
+          // The explorer's tooltip stays by its pin, where it can be reached.
+          if (explorerRef.current) return
           const tt = tooltipRef.current
           const container = containerRef.current
           if (!tt || !container) return
@@ -798,6 +864,10 @@ export default function D3Map({
           // Leaving before the dwell elapses means it wasn't a real hover.
           cancelHoverTimer()
           if (isMobile()) return
+          if (explorerRef.current) {
+            scheduleTooltipHide()
+            return
+          }
           if (tooltipRef.current) {
             tooltipRef.current.style.visibility = 'hidden'
             tooltipRef.current.style.opacity = '0'
@@ -883,8 +953,9 @@ export default function D3Map({
         const at = pinPositionAt(layout, tier.id, z)
         if (revealed) showing.push({ ...tier, ...at })
         else if (tier.scale === 'Large') largeHeldBack++
+        const size = tier.id === link?.selectedId ? s * SELECTED_PIN_SCALE : s
         group
-          .attr('transform', `translate(${at.x}, ${at.y}) scale(${s})`)
+          .attr('transform', `translate(${at.x}, ${at.y}) scale(${size})`)
           .classed(
             'mapFadeHidden',
             !revealed && tier.id !== forcedPinId && tier.id !== link?.selectedId
@@ -1204,6 +1275,33 @@ export default function D3Map({
         drawExplorerRing(link.highlightedId, 2, 0.6)
       }
       if (link.selectedId) drawExplorerRing(link.selectedId, 3.5, 1, true)
+      if (link.selectedId !== appliedSelected) {
+        // The selected pin's name, and the name of the place it stands in,
+        // take the active colors.
+        const selectedOrg = link.selectedId
+          ? orgById.get(link.selectedId)
+          : undefined
+        const activeArea = selectedOrg
+          ? mapAreaPath(primaryCategory(selectedOrg.category) ?? '', scheme).at(
+              -1
+            )
+          : undefined
+        for (const [label, pill] of areaPills) {
+          const active = label === activeArea
+          pill.group
+            .select('rect')
+            .attr('fill', active ? 'var(--teal-bright-400)' : AREA_PILL_FILL)
+          pill.group
+            .select('text')
+            .attr('fill', active ? 'var(--teal-900)' : '#fff')
+        }
+        for (const pin of pins) {
+          pin.labelRect.attr(
+            'fill',
+            pin.tier.id === link.selectedId ? 'var(--teal-bright-400)' : '#fff'
+          )
+        }
+      }
       const filterChanged =
         link.matchingIds !== appliedMatching || link.nonMatching !== appliedMode
       if (
@@ -1235,6 +1333,12 @@ export default function D3Map({
             : { x: org.x * GRID_SIZE, y: org.y * GRID_SIZE }
           flyToPoint(at.x, at.y, k, explorerRef.current?.leftInset ?? 0)
         },
+        focusPin: id => {
+          const pin = pins.find(({ tier }) => tier.id === id)
+          if (!pin?.link || pin.group.classed('mapFadeHidden')) return false
+          pin.link.focus({ preventScroll: true })
+          return document.activeElement === pin.link
+        },
       }
       explorerRef.current.onReady?.()
     }
@@ -1258,8 +1362,12 @@ export default function D3Map({
         searchControlRef.current.escape()
         return
       }
-      // In the explorer ESC first lets go of the selection; the view is reset
-      // only when there is none.
+      // In the explorer ESC first dismisses the hover tooltip, then lets go of
+      // the selection; the view is reset only when there is neither.
+      if (explorerRef.current && tooltipShowing()) {
+        hideTooltip()
+        return
+      }
       if (explorerRef.current?.selectedId) {
         explorerRef.current.onClear()
         return
@@ -1272,6 +1380,13 @@ export default function D3Map({
     const handleTooltipClick = (e: MouseEvent) => {
       const tt = tooltipRef.current
       if (!tt) return
+      if (explorerRef.current) {
+        const id = tt.getAttribute('data-listing-id')
+        hideTooltip()
+        if (id) explorerRef.current.onSelect(id)
+        e.stopPropagation()
+        return
+      }
       const link = tt.getAttribute('data-link-url')
       const title = tt.getAttribute('data-link-title')
       if (link && link !== '#') {
@@ -1304,6 +1419,10 @@ export default function D3Map({
 
     const tooltipEl = tooltipRef.current
     if (tooltipEl) tooltipEl.addEventListener('click', handleTooltipClick)
+    if (tooltipEl && hasExplorer) {
+      tooltipEl.addEventListener('mouseenter', cancelTooltipHide)
+      tooltipEl.addEventListener('mouseleave', scheduleTooltipHide)
+    }
     document.addEventListener('click', handleDocumentClick)
 
     const container = containerRef.current
@@ -1323,6 +1442,11 @@ export default function D3Map({
       applyTiersRef.current = () => {}
       applyExplorerRef.current = () => {}
       if (tooltipEl) tooltipEl.removeEventListener('click', handleTooltipClick)
+      if (tooltipEl) {
+        tooltipEl.removeEventListener('mouseenter', cancelTooltipHide)
+        tooltipEl.removeEventListener('mouseleave', scheduleTooltipHide)
+      }
+      cancelTooltipHide()
       document.removeEventListener('click', handleDocumentClick)
       document.removeEventListener('keydown', handleEscKey)
       if (container) {
@@ -1370,11 +1494,13 @@ export default function D3Map({
       {/* Tooltip — always in DOM for measuring, visibility toggled via ref */}
       <div
         ref={tooltipRef}
-        className={styles['map-tooltip']}
+        className={`${styles['map-tooltip']}${hasExplorer ? ` ${styles['map-tooltip-explorer']}` : ''}`}
         style={{ visibility: 'hidden', opacity: 0 }}
+        role={hasExplorer ? 'tooltip' : undefined}
       >
         <strong></strong>
         <span></span>
+        {hasExplorer && <small>Click for details</small>}
       </div>
     </>
   )

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_EXPLORER_STATE,
+  historyActionFor,
   matchesSearch,
   normalizeText,
   parseExplorerState,
@@ -164,6 +165,22 @@ describe('query string', () => {
     )
     expect(state.sort).toBe('best')
     expect(state.filters).toEqual({})
+  })
+})
+
+describe('historyActionFor', () => {
+  it('opens a card as a new history entry, so Back closes it', () => {
+    expect(historyActionFor(null, 'recA', false)).toBe('push')
+  })
+  it('closes a card it opened by stepping back off that entry', () => {
+    expect(historyActionFor('recA', null, true)).toBe('back')
+  })
+  it('closes a shared link’s card in place: there is no entry to go back to', () => {
+    expect(historyActionFor('recA', null, false)).toBe('replace')
+  })
+  it('moves between orgs, and changes filters, in place', () => {
+    expect(historyActionFor('recA', 'recB', true)).toBe('replace')
+    expect(historyActionFor(null, null, false)).toBe('replace')
   })
 })
 

@@ -180,6 +180,25 @@ export function writeExplorerState(
   return next
 }
 
+/**
+ * How a change of selection reaches the browser's history, so that Back
+ * closes a details card the visitor opened on this page:
+ * - push: a card opens where none was, as a new entry.
+ * - back: that same card closes, by stepping off the entry it made. Only
+ *   when the entry is ours (`entryIsCard`): a shared link's card has no
+ *   earlier entry on this page to step back to.
+ * - replace: everything else (another org, a filter, a shared link closing).
+ */
+export function historyActionFor(
+  currentOrg: string | null,
+  nextOrg: string | null,
+  entryIsCard: boolean
+): 'push' | 'replace' | 'back' {
+  if (!currentOrg && nextOrg) return 'push'
+  if (currentOrg && !nextOrg && entryIsCard) return 'back'
+  return 'replace'
+}
+
 /** "90 of 412 organizations", or "412 organizations" when nothing is
  *  filtered out. Also what the live region announces. */
 export function resultCountLabel(shown: number, total: number): string {

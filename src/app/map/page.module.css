@@ -299,6 +299,21 @@
   color: var(--teal-300);
 }
 
+/* Explorer: the tooltip stands by its pin and can be hovered and clicked
+   (WCAG 1.4.13), so it takes the pointer on every screen. */
+.map-tooltip-explorer {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.map-tooltip small {
+  display: block;
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 167.5%;
+  color: var(--teal-bright-300);
+}
+
 /* Map icon hover effect (matching Webflow) */
 .map-container :global(.mapItem) {
   transition: transform 0.3s;

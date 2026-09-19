@@ -9,6 +9,9 @@ interface MapResultRowProps {
   org: Pick<MapOrg, 'id' | 'title' | 'category' | 'mapLogo'>
   selected: boolean
   onSelect: () => void
+  // The drawer's rows carry the org's id, so focus and scrolling can find
+  // them; the same org's row elsewhere on the page must not repeat it.
+  id?: string
 }
 
 // One organization in the map's results drawer. The whole row is a button
@@ -18,11 +21,12 @@ export default function MapResultRow({
   org,
   selected,
   onSelect,
+  id,
 }: MapResultRowProps) {
   return (
     <button
       type="button"
-      id={org.id}
+      id={id}
       className={`${styles['result-row']}${selected ? ` ${styles['result-row-selected']}` : ''}`}
       aria-pressed={selected}
       onClick={onSelect}

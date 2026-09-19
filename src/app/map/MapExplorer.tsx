@@ -24,6 +24,7 @@ import { isPlacedOnMap } from '@/lib/map-images'
 import {
   DEFAULT_EXPLORER_STATE,
   EXPLORER_SORTS,
+  historyActionFor,
   matchesSearch,
   parseExplorerState,
   resultCountLabel,
@@ -78,6 +79,8 @@ const SORT_LABELS: Record<ExplorerSort, string> = {
 const FILTER_KEYS = ['category', 'status']
 const NO_STATUS = 'any'
 
+// Marks the history entry made by opening a details card.
+const CARD_ENTRY_KEY = 'mapCard'
 const COLLAPSED_STORAGE_KEY = 'map-list-collapsed'
 const LIST_ID = 'map-explorer-list'
 const LEGEND_ID = 'map-explorer-legend'
@@ -143,8 +146,14 @@ export default function MapExplorer({
 
   const searchRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
-  const mapApiRef = useRef<{ panTo: (id: string) => void }>({
+  const listPillRef = useRef<HTMLButtonElement>(null)
+  const selectedIdRef = useRef<string | null>(null)
+  // The org whose card has just closed: focus goes back to where it was
+  // opened from, once the render without the card has happened.
+  const closedIdRef = useRef<string | null>(null)
+  const mapApiRef = useRef<MapExplorerLink['apiRef']['current']>({
     panTo: () => {},
+    focusPin: () => false,
   })
 
   useEffect(() => {
@@ -233,13 +242,38 @@ export default function MapExplorer({
   }, [countLabel])
 
   // ── Query string ─────────────────────────────────────────────────────────
-  // Written with replaceState, never router.push: a push would refetch this
-  // statically generated page and stack a history entry per keystroke.
+  // Written with the History API, never router.push, which would refetch this
+  // statically generated page. Everything is written in place, bar one thing:
+  // opening a details card makes a history entry, so that Back closes it.
   const lastWrittenRef = useRef<string | null>(null)
   const urlReadRef = useRef(false)
+  // Closing a card steps back off the entry it made; what comes round in that
+  // popstate is our own doing, not a link to read.
+  const steppingBackRef = useRef(false)
+  const [historyTick, setHistoryTick] = useState(0)
   useEffect(() => {
-    // Not before the URL has been read, or a shared link would be wiped.
-    if (!urlReadRef.current) return
+    const onPopState = () => {
+      if (steppingBackRef.current) {
+        steppingBackRef.current = false
+        lastWrittenRef.current = new URL(
+          window.location.href
+        ).searchParams.toString()
+        // Whatever else changed with the close (a category from "See all")
+        // still has to be written, now onto the entry stepped back to.
+        setHistoryTick(tick => tick + 1)
+      } else {
+        // Back or Forward by the visitor: the address is there to be read,
+        // even if it is one this page wrote earlier.
+        lastWrittenRef.current = null
+      }
+    }
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [])
+  useEffect(() => {
+    // Not before the URL has been read, or a shared link would be wiped; and
+    // not while stepping back, when the address is about to change anyway.
+    if (!urlReadRef.current || steppingBackRef.current) return
     const url = new URL(window.location.href)
     const next = writeExplorerState(
       url.searchParams,
@@ -262,11 +296,26 @@ export default function MapExplorer({
       FILTER_KEYS
     ).toString()
     if (next === url.searchParams.toString()) return
+    const action = historyActionFor(
+      url.searchParams.get('org'),
+      selectedId,
+      window.history.state?.[CARD_ENTRY_KEY] === true
+    )
+    if (action === 'back') {
+      steppingBackRef.current = true
+      window.history.back()
+      return
+    }
     lastWrittenRef.current = next
     url.search = next
-    // history.state is passed through: Next.js keeps its routing state there.
-    window.history.replaceState(window.history.state, '', url)
-  }, [settledQuery, categories, statuses, sort, selectedId])
+    if (action === 'push') {
+      // Next.js adds its own routing state to a pushed entry.
+      window.history.pushState({ [CARD_ENTRY_KEY]: true }, '', url)
+    } else {
+      // history.state is passed through: Next.js keeps its routing state there.
+      window.history.replaceState(window.history.state, '', url)
+    }
+  }, [settledQuery, categories, statuses, sort, selectedId, historyTick])
 
   const readUrl = useCallback(
     (params: string) => {
@@ -294,6 +343,9 @@ export default function MapExplorer({
         state.selected && listed.some(org => org.id === state.selected)
           ? state.selected
           : null
+      // Back has closed a card, or Forward has opened one again.
+      if (!linked) closedIdRef.current = selectedIdRef.current
+      else requestAnimationFrame(() => mapApiRef.current.panTo(linked))
       setSelectedId(linked)
       // On a phone a shared link lands on the map, with the details sheet
       // over it.
@@ -334,7 +386,6 @@ export default function MapExplorer({
   }, [drawerOpen])
 
   // ── Selection ────────────────────────────────────────────────────────────
-  const selectedIdRef = useRef<string | null>(null)
   useEffect(() => {
     selectedIdRef.current = selectedId
   }, [selectedId])
@@ -362,8 +413,20 @@ export default function MapExplorer({
   }, [])
   const clearSelection = useCallback(() => {
     if (selectedIdRef.current) showRow(selectedIdRef.current)
+    closedIdRef.current = selectedIdRef.current
     setSelectedId(null)
   }, [])
+  useEffect(() => {
+    const id = closedIdRef.current
+    if (selectedId !== null || !id) return
+    closedIdRef.current = null
+    // The drawer comes back with the card gone: the org's row is the place
+    // to carry on from. With no drawer it is the pin, and if the pin is not
+    // showing at this zoom, the pill that opens the list.
+    const row = document.getElementById(id)
+    if (row && row.offsetParent !== null) row.focus({ preventScroll: true })
+    else if (!mapApiRef.current.focusPin(id)) listPillRef.current?.focus()
+  }, [selectedId])
 
   // A shared link's pin is shown once the map is there to show it.
   const onMapReady = useCallback(() => {
@@ -553,6 +616,7 @@ export default function MapExplorer({
               className={`border-plus-fill paragraph-small ${styles['explorer-pill']}${drawerOpen ? ` ${styles['explorer-pill-active']}` : ''}`}
               aria-expanded={drawerOpen}
               aria-controls={LIST_ID}
+              ref={listPillRef}
               onClick={toggleDrawer}
             >
               <Icon src="/images/icons/list.svg" size={16} />
@@ -658,6 +722,7 @@ export default function MapExplorer({
                       onBlur={() => setHighlightedId(null)}
                     >
                       <MapResultRow
+                        id={org.id}
                         org={org}
                         selected={org.id === selectedId}
                         onSelect={() => select(org.id)}
