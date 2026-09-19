@@ -13,8 +13,7 @@
 // road; Media and discourse is delta country, with a beach, reeds and boats
 // off it; Policy and strategy is open grass; Technical research is rock with
 // mountains throughout, in whatever gaps the org logos leave. A river comes
-// down from the mountains and over the dam, circles the castle town as its
-// moat, and runs out through the delta to the sea in the north-west. Over that stand the classic map's own landmarks (the
+// down from the mountains, circles the castle town as its moat, and runs out through the delta to the sea in the north-west. Over that stand the classic map's own landmarks (the
 // castle, the town, the forests and the rest), each in its new district: see
 // map-art-landmarks.ts.
 //
@@ -48,7 +47,7 @@ const LINE = '#112928'
 const ROAD = '#972f00'
 const ROAD_EDGE = '#571f02'
 const FOOTPATH = '#ffd1bc'
-const WATER = '#7dd5c2'
+const WATER = '#bbe8e1'
 const PLANK = '#972f00'
 const PLANK_GAP = '#571f02'
 const SAND = '#ffd1bc'
@@ -56,17 +55,24 @@ const SNOW = '#f6fbff'
 const CLIFF_ROCK = { lip: '#ff4b00', face: '#d53d00', foot: '#972f00' }
 const CLIFF_SAND = { lip: '#ffa777', face: '#ff7c25', foot: '#d53d00' }
 const CLIFF_EARTH = { lip: '#00ae85', face: '#008969', foot: '#2f5650' }
+const CLIFF_MARSH = { lip: '#4fb3bf', face: '#358d99', foot: '#2f5650' }
+const CLIFF_STONE = { lip: '#c9d4dd', face: '#9fb0bd', foot: '#6f8290' }
+const CLIFF_GRASS = { lip: '#c5d46a', face: '#97a844', foot: '#5f6f2a' }
 const MOUNTAIN_LIT = ['#ffa777', '#ffd1bc', '#7dd5c2']
 const MOUNTAIN_SHADE = '#972f00'
 const SHORE_DETAIL = '#d53d00'
 const STARFISH = '#ff4b00'
 
-// DESIGN DECISION, for review: each realm is a country of its own kind, told
-// apart by its ground, its shore and what grows or stands on it, after the
-// realm's part in the journey. Matched on the first word of the realm's name.
+// DESIGN DECISION, for review: each realm is a biome of its own, with its own
+// family of colors, so no two realms are shades of the same green. Its
+// districts step through the family's tones, so a biome has variety inside it
+// too. The greens and oranges are the classic map's; the wetland teal, the
+// harbour stone and the grassland wheat are new, and placeholders like the
+// rest. Matched on the first word of the realm's name.
 type Terrain = 'shore' | 'trail' | 'delta' | 'plains' | 'range'
 interface RealmTheme {
-  ground: string
+  // The biome's ground colors; districts take them in turn.
+  tones: string[]
   cliff: { lip: string; face: string; foot: string }
   // A strip of sand just inside the realm's shore.
   beach?: boolean
@@ -75,44 +81,54 @@ interface RealmTheme {
   growth?: string
   // Sailboats and rowboats off its shore.
   boats?: boolean
+  // The realm around the cove, whose two halves the causeway runs between.
+  harbour?: boolean
 }
 const REALM_THEMES: Record<string, RealmTheme> = {
-  // Field infrastructure: the sandy ground along the south
+  // Field infrastructure: sand, the ground along the south
   field: {
-    ground: '#ffa777',
+    tones: ['#ffa777', '#ffb68e', '#f59868'],
     cliff: CLIFF_SAND,
     beach: true,
     terrain: 'shore',
   },
-  // Talent pipeline
+  // Talent pipeline: green farmland along the road
   talent: {
-    ground: '#00ae85',
+    tones: ['#00ae85', '#1cbb92', '#009c77'],
     cliff: CLIFF_EARTH,
     terrain: 'trail',
-    growth: '#008969',
+    growth: '#007a5e',
   },
-  // Media and discourse: the delta country in the north-west
+  // Media and discourse: teal wetland, the delta in the north-west
   media: {
-    ground: '#008969',
-    cliff: CLIFF_EARTH,
+    tones: ['#4fb3bf', '#64c0cb', '#42a3b0'],
+    cliff: CLIFF_MARSH,
     beach: true,
     terrain: 'delta',
-    growth: '#2dc2a4',
+    growth: '#2a7c88',
     boats: true,
   },
-  // Advocacy and public engagement: the harbour
-  advocacy: { ground: '#ffd1bc', cliff: CLIFF_SAND },
-  // Policy and strategy
-  policy: {
-    ground: '#2dc2a4',
-    cliff: CLIFF_EARTH,
-    terrain: 'plains',
-    growth: '#008969',
+  // Advocacy and public engagement: the harbour's pale stone
+  advocacy: {
+    tones: ['#c9d4dd', '#d8e0e7'],
+    cliff: CLIFF_STONE,
+    harbour: true,
   },
-  // Technical research
-  technical: { ground: '#ff7c25', cliff: CLIFF_ROCK, terrain: 'range' },
+  // Policy and strategy: wheat-colored grassland
+  policy: {
+    tones: ['#c5d46a', '#d3de80', '#b5c657'],
+    cliff: CLIFF_GRASS,
+    terrain: 'plains',
+    growth: '#7d8f2e',
+  },
+  // Technical research: orange rock
+  technical: {
+    tones: ['#ff7c25', '#ff8f42', '#ee6c17'],
+    cliff: CLIFF_ROCK,
+    terrain: 'range',
+  },
 }
-const SPARE_THEME: RealmTheme = { ground: '#00ae85', cliff: CLIFF_EARTH }
+const SPARE_THEME: RealmTheme = { tones: ['#00ae85'], cliff: CLIFF_EARTH }
 // How thickly each terrain is strewn, in grid units (see scatterSpots).
 const TERRAIN_SCATTER: Record<Terrain, Parameters<typeof scatterSpots>[3]> = {
   shore: { spacing: 1.25, minRoom: 0.3, maxRoom: 1 },
@@ -124,13 +140,6 @@ const TERRAIN_SCATTER: Record<Terrain, Parameters<typeof scatterSpots>[3]> = {
 // A range is mountainous throughout: behind the peaks that fill the gaps
 // stands a row of larger ones, which the logos are drawn over.
 const RANGE_BACKDROP = { spacing: 2.7, minRoom: 0.9, maxRoom: 1.15 }
-// Districts of one realm step through these tints over the realm's ground.
-const DISTRICT_TINTS = [
-  { color: '#000', opacity: 0 },
-  { color: '#000', opacity: 0.08 },
-  { color: '#fff', opacity: 0.1 },
-]
-
 // Grid units.
 const CORNER_RADIUS = 0.7
 const CLIFF_HEIGHT = 0.95
@@ -142,7 +151,6 @@ const FRAME = { width: 60, height: 32.7 }
 // The classic art, one <symbol> per landmark (see map-art-landmarks.ts).
 const LANDMARKS_URL = '/images/map35-landmarks.svg'
 // Grid units: landmarks that stand at a fixed place, not in a district.
-const DAM = { width: 2.2, height: 2 }
 const LIGHTHOUSE = { width: 1.2, height: 2.2 }
 const BOATS = { width: 5.1, height: 1.9 }
 const SAILBOAT = { width: 1.6, height: 1.3 }
@@ -176,7 +184,6 @@ function landmarksFor(
   // Ground that is taken already: the river's course.
   taken: { x: number; y: number; radius: number }[] = []
 ) {
-  const [damX, damY] = layout.landmarks.controlDam
   const onLand = pins.filter(pin => layout.districtAt(pin.x, pin.y) !== null)
   const atSea = pins.filter(pin => layout.districtAt(pin.x, pin.y) === null)
   const placed: PlacedLandmark[] = placeLandmarks(
@@ -184,9 +191,8 @@ function landmarksFor(
     layout.districtAt,
     onLand,
     FRAME,
-    [{ x: damX, y: damY, radius: 2.5 }, ...taken]
+    taken
   )
-  placed.push({ symbol: 'dam', x: damX, y: damY, ...DAM })
 
   const [harbourX, harbourY] = layout.landmarks.arrivalHarbour
   placed.push({
@@ -343,7 +349,7 @@ export function artBackdropMarkup(
   }
   let landmarks = pins ? landmarksFor(layout, pins) : []
   // The river: it rises at the mountain lake in the range, comes down through
-  // the mountains and over the dam, and runs into the moat round the castle
+  // the mountains, and runs into the moat round the castle
   // town, the hub of the island. It leaves the moat by the shoulder nearest
   // the delta realm, and there splits again and again on its way to the sea.
   // With no range, no castle town or no delta realm there is no river.
@@ -367,17 +373,32 @@ export function artBackdropMarkup(
       return [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2]
     })
 
-    // Down through the range in two easy bends, over the dam, and into the
-    // side of the moat that faces it.
-    const dam = layout.landmarks.controlDam
+    // Down through the range in two easy bends, into the side of the moat
+    // that faces the spring. (The classic map's falls are not on it: they
+    // face down the page, and this river never runs that way.)
     const source: Point = [spring.x, spring.y + spring.height * 0.2]
+    // The side of the moat that looks most squarely toward the spring.
+    const center: Point = [
+      moat.reduce((sum, p) => sum + p[0], 0) / moat.length,
+      moat.reduce((sum, p) => sum + p[1], 0) / moat.length,
+    ]
+    const facing = (side: Point) => {
+      const [ax, ay] = [side[0] - center[0], side[1] - center[1]]
+      const [bx, by] = [source[0] - center[0], source[1] - center[1]]
+      return (ax * bx + ay * by) / (Math.hypot(ax, ay) * Math.hypot(bx, by))
+    }
+    const entry = sides.reduce((best, side) =>
+      facing(side) > facing(best) ? side : best
+    )
     const along = (share: number, swing: number): Point => [
-      source[0] + (dam[0] - source[0]) * share,
-      source[1] + (dam[1] - source[1]) * share + swing,
+      source[0] + (entry[0] - source[0]) * share,
+      source[1] + (entry[1] - source[1]) * share + swing,
     ]
     river.push(
-      { points: [source, along(0.35, 0.9), along(0.7, -0.5), dam], width: 9 },
-      { points: [dam, nearest(sides, dam)], width: 12 },
+      {
+        points: [source, along(0.3, 0.9), along(0.65, -0.6), entry],
+        width: 10,
+      },
       { points: moat, width: 12, closed: true }
     )
 
@@ -482,10 +503,9 @@ export function artBackdropMarkup(
   }
 
   // The land: each realm's ground, its districts as tones of it.
-  out.push(`<path d="${coastPath}" fill="${SPARE_THEME.ground}"/>`)
+  out.push(`<path d="${coastPath}" fill="${SPARE_THEME.tones[0]}"/>`)
   layout.realms.forEach((realm, i) => {
     const theme = themeOf(realm.realm)
-    const ground = theme.ground
     out.push(
       `<g clip-path="url(#art-coast)"><g clip-path="url(#art-realm-${i})">`
     )
@@ -495,10 +515,9 @@ export function artBackdropMarkup(
       .sort((a, b) => Number(a.block) - Number(b.block))
     districts.forEach((district, n) => {
       const d = district.pieces.map(outline).join('')
-      const tint = DISTRICT_TINTS[n % DISTRICT_TINTS.length]
-      out.push(`<path d="${d}" fill="${ground}"/>`)
+      const tone = theme.tones[n % theme.tones.length]
       out.push(
-        `<path d="${d}" fill="${tint.color}" fill-opacity="${tint.opacity}" stroke="${LINE}" stroke-opacity="0.35" stroke-width="3" stroke-linejoin="round"/>`
+        `<path d="${d}" fill="${tone}" stroke="${LINE}" stroke-opacity="0.35" stroke-width="3" stroke-linejoin="round"/>`
       )
     })
     // The beach: a strip of sand just inside the realm's shore.
@@ -590,19 +609,52 @@ export function artBackdropMarkup(
       `<path d="${d}" fill="none" stroke="${PLANK}" stroke-width="16" stroke-dasharray="7 3"/>`
     )
   }
-  if (layout.boardwalk.length > 1) planks(layout.boardwalk)
-  // Bridges over the moat where the road comes in from the west and the
-  // footpaths set out to the east (the boardwalk is its own, to the north).
+  // The causeway from the castle town to the cove: over the moat, up the
+  // line between the harbour realm's two halves (so it parts them), and out
+  // into the water as a jetty. Without a moat or that line, the spec's
+  // boardwalk as it is.
+  const harbourDistricts = new Set(
+    layout.districts.filter(d => themeOf(d.realm).harbour).map(d => d.district)
+  )
+  const between = (y: number): number | null => {
+    const xs = cove.map(p => p[0])
+    let last: string | null = null
+    for (let x = Math.min(...xs); x <= Math.max(...xs); x += 0.05) {
+      const district = layout.districtAt(x, y)
+      if (district === null || !harbourDistricts.has(district)) continue
+      if (last !== null && district !== last) return x
+      last = district
+    }
+    return null
+  }
+  const coveFoot = cove.length > 0 ? Math.max(...cove.map(p => p[1])) : null
+  const townTop = hub ? Math.min(...hub.pieces[0].map(p => p[1])) : null
+  const upper = coveFoot === null ? null : between(coveFoot + 0.4)
+  const lower = townTop === null ? null : between(townTop - 0.4)
+  if (
+    coveFoot !== null &&
+    townTop !== null &&
+    upper !== null &&
+    lower !== null
+  ) {
+    const slope = (upper - lower) / (coveFoot + 0.4 - (townTop - 0.4))
+    const at = (y: number): Point => [lower + slope * (y - (townTop - 0.4)), y]
+    planks([at(townTop + 0.55), at(coveFoot - 0.9)])
+  } else if (layout.boardwalk.length > 1) {
+    planks(layout.boardwalk)
+  }
+  // A bridge over the moat where the road comes in from the west.
   if (river.length > 0 && hub) {
     const xs = hub.pieces[0].map(p => p[0])
     const ys = hub.pieces[0].map(p => p[1])
-    const y = (Math.min(...ys) + Math.max(...ys)) / 2
-    for (const x of [Math.min(...xs), Math.max(...xs)]) {
-      planks([
-        [x - 0.45, y],
-        [x + 0.45, y],
-      ])
-    }
+    const [road] = layout.roads
+    const y = road
+      ? road[road.length - 1][1]
+      : (Math.min(...ys) + Math.max(...ys)) / 2
+    planks([
+      [Math.min(...xs) - 0.5, y],
+      [Math.min(...xs) + 0.5, y],
+    ])
   }
   const [hx, hy] = layout.landmarks.arrivalHarbour
   planks([
