@@ -212,6 +212,26 @@ describe('layoutRealmMap', () => {
     expect(width / height).toBeLessThan(1.33)
   })
 
+  it('makes a town an octagon when the spec asks for one', () => {
+    const hub = layoutRealmMap(pins, graveyard, {
+      ...spec,
+      blocks: { 'East two': { seed: [44, 22], shape: 'octagon' } },
+    })
+    const town = hub.districts.find(d => d.district === 'East two')!
+    const [outline] = town.pieces
+    expect(outline).toHaveLength(8)
+    // All eight sides are the same length, and it holds its pins.
+    const sides = outline.map((p, i) => {
+      const q = outline[(i + 1) % outline.length]
+      return Math.hypot(q[0] - p[0], q[1] - p[1])
+    })
+    for (const side of sides) expect(side).toBeCloseTo(sides[0], 5)
+    for (const pin of pins.filter(p => p.district === 'East two')) {
+      const spot = hub.positions.get(pin.id)!
+      expect(inside([spot.x, spot.y], outline), pin.id).toBe(true)
+    }
+  })
+
   it('says which district a spot on the map is in', () => {
     for (const pin of pins) {
       const [x, y] = at(pin)
