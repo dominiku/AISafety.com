@@ -540,8 +540,11 @@ describe('the Map 3.5 hex map', () => {
     expect(
       layout.ends.filter(end => end.kind === 'river').length
     ).toBeGreaterThanOrEqual(3)
+    // The fall from the Thermals into the Dam's basin, and the dam itself.
     expect(
       layout.drops.filter(drop => drop.kind === 'river' && drop.visible).length
-    ).toBeGreaterThanOrEqual(3)
+    ).toBeGreaterThanOrEqual(2)
+    // It rises in one place, and every stretch of it leads on to the sea.
+    expect(layout.springs).toHaveLength(1)
   })
 })

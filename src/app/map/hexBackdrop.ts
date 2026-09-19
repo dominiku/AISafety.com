@@ -59,11 +59,13 @@ import {
 import { buildingMarkup } from './hexBuildings'
 import {
   canopyMarkup,
-  craterMarkup,
   deckMarkup,
   duneMarkup,
   geyserMarkup,
   palmMarkup,
+  parasolMarkup,
+  stiltHouseMarkup,
+  volcanoMarkup,
   beachHutMarkup,
   sulphurPoolMarkup,
   slopeCornerMarkup,
@@ -1007,7 +1009,7 @@ export function hexBackdropMarkup(
         extent,
         cover === 'forest'
           ? { spacing: 0.42, minRoom: 0.05, maxRoom: 0.4 }
-          : { spacing: 1.15, minRoom: 0.3, maxRoom: 0.8 }
+          : { spacing: 1.75, minRoom: 0.3, maxRoom: 0.8 }
       )
         .sort((a, b) => a.y - b.y)
         .forEach((spot, n) =>
@@ -1025,7 +1027,7 @@ export function hexBackdropMarkup(
               : sulphurPoolMarkup(
                   spot.x,
                   spot.y,
-                  0.95 + spot.roll * 0.7,
+                  0.9 + spot.roll * 0.9,
                   view.squash,
                   g,
                   n,
@@ -1065,8 +1067,8 @@ export function hexBackdropMarkup(
     const building = plateau.tiles[0].building
     if (building) {
       const [site] = scatterSpots(inside, [...logos, ...fixed], extent, {
-        spacing: 0.45,
-        minRoom: 0.6,
+        spacing: 0.3,
+        minRoom: 0.42,
         maxRoom: 1.5,
       }).sort((a, b) => b.room - a.room)
       if (site) {
@@ -1111,60 +1113,70 @@ export function hexBackdropMarkup(
       return
     }
     if (cover === 'huts') {
-      // A stilt village's huts, and now and then one of the classic cottages.
+      // A stilt village's houses of timber and thatch, of three kinds.
       scatterSpots(inside, [...logos, ...fixed], extent, {
-        spacing: 0.75,
-        minRoom: 0.26,
+        spacing: 0.95,
+        minRoom: 0.34,
         maxRoom: 0.8,
       }).forEach(spot => {
-        const foot = spot.y + 0.3
-        stand(
-          foot,
-          level,
-          spot.roll > 0.7
-            ? stamp('cottage', spot.x, foot, 0.72, 0.93)
-            : beachHutMarkup(spot.x, foot, 0.72, g)
-        )
+        const foot = spot.y + 0.38
+        const kind =
+          spot.room > 0.5 && spot.roll > 0.55 ? 1 : spot.roll > 0.3 ? 0 : 2
+        stand(foot, level, stiltHouseMarkup(spot.x, foot, 0.98, g, kind))
       })
       return
     }
     if (cover === 'tropical') {
-      // A tropical beach: palms, and a beach hut or two where there is room.
+      // A tropical beach: palms in plenty, parasols and towels, a rowboat
+      // drawn up on the sand, and a beach hut or two where there is room.
       let huts = 0
       scatterSpots(inside, [...logos, ...fixed], extent, {
-        spacing: 1.15,
-        minRoom: 0.3,
+        spacing: 0.72,
+        minRoom: 0.2,
         maxRoom: 0.8,
       }).forEach((spot, n) => {
+        const foot = spot.y + 0.25
         const hut = huts < 2 && spot.room > 0.55 && spot.roll > 0.45
         if (hut) huts++
         stand(
-          spot.y + 0.3,
+          foot,
           level,
           hut
-            ? beachHutMarkup(spot.x, spot.y + 0.3, 0.85, g)
-            : palmMarkup(
-                spot.x,
-                spot.y + 0.3,
-                1.05 + spot.roll * 0.45,
-                g,
-                seed * 97 + n
-              )
+            ? beachHutMarkup(spot.x, foot, 0.8, g)
+            : spot.roll < 0.2 && spot.room > 0.3
+              ? parasolMarkup(spot.x, foot, 0.5, g, seed * 97 + n)
+              : spot.roll < 0.28 && spot.room > 0.45
+                ? stamp('rowboat', spot.x, foot, 0.85, 0.38)
+                : palmMarkup(
+                    spot.x,
+                    foot,
+                    0.72 + spot.roll * 0.4,
+                    g,
+                    seed * 97 + n
+                  )
         )
       })
       return
     }
     if (cover === 'thermals') {
-      // Geysers, in the gaps among the hot springs that lie under the logos.
+      // Geysers going off, in the gaps among the hot springs that lie under
+      // the logos.
       scatterSpots(inside, [...logos, ...fixed], extent, {
-        spacing: 1.6,
-        minRoom: 0.3,
+        spacing: 1.1,
+        minRoom: 0.22,
         maxRoom: 0.8,
-      }).forEach(spot =>
+      }).forEach((spot, n) =>
         stand(
           spot.y + 0.25,
           level,
-          geyserMarkup(spot.x, spot.y + 0.25, 1.5, g, theme.cliff.foot)
+          geyserMarkup(
+            spot.x,
+            spot.y + 0.25,
+            1.3 + spot.roll * 0.7,
+            g,
+            theme.cliff.foot,
+            seed * 97 + n
+          )
         )
       )
       return
@@ -1414,10 +1426,15 @@ export function hexBackdropMarkup(
       drawRelief(plateau, tone, id)
       for (const tile of plateau.tiles) {
         if (tile.state === 'crater') {
-          out.push(
-            craterMarkup(
-              tile.center,
-              view.size * 0.68,
+          const depth = (Math.sqrt(3) / 2) * view.size * view.squash
+          const foot: Point = [tile.center[0], tile.center[1] + depth * 0.18]
+          stand(
+            foot[1] + depth * 0.6,
+            height,
+            volcanoMarkup(
+              foot,
+              view.size * 0.8,
+              view.size * 0.95,
               view.squash,
               g,
               styleOf(tile).theme.cliff
@@ -1505,6 +1522,19 @@ export function hexBackdropMarkup(
     )
     for (const spring of layout.springs) {
       if (!refs.has(spring.tile)) continue
+      if (tileByRef.get(spring.tile)?.cover === 'thermals') {
+        out.push(
+          sulphurPoolMarkup(
+            spring.at[0],
+            spring.at[1],
+            spring.width * 2.6,
+            view.squash,
+            g,
+            2
+          )
+        )
+        continue
+      }
       out.push(
         `<ellipse cx="${(spring.at[0] * g).toFixed(1)}" cy="${(spring.at[1] * g).toFixed(1)}" rx="${(spring.width * 0.95 * g).toFixed(1)}" ry="${(spring.width * 0.95 * view.squash * g).toFixed(1)}" fill="${WATER}" stroke="${SHALLOWS}" stroke-width="${BANK}"/>`
       )

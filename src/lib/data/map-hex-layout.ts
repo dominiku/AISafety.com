@@ -889,6 +889,20 @@ export function layoutHexMap(
           (a, b) => turn(b) - turn(a)
         )[0]
         outSides.push(out ?? null)
+        // (Round the keep it runs on as the moat, which is joined up apart.)
+        const byKeep = (at: PlannedTile) =>
+          !!keep && HEX_DIRECTIONS.some(side => neighborOf(at, side) === keep)
+        const intoMoat =
+          byKeep(tile) ||
+          HEX_DIRECTIONS.some(side => {
+            const next = neighborOf(tile, side)
+            return !!next && next.mark === 'river' && byKeep(next)
+          })
+        if (!out && kind === 'river' && !intoMoat) {
+          throw new Error(
+            `Hex map: the river tile "${tile.ref}" at ${where(tile)} is a dead end inland: an arm of the river leads there and nowhere on. Mark the tiles on to the coast, or take its mark away`
+          )
+        }
         if (out) {
           const from = projectPoint(view, middle, 0)
           const to = projectPoint(view, hexSideMiddle(tile, out, view.size), 0)
