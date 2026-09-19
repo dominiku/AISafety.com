@@ -56,7 +56,14 @@ import {
   type ArtPin,
   type RealmTheme,
 } from './realmArtBackdrop'
-import { craterMarkup, deckMarkup, scarpFaceMarkup } from './hexFeatures'
+import {
+  craterMarkup,
+  deckMarkup,
+  duneMarkup,
+  slopeCornerMarkup,
+  slopeMarkup,
+  tuftMarkup,
+} from './hexFeatures'
 
 // DESIGN REVIEW (Melissa): the closed orgs' islet, in the classic map's dark
 // greens. Every other color of this view is the Art work view's, or a tone
@@ -236,7 +243,10 @@ export function hexBackdropMarkup(
       projectPoint(view, corner, 0)
     )
   // Sunken ships are not land: the sea and its border pass under them.
-  const land = layout.tiles.filter(tile => tile.state !== 'sea' && !tile.sunken)
+  // Nor is a pier: it stands out in open water.
+  const land = layout.tiles.filter(
+    tile => tile.state !== 'sea' && !tile.sunken && !tile.deck
+  )
   const landCells = new Set(land.map(tile => hexKey(tile)))
   for (let col = -SEA_REACH; col < layout.columns + SEA_REACH; col++) {
     for (let row = -SEA_REACH; row < layout.rows + SEA_REACH; row++) {
@@ -272,7 +282,16 @@ export function hexBackdropMarkup(
       end.at[0] + end.toward[0] * along,
       end.at[1] + end.toward[1] * along,
     ]
-    const d = `M${xy(at(0.2))}L${xy(at(1.3))}`
+    // A district's pier is an L: a short arm at its head, turned toward the
+    // viewer, for boats to lie along.
+    const [tx, ty] = end.toward
+    const turn: Point = tx > 0 ? [-ty, tx] : [ty, -tx]
+    const head = at(1.3)
+    const arm =
+      end.kind === 'pier'
+        ? `L${xy([head[0] + turn[0] * 0.75, head[1] + turn[1] * 0.75])}`
+        : ''
+    const d = `M${xy(at(0.2))}L${xy(head)}${arm}`
     const across = (end.width * g * 0.8).toFixed(1)
     out.push(
       `<path d="${d}" fill="none" stroke="${PLANK_GAP}" stroke-width="${across}"/>`,
@@ -597,7 +616,7 @@ export function hexBackdropMarkup(
             .filter(face => face.drop > 0)
             .map(face => outline(faceShape(other, face.k, face.drop))),
         ])
-        .join('')}" fill="#000" stroke="#fff" stroke-width="1.5"/></mask>`
+        .join('')}" fill="#000"/></mask>`
     )
     faceMasks.set(tile.ref, id)
   })
@@ -629,7 +648,9 @@ export function hexBackdropMarkup(
           ? front.height
           : 0
       const drop = (tile.height - ground) * view.lift
-      if (drop <= 0) return
+      // A side that slopes down onto land is drawn by drawSlopes, not as a
+      // sheer face. (Down to the sea it stays a cliff.)
+      if (drop <= 0 || (tile.slope > 0 && ground > 0)) return
       const [a, b] = [top[k], top[k + 1]]
       const band = (from: number, to: number, color: string) =>
         out.push(
@@ -638,26 +659,13 @@ export function hexBackdropMarkup(
             [b[0], b[1] + from],
             [b[0], b[1] + to],
             [a[0], a[1] + to],
-          ])}" fill="${color}" stroke="${color}" stroke-width="1"/>`
+          ])}" fill="${color}" stroke="${color}" stroke-width="1" stroke-linejoin="bevel"/>`
         )
       band(0, drop, theme.cliff.face)
       band(0, Math.min(FACE_LIP, drop), theme.cliff.lip)
       // The dark foot is where a cliff meets the sea.
       if (ground === 0) {
         band(Math.max(0, drop - FACE_FOOT), drop, theme.cliff.foot)
-      }
-      if (tile.scarp) {
-        out.push(
-          scarpFaceMarkup(
-            a,
-            b,
-            drop,
-            g,
-            theme.cliff,
-            ground > 0,
-            tile.col * 31 + tile.row * 7 + k
-          )
-        )
       }
       if (k === 0) {
         out.push(
@@ -689,6 +697,64 @@ export function hexBackdropMarkup(
           )
         }
       })
+    }
+  }
+
+  // The sides of an escarpment or a volcano toward the viewer: not sheer
+  // faces but slopes, leaning out over the lower land (or the sea) in front
+  // of them, which is drawn already. The ways the three near sides face on
+  // the ground, as the corners of a tile's top run: south-east, south,
+  // south-west.
+  const SLOPE_OUT: Point[] = [
+    [0.866, 0.5],
+    [0, 1],
+    [-0.866, 0.5],
+  ]
+  const drawSlopes = (tile: HexLaidTile) => {
+    if (!(tile.slope > 0)) return
+    const { cliff } = styleOf(tile).theme
+    const sides = faceDrops(tile)
+      .filter(face => face.drop > 0 && face.ground > 0)
+      .map(face => {
+        const run = tile.slope * (tile.height - face.ground)
+        const reach: Point = [
+          SLOPE_OUT[face.k][0] * run,
+          SLOPE_OUT[face.k][1] * run * view.squash + face.drop,
+        ]
+        return { ...face, run, reach }
+      })
+    const shadeOf = (k: number) => (k === 0 ? FACE_SHADE : 0)
+    // Round each corner between two sloping sides first, then the sides.
+    sides.forEach(side => {
+      const next = sides.find(other => other.k === side.k + 1)
+      if (!next) return
+      out.push(
+        slopeCornerMarkup(
+          tile.top[next.k],
+          side.reach,
+          next.reach,
+          g,
+          cliff,
+          shadeOf(side.k) / 2
+        )
+      )
+    })
+    for (const side of sides) {
+      out.push(
+        slopeMarkup(
+          tile.top[side.k],
+          tile.top[side.k + 1],
+          SLOPE_OUT[side.k],
+          side.run,
+          side.drop,
+          view.squash,
+          g,
+          cliff,
+          tile.scarp,
+          shadeOf(side.k),
+          tile.col * 31 + tile.row * 7 + side.k
+        )
+      )
     }
   }
 
@@ -765,6 +831,37 @@ export function hexBackdropMarkup(
       out.push('</g>')
       return
     }
+    if (cover === 'dunes' || cover === 'meadow') {
+      // Dunes along a beach, or the grass of a valley floor: in the gaps the
+      // logos leave.
+      const spots = scatterSpots(inTile, [...logos, ...fixed], extent, {
+        spacing: cover === 'dunes' ? 1.05 : 0.7,
+        minRoom: cover === 'dunes' ? 0.35 : 0.15,
+        maxRoom: 0.7,
+      }).sort((a, b) => a.y - b.y)
+      spots.forEach((spot, n) => {
+        const seed = tile.col * 53 + tile.row * 19 + n
+        if (cover === 'dunes') {
+          out.push(
+            duneMarkup(
+              spot.x,
+              spot.y + 0.2,
+              0.7 + spot.roll * 0.5,
+              g,
+              mixHex(tone, '#ffffff', 0.45),
+              mixHex(tone, LINE, 0.4),
+              VINE,
+              seed
+            )
+          )
+        } else if (spot.roll > 0.82 && spot.room > 0.4) {
+          out.push(stamp('tree', spot.x, spot.y + 0.3, 0.45, 0.9))
+        } else {
+          out.push(tuftMarkup(spot.x, spot.y, g, VINE, FIELD_RIPE, seed))
+        }
+      })
+      return
+    }
     const wood = cover === 'forest' || cover === 'thicket' || cover === 'grove'
     const stand = wood
       ? cover === 'thicket'
@@ -814,8 +911,9 @@ export function hexBackdropMarkup(
     flat: boolean
   ) => {
     if (!pins || tile.landmark || !(theme.terrain || tile.cover)) return
-    // A crater fills its tile.
-    if (tile.state === 'crater') return
+    // A crater fills its tile, and the top of an escarpment is bare: what
+    // stood on it would hide its slope.
+    if (tile.state === 'crater' || tile.scarp) return
     if (flat !== (tile.cover === 'fields' || tile.cover === 'vineyard')) return
     const ground = insetConvex(
       tile.top,
@@ -1009,6 +1107,9 @@ export function hexBackdropMarkup(
         maskedBy(tile.ref, () => drawFaces(tile, styleOf(tile).theme))
       }
     }
+    for (const plateau of level) {
+      for (const tile of plateau.tiles) drawSlopes(tile)
+    }
     level.forEach((plateau, n) => {
       const { tone } = styleOf(plateau.tiles[0])
       const shape = plateau.loops.map(outline).join('')
@@ -1023,7 +1124,7 @@ export function hexBackdropMarkup(
           out.push(
             craterMarkup(
               tile.center,
-              view.size * 0.62,
+              view.size * 0.68,
               view.squash,
               g,
               styleOf(tile).theme.cliff
