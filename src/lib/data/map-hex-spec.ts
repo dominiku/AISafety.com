@@ -11,8 +11,11 @@
 //         below). Lower-case letters are features, not districts: cv the
 //         cove, hb the harbor, mt the peak, kp the castle's keep.
 // Every painted tile is land (takeAllTiles below), so the coast is exactly
-// what is painted here: keep it smooth, with no single tile sticking out. The
-// two rows at the top are left to the sea for the map's title. Logos fill a
+// what is painted here: keep it smooth, with no single tile sticking out, and
+// paint each district about as many tiles as its logos need (a tile holds
+// about one large logo, two medium or four small; the render script's need
+// report gives the count). The two rows at the top are left to the sea for
+// the map's title. Logos fill a
 // district from its most inland tile (the one nearest the castle) outward.
 // With takeAllTiles off, a district takes only as many tiles as its logos
 // need and the rest stay sea until the day they are needed.
@@ -54,21 +57,21 @@ const TILES = `
 # 0   1   2   3   4   5   6   7   8   9   10  11  12  13  14  15  16  17  18
   ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..
   ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..
-  ..  Fo  Fo  Fo~ Ne  Ne~ Ne  Ne  Gr  Gr  cv  Pa  Pa  Go  Go  Th  Th  Lo  ..
-  ..  Fo! Fo  Fo~ Ne  Ne~ Ne  Ne  Fr  Gr  cv  Pa  Pa  Go  Th  Th  Th  Lo  Lo
-  ..  Fo~ Fo~ Fo  Fo~ Ne~ Ne  Ne  Fr  Gr  cv! Pa  Pa  Go  Th  Th! Th  Lo  Lo
-  ..  In  Fo  Fo  Fo  Ne  Ne~ Ne~ Fr  Fr  cv  Ma  Ma  Ma  Ma! St  St  ..  ..
-  In! hb  In  Fb  Pp  Pp  Pp  Pp  Fr~ Ca~ Ca  Ca  Ma  Ma  St  Ev  Ev  mt~ ..
-  hb  hb  In= Fb= Pp= Pp= Tp= Tp= Tp= Ca= kp  Ca~ Al~ Al~ Al  Ev~ Ev~ Ip  Ip
-  In  In  In  Fb  Tp  Tp  Tp! Tp  Tp  Hu  Ca  Gm  Al  Al  Al~ Al  Ev  Ip  Ip!
-  ..  ..  Fb  Tp  Tp  Tp  Tp  Tp  To  Hu  Gm  Gm  Gm  Al  Al  Co  Co  Cp! Cp
-  Gy  Gy  ..  ..  Tp  Op  Op  Op  To  Gm  Gm! Gm  Gm  Vc  Co  Co  Co! Cp  Cp
-  Gy! Gy  Gy  ..  ..  Op  Op  To  To  Gm  Gm  Gm  Gm  Vc  Vc  Co  Co  ..  ..
+  ..  ..  Fo  Fo~ Fo  Ne~ Ne  Ne  Ne  Gr  ..  Pa  Go  Go  Th  Th  Th  Lo  ..
+  ..  ..  Fo  Fo~ Fo~ Ne~ Ne  Ne  Fr  Gr  cv! Pa  Pa  Go  Th  Th! Th  Lo  ..
+  ..  ..  Fo~ Fo! Fo  Ne  Ne~ Ne~ Fr  Gr  cv  Pa  Ma  Ma  Ma! St  Lo  ..  ..
+  ..  In! In  In  Fb  Pp  Pp  Pp  Fr~ Ca~ Ca  Ca  Ma  Ma  St  Ev  Ev  mt~ ..
+  ..  hb  hb  In= Fb= Pp= Pp= Tp= Tp= Ca= kp  Ca~ Al~ Al~ Al  Ev~ Ev~ Ip  ..
+  ..  In  hb  In  Fb  Tp  Tp! Tp  Tp  Hu  Ca  Gm  Al  Al  Al~ Co  Ip  Ip! ..
+  ..  ..  In  Tp  Tp  Tp  Tp  Op  Hu  Gm  Gm  Gm  Gm  Co  Co  Co! Cp  Cp! ..
+  Gy! Gy  ..  ..  ..  Op  Op  To  Hu  Gm  Gm! Gm  Vc  Vc  Co  Cp  Cp  ..  ..
+  Gy  Gy  Gy  ..  ..  ..  ..  ..  To  To  Gm  Gm  ..  ..  ..  ..  ..  ..  ..
+  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..
 `
 
 export const MAP_35_HEX_SPEC: HexMapSpec = {
   // Sizes are in map grid units (the map is 60 wide).
-  view: { size: 2.05, squash: 0.66, lift: 0.4, origin: [2.33, 1.9] },
+  view: { size: 2.05, squash: 0.66, lift: 0.4, origin: [2.33, 2.6] },
   tiles: TILES,
   // prettier-ignore
   districts: [
@@ -79,7 +82,7 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
     { code: 'Gr', district: 'Grassroots campaigns', realm: 'Advocacy and public engagement', height: 1 },
     { code: 'Pa', district: 'Professional advocacy and communication', realm: 'Advocacy and public engagement', height: 1.5 },
     // The landing: the arms of a sheltered harbor, where the road starts.
-    { code: 'In', district: 'Introductory learning', realm: 'Talent pipeline', height: 1,
+    { code: 'In', district: 'Introductory learning', realm: 'Talent pipeline', height: 0.5,
       landmark: { symbol: 'lighthouse', width: 1, height: 1.8 } },
     { code: 'Fb', district: 'Field-building and local groups', realm: 'Talent pipeline', height: 1.5 },
     { code: 'Pp', district: 'Policy and governance programs', realm: 'Talent pipeline', height: 2 },

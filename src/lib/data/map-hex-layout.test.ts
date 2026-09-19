@@ -164,14 +164,16 @@ describe('layoutHexMap', () => {
     const south = layoutHexMap(withTiles(tiles), [])
     expect(south.springs).toHaveLength(1)
     expect(south.springs[0].tile).toBe(at(south, 1, 1).ref)
-    expect(south.drops).toHaveLength(1)
-    expect(south.drops[0]).toMatchObject({
-      tile: at(south, 1, 1).ref,
-      visible: true,
-    })
-    expect(south.drops[0].fall).toBeCloseTo(0.4)
-    // It ends on the coast, so it runs out to sea.
+    const step = south.drops.filter(drop => drop.tile === at(south, 1, 1).ref)
+    expect(step).toHaveLength(1)
+    expect(step[0].visible).toBe(true)
+    expect(step[0].fall).toBeCloseTo(0.4)
+    // It ends on the coast, so it runs out to sea: over a side the viewer
+    // sees, so it falls the two levels from Beta to the water.
     expect(south.ends).toHaveLength(1)
+    const mouth = south.drops.filter(drop => drop.tile === at(south, 1, 2).ref)
+    expect(mouth).toHaveLength(1)
+    expect(mouth[0].fall).toBeCloseTo(0.8)
 
     // With Beta the higher, the same river runs north and steps down a side
     // that faces away.
@@ -184,6 +186,8 @@ describe('layoutHexMap', () => {
       }),
       []
     )
+    // Its step from Beta down to Alpha faces away; its mouth, on Alpha's
+    // north-west side, does too, and has no fall.
     expect(north.drops).toHaveLength(1)
     expect(north.drops[0].visible).toBe(false)
   })

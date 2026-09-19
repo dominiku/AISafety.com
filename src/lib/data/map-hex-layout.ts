@@ -641,6 +641,24 @@ export function layoutHexMap(
           const from = projectPoint(view, middle, 0)
           const to = projectPoint(view, hexSideMiddle(tile, out, view.size), 0)
           const length = Math.hypot(to[0] - from[0], to[1] - from[1])
+          if (kind === 'river' && SOUTH_FACING.includes(out)) {
+            // Out over a side the viewer sees: it falls to the sea.
+            const [c1, c2] = hexSide(tile, out, view.size)
+            const share =
+              Math.min(1, own / Math.hypot(c2[0] - c1[0], c2[1] - c1[1])) / 2
+            const along = (t: number): Point => [
+              c1[0] + (c2[0] - c1[0]) * t,
+              c1[1] + (c2[1] - c1[1]) * t,
+            ]
+            drops.push({
+              kind,
+              tile: tile.ref,
+              a: drawn(tile, along(0.5 - share)),
+              b: drawn(tile, along(0.5 + share)),
+              fall: tile.height * view.lift,
+              visible: true,
+            })
+          }
           ends.push({
             kind,
             width: own,

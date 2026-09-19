@@ -21,7 +21,6 @@ import type * as d3 from 'd3'
 import {
   hexCorners,
   hexKey,
-  hexNeighbor,
   insetConvex,
   insideConvex,
   projectPoint,
@@ -45,6 +44,7 @@ import {
   ROAD_PEBBLE,
   SEA,
   SHALLOWS,
+  SHELF_INNER,
   SHELF_OUTER,
   SNOW,
   TERRAIN_SCATTER,
@@ -57,19 +57,26 @@ import {
 } from './realmArtBackdrop'
 
 // DESIGN REVIEW (Melissa): the closed orgs' islet, in the classic map's dark
-// greens, and the sandbars off the river's mouths. Every other color of this
-// view is the Art work view's, or a tone worked out from one (districtTone).
+// greens. Every other color of this view is the Art work view's, or a tone
+// worked out from one (districtTone).
 const QUIET_THEME: RealmTheme = {
   tones: ['#2f5650'],
   cliff: { lip: '#2f5650', face: '#21463f', foot: '#173633' },
 }
-const SANDBAR = '#ffd1bc'
 // DESIGN REVIEW (Melissa): how far a district's tone may stray from its
 // realm's ground, in lightness (of 1) and in hue (degrees). Each district of
 // a realm gets its own step within that, so neighbors can be told apart while
 // the realm still reads as one country.
-const TONE_LIGHTNESS = 0.055
-const TONE_HUE = 3
+const TONE_LIGHTNESS = 0.085
+const TONE_HUE = 5
+// DESIGN REVIEW (Melissa): the classic map's three greens are one hue, light,
+// mid and dark, and side by side as whole realms they were hard to tell
+// apart. Here each green realm's ground is turned a little (degrees of hue):
+// Media and discourse toward the blue of its delta, Policy and strategy
+// toward a leafier green; the Talent pipeline keeps the classic green.
+const REALM_HUE: Record<string, number> = { media: 14, policy: -24 }
+// A thin dark line along the edge of every district, over its rim.
+const BORDER_LINE = { width: 2.5, opacity: 0.55 }
 // How much darker than the ground a district's rim is, and a tile's
 // south-east face than the other two (the light comes from the west).
 const RIM_SHADE = 0.22
@@ -84,9 +91,9 @@ const FACE_FOOT = 0.12
 const BANK = 3
 // A fall this high (map grid units) or more is a large one.
 const LARGE_FALL = 0.55
-// Share of a sea tile the shallows reach in from the side it shares with the
-// land.
-const SHALLOWS_REACH = 0.6
+// Map grid units the two bands of the border of shallows reach out from the
+// coast.
+const COAST_BORDER = { outer: 0.95, inner: 0.4 }
 // Sea tiles are drawn this far past the board, so zooming out shows no edge.
 const SEA_REACH = 8
 
@@ -135,13 +142,18 @@ function toHex(h: number, s: number, l: number): string {
  *  own ground, lighter or darker and a touch warmer or cooler by a step of
  *  its own. Steps alternate (0, +1, -1, +2, -2...) so that districts listed
  *  next to each other differ most. */
-export function districtTone(base: string, index: number, count: number) {
-  if (count <= 1) return base
+export function districtTone(
+  base: string,
+  index: number,
+  count: number,
+  turn = 0
+) {
+  const [h, s, l] = toHsl(base)
+  if (count <= 1) return toHex(h + turn, s, l)
   const reach = Math.ceil((count - 1) / 2)
   const step = (index % 2 === 1 ? 1 : -1) * Math.ceil(index / 2)
   const share = step / reach
-  const [h, s, l] = toHsl(base)
-  return toHex(h + share * TONE_HUE, s, l + share * TONE_LIGHTNESS)
+  return toHex(h + turn + share * TONE_HUE, s, l + share * TONE_LIGHTNESS)
 }
 
 export function hexBackdropMarkup(
@@ -168,89 +180,55 @@ export function hexBackdropMarkup(
     `<rect x="${-width}" y="${-height}" width="${width * 3}" height="${height * 3}" fill="${SEA}"/>`
   )
 
-  // The sea, tiled like the land: a faint honeycomb. Round the island one
-  // narrow band of shallows: in each sea tile that touches land, the water
-  // is pale along the side it shares with the land and fades toward the
-  // tile's middle.
-  const land = new Set(
-    layout.tiles.filter(tile => tile.state !== 'sea').map(tile => hexKey(tile))
-  )
+  // The sea: a faint honeycomb, as on the land, and round the island a border
+  // of shallower water that follows the coast, a wider dim band and a
+  // narrower paler one inside it. Both are the island's own outline at sea
+  // level drawn with a wide rounded line, so they keep the coast's shape.
   const seaHex = (cell: { col: number; row: number }, scale = 1) =>
     hexCorners(cell, view.size, scale).map(corner =>
       projectPoint(view, corner, 0)
     )
-  const shallows: string[] = []
-  // Sides in the order the corners run: SE, S, SW, NW, N, NE.
-  const sides = ['SE', 'S', 'SW', 'NW', 'N', 'NE'] as const
+  const land = layout.tiles.filter(tile => tile.state !== 'sea')
+  const landCells = new Set(land.map(tile => hexKey(tile)))
   for (let col = -SEA_REACH; col < layout.columns + SEA_REACH; col++) {
     for (let row = -SEA_REACH; row < layout.rows + SEA_REACH; row++) {
-      const cell = { col, row }
-      if (land.has(hexKey(cell))) continue
+      if (landCells.has(hexKey({ col, row }))) continue
       out.push(
-        `<path d="${outline(seaHex(cell, 0.95))}" fill="none" stroke="${SHELF_OUTER}" stroke-width="2"/>`
+        `<path d="${outline(seaHex({ col, row }, 0.95))}" fill="none" stroke="${SHELF_OUTER}" stroke-width="2"/>`
       )
-      const corners = seaHex(cell)
-      const inner = seaHex(cell, 1 - SHALLOWS_REACH)
-      sides.forEach((side, k) => {
-        if (!land.has(hexKey(hexNeighbor(cell, side)))) return
-        const [a, b] = [corners[k], corners[(k + 1) % 6]]
-        const [c, d] = [inner[(k + 1) % 6], inner[k]]
-        const id = `hex-shallows-${clips.length}`
-        clips.push(
-          `<linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="${(((a[0] + b[0]) / 2) * g).toFixed(1)}" y1="${(((a[1] + b[1]) / 2) * g).toFixed(1)}" x2="${(((c[0] + d[0]) / 2) * g).toFixed(1)}" y2="${(((c[1] + d[1]) / 2) * g).toFixed(1)}"><stop offset="0" stop-color="${SHALLOWS}"/><stop offset="1" stop-color="${SHALLOWS}" stop-opacity="0"/></linearGradient>`
-        )
-        shallows.push(`<path d="${outline([a, b, c, d])}" fill="url(#${id})"/>`)
-      })
     }
   }
-  out.push(...shallows)
+  const coast = land.map(tile => outline(seaHex(tile))).join('')
+  for (const [color, reach] of [
+    [SHELF_INNER, COAST_BORDER.outer],
+    [SHALLOWS, COAST_BORDER.inner],
+  ] as const) {
+    out.push(
+      `<path d="${coast}" fill="${color}" stroke="${color}" stroke-width="${(reach * 2 * g).toFixed(1)}" stroke-linejoin="round"/>`
+    )
+  }
   // Coves and harbors: water inside the coast, under the piers and boats.
-  for (const tile of layout.tiles) {
+  for (const tile of land) {
     if (tile.state !== 'water') continue
     out.push(
-      `<path d="${outline(tile.top)}" fill="${SHALLOWS}" stroke="${SHELF_OUTER}" stroke-width="3"/>`
+      `<path d="${outline(tile.top)}" fill="${SHALLOWS}" stroke="${SHALLOWS}" stroke-width="2"/>`
     )
   }
 
-  // Off each of the river's mouths: shallows fanning out over the sea, the
-  // river's water running into them, and a sandbar or two. They lie on the
-  // sea, under the land, so the coast covers where they begin.
+  // A pier out from the harbor where the road ends at the water. (Where the
+  // river reaches the coast its water simply ends at the edge of the land.)
   for (const end of layout.ends) {
-    const [tx, ty] = end.toward
-    const [nx, ny] = [-ty, tx]
-    const at = (along: number, across: number): Point => [
-      end.at[0] + tx * along + nx * across,
-      end.at[1] + ty * along + ny * across,
+    if (end.kind !== 'road') continue
+    const at = (along: number): Point => [
+      end.at[0] + end.toward[0] * along,
+      end.at[1] + end.toward[1] * along,
     ]
-    const w = end.width
-    if (end.kind === 'road') {
-      // A pier out from the harbour.
-      const d = `M${xy(at(0.2, 0))}L${xy(at(1.3, 0))}`
-      out.push(
-        `<path d="${d}" fill="none" stroke="${PLANK_GAP}" stroke-width="${(w * g * 0.8).toFixed(1)}"/>`,
-        `<path d="${d}" fill="none" stroke="${PLANK}" stroke-width="${(w * g * 0.8).toFixed(1)}" stroke-dasharray="7 3"/>`
-      )
-      continue
-    }
-    // Wide and shallow, as water lying flat is seen from the south.
-    const pool = (along: number, across: number, color: string) => {
-      const [cx, cy] = at(along, 0)
-      return `<ellipse cx="${(cx * g).toFixed(1)}" cy="${(cy * g).toFixed(1)}" rx="${(across * g).toFixed(1)}" ry="${(across * 0.5 * g).toFixed(1)}" fill="${color}"/>`
-    }
+    const d = `M${xy(at(0.2))}L${xy(at(1.3))}`
+    const across = (end.width * g * 0.8).toFixed(1)
     out.push(
-      pool(0.9, w * 2.4, SHALLOWS),
-      `<path d="M${xy(at(-0.3, -w / 2))}L${xy(at(0.8, -w * 0.7))}L${xy(at(0.8, w * 0.7))}L${xy(at(-0.3, w / 2))}Z" fill="${WATER}"/>`,
-      pool(0.9, w * 1.2, WATER)
+      `<path d="${d}" fill="none" stroke="${PLANK_GAP}" stroke-width="${across}"/>`,
+      `<path d="${d}" fill="none" stroke="${PLANK}" stroke-width="${across}" stroke-dasharray="7 3"/>`
     )
-    for (const [along, across, size] of [
-      [1.5, -w * 1.5, 0.3],
-      [1.7, w * 1.2, 0.22],
-    ]) {
-      const [cx, cy] = at(along, across)
-      out.push(
-        `<ellipse cx="${(cx * g).toFixed(1)}" cy="${(cy * g).toFixed(1)}" rx="${(size * g).toFixed(1)}" ry="${(size * 0.4 * g).toFixed(1)}" fill="${SANDBAR}"/>`
-      )
-    }
   }
 
   // Points no more than a third of a grid unit apart along a line.
@@ -480,7 +458,8 @@ export function hexBackdropMarkup(
         `<clipPath id="hex-top-${n}"><path d="${outline(top)}"/></clipPath>`
       )
       out.push(
-        `<g clip-path="url(#hex-top-${n})" opacity="${RIM_SHADE}"><path d="${rim}" fill="none" stroke="${LINE}" stroke-width="${(RIM_WIDTH * 2 * g).toFixed(1)}" stroke-linecap="round" stroke-linejoin="round"/></g>`
+        `<g clip-path="url(#hex-top-${n})" opacity="${RIM_SHADE}"><path d="${rim}" fill="none" stroke="${LINE}" stroke-width="${(RIM_WIDTH * 2 * g).toFixed(1)}" stroke-linecap="round" stroke-linejoin="round"/></g>`,
+        `<path clip-path="url(#hex-top-${n})" d="${rim}" fill="none" stroke="${LINE}" stroke-opacity="${BORDER_LINE.opacity}" stroke-width="${BORDER_LINE.width * 2}" stroke-linecap="round"/>`
       )
     }
   }
@@ -529,11 +508,24 @@ export function hexBackdropMarkup(
 
   layout.tiles.forEach((tile, n) => {
     if (tile.state === 'sea' || tile.ref === null) return
-    const theme = themeFor(tile.realm)
+    const turn = REALM_HUE[(tile.realm ?? '').split(' ')[0].toLowerCase()] ?? 0
+    const ground = themeFor(tile.realm)
+    // A realm whose ground is turned has its cliffs turned with it.
+    const theme: RealmTheme =
+      turn === 0
+        ? ground
+        : {
+            ...ground,
+            cliff: {
+              lip: districtTone(ground.cliff.lip, 0, 1, turn),
+              face: districtTone(ground.cliff.face, 0, 1, turn),
+              foot: districtTone(ground.cliff.foot, 0, 1, turn),
+            },
+          }
     if (tile.state !== 'water') {
       drawSlab(
         tile,
-        districtTone(theme.tones[0], tile.tone, tile.tones),
+        districtTone(theme.tones[0], tile.tone, tile.tones, turn),
         theme,
         n
       )
