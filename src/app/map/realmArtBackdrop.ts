@@ -430,7 +430,15 @@ export function artBackdropMarkup(
       const [bx, by] = [source[0] - center[0], source[1] - center[1]]
       return (ax * bx + ay * by) / (Math.hypot(ax, ay) * Math.hypot(bx, by))
     }
-    const entry = sides.reduce((best, side) =>
+    // Of the sides that open onto the spring's own realm, so the river does
+    // not come in along a border between two realms.
+    const springRealm = realmAt(spring.x, spring.y)
+    const opening = sides.filter(side => {
+      const [ox, oy] = [side[0] - center[0], side[1] - center[1]]
+      const out = 0.8 / Math.hypot(ox, oy)
+      return realmAt(side[0] + ox * out, side[1] + oy * out) === springRealm
+    })
+    const entry = (opening.length > 0 ? opening : sides).reduce((best, side) =>
       facing(side) > facing(best) ? side : best
     )
     const along = (share: number, swing: number): Point => [
