@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_EXPLORER_STATE,
+  categoryFromSlug,
+  categorySlug,
+  fittedStatus,
   historyActionFor,
+  pickedSort,
+  shownSort,
+  sortOptions,
+  visibleRange,
   matchesSearch,
   normalizeText,
   parseExplorerState,
@@ -165,6 +172,69 @@ describe('query string', () => {
     )
     expect(state.sort).toBe('best')
     expect(state.filters).toEqual({})
+  })
+})
+
+describe('sort options', () => {
+  it('offers Best match only while something is typed', () => {
+    expect(sortOptions(false)).toEqual(['featured', 'name', 'recent'])
+    expect(sortOptions(true)).toEqual(['best', 'featured', 'name', 'recent'])
+  })
+  it('shows the default as Featured until something is typed', () => {
+    expect(shownSort('best', false)).toBe('featured')
+    expect(shownSort('best', true)).toBe('best')
+    expect(shownSort('name', false)).toBe('name')
+  })
+  it('stores Featured as the default when nothing is typed', () => {
+    expect(pickedSort('featured', false)).toBe('best')
+    expect(pickedSort('featured', true)).toBe('featured')
+    expect(pickedSort('recent', false)).toBe('recent')
+  })
+  it('keeps the given order for Featured even with a search', () => {
+    const list = [org({ title: 'Zeta fund' }), org({ title: 'Fund alpha' })]
+    expect(sortOrgs(list, 'featured', 'fund').map(o => o.title)).toEqual([
+      'Zeta fund',
+      'Fund alpha',
+    ])
+  })
+})
+
+describe('category slugs', () => {
+  const categories = ['Training and education', 'Blog', 'Research support']
+  it('writes a category as a slug', () => {
+    expect(categorySlug('Training and education')).toBe(
+      'training-and-education'
+    )
+    expect(categorySlug('Blog')).toBe('blog')
+  })
+  it('reads a slug, or an older link with the plain name', () => {
+    expect(categoryFromSlug('training-and-education', categories)).toBe(
+      'Training and education'
+    )
+    expect(categoryFromSlug('Training and education', categories)).toBe(
+      'Training and education'
+    )
+    expect(categoryFromSlug('nonsense', categories)).toBeNull()
+  })
+})
+
+describe('visibleRange', () => {
+  it('renders the rows in view plus a few either side', () => {
+    expect(visibleRange(0, 640, 64, 339)).toEqual({ start: 0, end: 16 })
+    expect(visibleRange(6400, 640, 64, 339)).toEqual({ start: 94, end: 116 })
+  })
+  it('never runs past the list', () => {
+    expect(visibleRange(99999, 640, 64, 20)).toEqual({ start: 20, end: 20 })
+    expect(visibleRange(0, 640, 64, 3)).toEqual({ start: 0, end: 3 })
+  })
+})
+
+describe('fittedStatus', () => {
+  it('counts the pins here and those elsewhere', () => {
+    expect(fittedStatus('Training Town', 54, 8).rest).toBe(
+      '54 pins here, 8 more in other areas'
+    )
+    expect(fittedStatus('Blog Beach', 1, 0).rest).toBe('1 pin here')
   })
 })
 

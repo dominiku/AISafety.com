@@ -23,12 +23,18 @@ import { filterItems, optionCounts } from '@/lib/filter-counts'
 import { isPlacedOnMap } from '@/lib/map-images'
 import {
   DEFAULT_EXPLORER_STATE,
-  EXPLORER_SORTS,
+  categoryFromSlug,
+  categorySlug,
+  fittedStatus,
   historyActionFor,
   matchesSearch,
   parseExplorerState,
+  pickedSort,
   resultCountLabel,
+  shownSort,
+  sortOptions,
   sortOrgs,
+  visibleRange,
   writeExplorerState,
   type ExplorerSort,
 } from '@/lib/map-explorer'
@@ -69,6 +75,7 @@ const DEFAULT_STATUSES = ['Active']
 
 const SORT_LABELS: Record<ExplorerSort, string> = {
   best: 'Best match',
+  featured: 'Featured',
   name: 'Name A–Z',
   recent: 'Recently added',
 }
@@ -84,6 +91,9 @@ const CARD_ENTRY_KEY = 'mapCard'
 const COLLAPSED_STORAGE_KEY = 'map-list-collapsed'
 const LIST_ID = 'map-explorer-list'
 const LEGEND_ID = 'map-explorer-legend'
+// Every row of the results drawer is this tall, which is what lets only the
+// rows in view be rendered (.result-row in page.module.css).
+const ROW_HEIGHT = 64
 // The overlay on the map's left side: a 376px column, 16px in from the edge.
 const OVERLAY_WIDTH = 408
 
@@ -221,6 +231,28 @@ export default function MapExplorer({
     [listed, basePass, groups]
   )
 
+  // One way to change the category filter, for the Category pill, the chips,
+  // the place names on the map and "See all": the first category picked
+  // a category picked opens the results drawer, where its matches are listed.
+  const toggleCategory = useCallback(
+    (value: string) => {
+      const adding = !categories.includes(value)
+      setCategories(
+        adding ? [...categories, value] : categories.filter(c => c !== value)
+      )
+      if (adding) {
+        setDrawerOpen(true)
+        setLegendOpen(false)
+      }
+    },
+    [categories]
+  )
+  const toggleInactive = useCallback(() => {
+    setStatuses(current =>
+      current.includes('No longer active') ? DEFAULT_STATUSES : STATUSES
+    )
+  }, [])
+
   const showInactive = statuses.includes('No longer active')
   const isFiltered =
     query.trim() !== '' ||
@@ -233,13 +265,20 @@ export default function MapExplorer({
     setStatuses(DEFAULT_STATUSES)
   }
 
+  const hasQuery = settledQuery.trim() !== ''
+  // With exactly one category filtered by, the map is fitted to its place.
+  const fitArea = categories.length === 1 ? mapAreaFor(categories[0]) : null
+
   // The count is announced once it has stopped changing, never per keystroke.
   const countLabel = resultCountLabel(shown.length, total)
   const [announced, setAnnounced] = useState('')
   useEffect(() => {
-    const timer = window.setTimeout(() => setAnnounced(countLabel), 500)
+    const label = fitArea
+      ? `${countLabel}. Map fitted to ${fitArea}.`
+      : countLabel
+    const timer = window.setTimeout(() => setAnnounced(label), 500)
     return () => window.clearTimeout(timer)
-  }, [countLabel])
+  }, [countLabel, fitArea])
 
   // ── Query string ─────────────────────────────────────────────────────────
   // Written with the History API, never router.push, which would refetch this
@@ -280,7 +319,7 @@ export default function MapExplorer({
       {
         query: settledQuery,
         filters: {
-          category: categories,
+          category: categories.map(categorySlug),
           status: sameValues(statuses, DEFAULT_STATUSES)
             ? []
             : statuses.length > 0
@@ -327,9 +366,12 @@ export default function MapExplorer({
       const state = parseExplorerState(new URLSearchParams(params), FILTER_KEYS)
       setQuery(state.query)
       setSettledQuery(state.query)
-      setCategories(
-        (state.filters.category ?? []).filter(c => CATEGORIES.includes(c))
-      )
+      const linkedCategories = (state.filters.category ?? [])
+        .map(value => categoryFromSlug(value, CATEGORIES))
+        .filter((c): c is string => c !== null)
+      setCategories(linkedCategories)
+      // A link to a category shows its list, as picking one here does.
+      if (linkedCategories.length > 0) setDrawerOpen(true)
       const urlStatuses = state.filters.status
       setStatuses(
         !urlStatuses
@@ -355,9 +397,11 @@ export default function MapExplorer({
         // What this visitor chose last time. Storage can be blocked; the
         // drawer then simply starts closed.
         try {
-          setDrawerOpen(localStorage.getItem(COLLAPSED_STORAGE_KEY) === '0')
+          if (localStorage.getItem(COLLAPSED_STORAGE_KEY) === '0') {
+            setDrawerOpen(true)
+          }
         } catch {
-          setDrawerOpen(false)
+          // Storage blocked: the drawer keeps to what the link asked for.
         }
       }
     },
@@ -389,20 +433,68 @@ export default function MapExplorer({
   useEffect(() => {
     selectedIdRef.current = selectedId
   }, [selectedId])
+  // Only the drawer's rows in view are rendered: 339 rows at once made a list
+  // 22,000px tall that nobody sees. What is in view is worked out from the
+  // list's own scroll position and height.
+  const [listView, setListView] = useState({ top: 0, height: 0 })
+  const measureList = useCallback(() => {
+    const list = listRef.current
+    if (!list) return
+    setListView(view =>
+      view.top === list.scrollTop && view.height === list.clientHeight
+        ? view
+        : { top: list.scrollTop, height: list.clientHeight }
+    )
+  }, [])
+  useEffect(() => {
+    const list = listRef.current
+    if (!list) return
+    const observer = new ResizeObserver(measureList)
+    observer.observe(list)
+    return () => observer.disconnect()
+  }, [measureList])
+  // Until it has been measured (the drawer is closed), a screenful's worth.
+  const rows = visibleRange(
+    listView.top,
+    listView.height || 800,
+    ROW_HEIGHT,
+    shown.length
+  )
+
+  const shownRef = useRef(shown)
+  useEffect(() => {
+    shownRef.current = shown
+  }, [shown])
+  // The row that gets the keyboard's focus once it has been rendered.
+  const focusRowRef = useRef<string | null>(null)
   // A row is brought into view inside the drawer only: the page itself never
-  // scrolls because something was selected.
-  const showRow = (id: string) => {
-    requestAnimationFrame(() => {
+  // scrolls because something was selected. False when there is no such row
+  // on screen (the drawer is closed, or the org is filtered out).
+  const showRow = useCallback(
+    (id: string) => {
       const list = listRef.current
-      const row = document.getElementById(id)
-      if (!list || !row || !list.contains(row)) return
-      const top = row.offsetTop - list.offsetTop
-      if (top < list.scrollTop) list.scrollTop = top
-      else if (top + row.offsetHeight > list.scrollTop + list.clientHeight) {
-        list.scrollTop = top + row.offsetHeight - list.clientHeight
+      const index = shownRef.current.findIndex(org => org.id === id)
+      if (!list || list.offsetParent === null || index < 0) return false
+      // On a phone the page scrolls, not the list: there is nothing to do.
+      if (list.scrollHeight > list.clientHeight) {
+        const top = index * ROW_HEIGHT
+        if (top < list.scrollTop) list.scrollTop = top
+        else if (top + ROW_HEIGHT > list.scrollTop + list.clientHeight) {
+          list.scrollTop = top + ROW_HEIGHT - list.clientHeight
+        }
+        measureList()
       }
-    })
-  }
+      return true
+    },
+    [measureList]
+  )
+  useEffect(() => {
+    const id = focusRowRef.current
+    const row = id ? document.getElementById(id) : null
+    if (!row) return
+    focusRowRef.current = null
+    row.focus({ preventScroll: true })
+  })
   const select = useCallback((id: string) => {
     setSelectedId(id)
     setLegendOpen(false)
@@ -412,7 +504,6 @@ export default function MapExplorer({
     requestAnimationFrame(() => mapApiRef.current.panTo(id))
   }, [])
   const clearSelection = useCallback(() => {
-    if (selectedIdRef.current) showRow(selectedIdRef.current)
     closedIdRef.current = selectedIdRef.current
     setSelectedId(null)
   }, [])
@@ -423,10 +514,9 @@ export default function MapExplorer({
     // The drawer comes back with the card gone: the org's row is the place
     // to carry on from. With no drawer it is the pin, and if the pin is not
     // showing at this zoom, the pill that opens the list.
-    const row = document.getElementById(id)
-    if (row && row.offsetParent !== null) row.focus({ preventScroll: true })
+    if (showRow(id)) focusRowRef.current = id
     else if (!mapApiRef.current.focusPin(id)) listPillRef.current?.focus()
-  }, [selectedId])
+  }, [selectedId, showRow])
 
   // A shared link's pin is shown once the map is there to show it.
   const onMapReady = useCallback(() => {
@@ -456,11 +546,33 @@ export default function MapExplorer({
       shown.length === listed.length ? null : new Set(shown.map(o => o.id)),
     [shown, listed]
   )
+  // Closed orgs are off the map, not dimmed, until "Show inactive" is on.
+  const hiddenIds = useMemo(
+    () =>
+      showInactive
+        ? null
+        : new Set(
+            listed.filter(org => org.status !== 'Active').map(org => org.id)
+          ),
+    [listed, showInactive]
+  )
+  const fitted = useMemo(() => {
+    if (!fitArea) return null
+    const onMap = shown.filter(isPlacedOnMap)
+    const here = onMap.filter(org => mapAreaFor(org.category) === fitArea)
+    return fittedStatus(fitArea, here.length, onMap.length - here.length)
+  }, [fitArea, shown])
   const overlayOpen = selected !== null || drawerOpen
   const explorerLink = useMemo(
     (): MapExplorerLink => ({
       matchingIds,
       nonMatching,
+      hiddenIds,
+      activeCategories: categories,
+      onToggleCategory: toggleCategory,
+      showInactive,
+      onToggleInactive: toggleInactive,
+      fitArea,
       selectedId,
       highlightedId,
       onSelect: select,
@@ -472,6 +584,12 @@ export default function MapExplorer({
     [
       matchingIds,
       nonMatching,
+      hiddenIds,
+      categories,
+      toggleCategory,
+      showInactive,
+      toggleInactive,
+      fitArea,
       selectedId,
       highlightedId,
       select,
@@ -557,6 +675,20 @@ export default function MapExplorer({
           )}
         </section>
 
+        {fitted && !selected && (
+          <p
+            className={`border-plus-fill drop-shadow-dark paragraph-small color-teal-300 ${styles['explorer-fitted']}`}
+            data-overlay={overlayOpen ? 'open' : undefined}
+          >
+            <Icon src="/images/icons/scan.svg" size={16} />
+            <span>
+              Map fitted to{' '}
+              <strong className="color-white">{fitted.place}</strong> ·{' '}
+              {fitted.rest}
+            </span>
+          </p>
+        )}
+
         {/* Over the map's left side: search and filters with the results
             drawer under them, or the selected org's details in their place. */}
         <div
@@ -583,8 +715,20 @@ export default function MapExplorer({
           </div>
 
           <div
-            className={`flex flex-wrap items-center gap-8px ${styles['explorer-controls']}`}
+            className={`flex flex-wrap items-center gap-8px ${styles['explorer-controls']} ${styles['explorer-pills']}`}
           >
+            {categories.map(category => (
+              <button
+                key={category}
+                type="button"
+                className={`border-plus-fill paragraph-small ${styles['explorer-pill']} ${styles['explorer-pill-active']}`}
+                aria-label={`Remove filter: ${category}`}
+                onClick={() => toggleCategory(category)}
+              >
+                {category}
+                <Icon src="/images/icons/x.svg" size={16} />
+              </button>
+            ))}
             <FilterDropdown
               trackingPage="Map"
               title="Category"
@@ -592,21 +736,13 @@ export default function MapExplorer({
               selected={categories}
               counts={categoryCounts}
               countLabel
-              onToggle={value =>
-                setCategories(current =>
-                  current.includes(value)
-                    ? current.filter(c => c !== value)
-                    : [...current, value]
-                )
-              }
+              onToggle={toggleCategory}
             />
             <button
               type="button"
               className={`border-plus-fill paragraph-small ${styles['explorer-pill']}${showInactive ? ` ${styles['explorer-pill-active']}` : ''}`}
               aria-pressed={showInactive}
-              onClick={() =>
-                setStatuses(showInactive ? DEFAULT_STATUSES : STATUSES)
-              }
+              onClick={toggleInactive}
             >
               <Icon src="/images/icons/eye.svg" size={16} />
               Show inactive · {statusCounts['No longer active'] ?? 0}
@@ -653,6 +789,7 @@ export default function MapExplorer({
                 setCategories([firstCategory(selected)])
                 setSelectedId(null)
                 setDrawerOpen(true)
+                setLegendOpen(false)
               }}
               onClose={clearSelection}
             />
@@ -674,12 +811,14 @@ export default function MapExplorer({
                 <span className="visually-hidden">Sort by</span>
                 <select
                   className={`text-field ${styles['explorer-sort']}`}
-                  value={sort}
+                  value={shownSort(sort, hasQuery)}
                   onChange={event =>
-                    setSort(event.target.value as ExplorerSort)
+                    setSort(
+                      pickedSort(event.target.value as ExplorerSort, hasQuery)
+                    )
                   }
                 >
-                  {EXPLORER_SORTS.map(option => (
+                  {sortOptions(hasQuery).map(option => (
                     <option key={option} value={option}>
                       {SORT_LABELS[option]}
                     </option>
@@ -710,12 +849,22 @@ export default function MapExplorer({
               </div>
             )}
 
-            <div ref={listRef} className={styles['explorer-drawer-list']}>
+            <div
+              ref={listRef}
+              className={styles['explorer-drawer-list']}
+              onScroll={measureList}
+            >
               {shown.length > 0 ? (
-                <ul>
-                  {shown.map(org => (
+                <ul
+                  className={styles['explorer-rows']}
+                  style={{ height: shown.length * ROW_HEIGHT }}
+                >
+                  {shown.slice(rows.start, rows.end).map((org, offset) => (
                     <li
                       key={org.id}
+                      style={{ top: (rows.start + offset) * ROW_HEIGHT }}
+                      aria-setsize={shown.length}
+                      aria-posinset={rows.start + offset + 1}
                       onMouseEnter={() => setHighlightedId(org.id)}
                       onMouseLeave={() => setHighlightedId(null)}
                       onFocus={() => setHighlightedId(org.id)}

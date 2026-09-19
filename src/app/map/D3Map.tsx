@@ -16,6 +16,7 @@ import { MAP_BACKGROUND_URL } from '@/lib/map-images'
 import {
   CLASSIC_MAP_SCHEME,
   categoriesForMapArea,
+  categoryForMapArea,
   isInQuietMapArea,
   mapAreaBounds,
   mapAreaDepth,
@@ -81,6 +82,18 @@ export interface MapExplorerLink {
   matchingIds: Set<string> | null
   // What becomes of the pins that don't match (both are being tested).
   nonMatching: 'hide' | 'dim'
+  // Orgs taken off the map altogether, whatever `nonMatching` says: closed
+  // orgs while "Show inactive" is off. null = none.
+  hiddenIds: Set<string> | null
+  // The place names are buttons: each toggles its category in the column's
+  // filter, and the Gone Graveyard's toggles "Show inactive".
+  activeCategories: string[]
+  onToggleCategory: (category: string) => void
+  showInactive: boolean
+  onToggleInactive: () => void
+  // The place the view is fitted to (exactly one category is filtered by),
+  // or null for the whole island.
+  fitArea: string | null
   selectedId: string | null
   // The result row being hovered or focused.
   highlightedId: string | null
@@ -136,6 +149,13 @@ const REALM_SUB_LABEL_ZOOM = 1.5
 const EXPLORER_SHOW_ALL_MAX = 60
 // The explorer's selected pin is drawn this much bigger than its neighbors.
 const SELECTED_PIN_SCALE = 1.25
+// Closed orgs carry this as their first category; it places them in the Gone
+// Graveyard.
+const INACTIVE_CATEGORY = 'No longer active'
+// Screen pixels kept clear when the view is fitted to a place: breathing room
+// at the sides, and the status line along the bottom.
+const FIT_SIDE_ROOM = 48
+const FIT_BOTTOM_ROOM = 112
 
 export default function D3Map({
   orgs,
@@ -407,7 +427,7 @@ export default function D3Map({
     // labels live inside <a>; a pan does not reach here because the drag
     // cancels the synthetic click.
     svg.on('click.explorer', event => {
-      if ((event.target as Element | null)?.closest('a')) return
+      if ((event.target as Element | null)?.closest('a, [data-area]')) return
       explorerRef.current?.onClear()
     })
 
@@ -486,6 +506,13 @@ export default function D3Map({
       string,
       {
         group: d3.Selection<SVGGElement, unknown, null, undefined>
+        text: d3.Selection<SVGTextElement, unknown, null, undefined>
+        rect: d3.Selection<SVGRectElement, unknown, null, undefined>
+        // What the name reads at rest, and how many pins stand there.
+        restingText: string
+        count: number
+        // Explorer: the category the name toggles (null: it is no button).
+        category: string | null
         anchorX: number
         anchorY: number
         x: number
@@ -509,9 +536,14 @@ export default function D3Map({
     }
 
     scheme.areas.forEach(({ label, x, y }) => {
-      const count = showAreaCounts ? areaCount(label) : 0
+      const pinCount = areaCount(label)
+      const count = showAreaCounts ? pinCount : 0
       const xPos = x * GRID_SIZE
       const yPos = y * GRID_SIZE
+      // Explorer: an umbrella area (Research Range) is a caption over its
+      // children; every other name is a button for its category.
+      const isCaption = hasExplorer && mapAreaHasChildren(label, scheme)
+      const category = hasExplorer ? categoryForMapArea(label, scheme) : null
 
       const labelGroup = svgGroup
         .append('g')
@@ -531,10 +563,37 @@ export default function D3Map({
         .style('letter-spacing', '-0.01em')
         .attr('fill', '#fff')
         .text(count > 0 ? `${label} · ${count}` : label)
+      if (isCaption) {
+        textEl
+          .text(label.toUpperCase())
+          .attr('font-size', finalFontSize * 0.8)
+          .attr('fill-opacity', 0.75)
+          .style('letter-spacing', '0.12em')
+      }
+      if (category !== null && !isCaption) {
+        const activate = () => {
+          const link = explorerRef.current
+          if (!link) return
+          if (category === INACTIVE_CATEGORY) link.onToggleInactive()
+          else link.onToggleCategory(category)
+        }
+        labelGroup
+          .attr('data-area', label)
+          .attr('role', 'button')
+          .attr('tabindex', 0)
+          .style('pointer-events', 'auto')
+          .style('cursor', 'pointer')
+          .on('click', activate)
+          .on('keydown', (event: KeyboardEvent) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return
+            event.preventDefault()
+            activate()
+          })
+      }
 
       const bbox = textEl.node()?.getBBox()
       if (bbox) {
-        labelGroup
+        const rectEl = labelGroup
           .insert('rect', 'text')
           .attr('x', bbox.x - finalPadX)
           .attr('y', bbox.y - finalPadY)
@@ -542,9 +601,14 @@ export default function D3Map({
           .attr('height', bbox.height + finalPadY * 2)
           .attr('rx', (bbox.height + finalPadY * 2) / 2)
           .attr('ry', (bbox.height + finalPadY * 2) / 2)
-          .attr('fill', AREA_PILL_FILL)
+          .attr('fill', isCaption ? 'transparent' : AREA_PILL_FILL)
         areaPills.set(label, {
           group: labelGroup,
+          text: textEl,
+          rect: rectEl,
+          restingText: textEl.text(),
+          count: pinCount,
+          category: isCaption ? null : category,
           anchorX: xPos,
           anchorY: yPos,
           depth: mapAreaDepth(label, scheme),
@@ -915,6 +979,8 @@ export default function D3Map({
         .filter(org => org.isMagic || !org.link || org.link === '#')
         .map(org => org.id)
     )
+    const goneFromMap = (id: string) =>
+      explorerRef.current?.hiddenIds?.has(id) === true
     const matchesExplorer = (id: string) => {
       const matching = explorerRef.current?.matchingIds
       return !matching || matching.has(id) || furnitureIds.has(id)
@@ -943,7 +1009,10 @@ export default function D3Map({
       for (const { tier, group } of pins) {
         const matches = matchesExplorer(tier.id)
         // A hidden non-match has no place in the layout (see applyTiers).
-        if (!matches && link?.nonMatching === 'hide') {
+        if (
+          goneFromMap(tier.id) ||
+          (!matches && link?.nonMatching === 'hide')
+        ) {
           group.classed('mapFadeHidden', true).classed('mapDimmed', false)
           continue
         }
@@ -988,7 +1057,11 @@ export default function D3Map({
       const hiding = explorerRef.current?.nonMatching === 'hide'
       layout = layoutPins(
         pins
-          .filter(pin => !hiding || matchesExplorer(pin.tier.id))
+          .filter(
+            pin =>
+              !goneFromMap(pin.tier.id) &&
+              (!hiding || matchesExplorer(pin.tier.id))
+          )
           .map(pin => pin.tier),
         obstacles,
         tierConfigRef.current,
@@ -1075,6 +1148,49 @@ export default function D3Map({
             .scale(k)
         )
     }
+    // Explorer: fit the view to one place, in what the overlay leaves free.
+    // Its pins all show once framed, as for an area picked from the search.
+    const fitToArea = (label: string, leftInset: number) => {
+      const area = scheme.areas.find(a => a.label === label)
+      if (!area) return
+      const categories = categoriesForMapArea(label, scheme)
+      const areaPins: { x: number; y: number }[] = []
+      for (const org of orgs) {
+        if (org.isMagic || org.x === null || org.y === null) continue
+        const primary = primaryCategory(org.category)
+        if (!primary || !categories.includes(primary)) continue
+        if (goneFromMap(org.id) || !matchesExplorer(org.id)) continue
+        areaPins.push({ x: org.x, y: org.y })
+      }
+      const bounds = mapAreaBounds(area, areaPins)
+      const frameWidth =
+        (bounds.maxX - bounds.minX + AREA_FRAME_MARGIN * 2) * GRID_SIZE
+      const frameHeight =
+        (bounds.maxY - bounds.minY + AREA_FRAME_MARGIN * 2) * GRID_SIZE
+      const { width, height } = svgNode.getBoundingClientRect()
+      const unit = Math.min(width / PADDED_WIDTH, height / PADDED_HEIGHT) || 1
+      const freeWidth = Math.max(width - leftInset - FIT_SIDE_ROOM, 200)
+      const freeHeight = Math.max(height - FIT_BOTTOM_ROOM, 200)
+      // Never further out than the whole island, never closer than a pin.
+      const k = Math.max(
+        fitTransform().k,
+        Math.min(
+          freeWidth / (frameWidth * unit),
+          freeHeight / (frameHeight * unit),
+          pinZoom()
+        )
+      )
+      measureScreenScale()
+      focus = { areas: [label], fromZoom: zoomOf(k) * FOCUS_MARGIN }
+      applyTiers()
+      flyToPoint(
+        ((bounds.minX + bounds.maxX) / 2) * GRID_SIZE,
+        ((bounds.minY + bounds.maxY) / 2) * GRID_SIZE,
+        k,
+        leftInset
+      )
+    }
+
     searchRef.current = {
       clearHighlight,
       flyToArea: area => {
@@ -1266,6 +1382,10 @@ export default function D3Map({
     let appliedMatching: Set<string> | null | undefined
     let appliedMode: string | undefined
     let appliedSelected: string | null | undefined
+    let appliedCategories: string[] | undefined
+    let appliedShowInactive: boolean | undefined
+    let appliedHidden: Set<string> | null | undefined
+    let appliedFit: string | null | undefined
     const applyExplorer = () => {
       const link = explorerRef.current
       if (!link) return
@@ -1275,25 +1395,56 @@ export default function D3Map({
         drawExplorerRing(link.highlightedId, 2, 0.6)
       }
       if (link.selectedId) drawExplorerRing(link.selectedId, 3.5, 1, true)
-      if (link.selectedId !== appliedSelected) {
-        // The selected pin's name, and the name of the place it stands in,
-        // take the active colors.
+      if (
+        link.selectedId !== appliedSelected ||
+        link.activeCategories !== appliedCategories ||
+        link.showInactive !== appliedShowInactive
+      ) {
+        // A place's name takes the active colors while its category is
+        // filtered by, or the selected pin stands there. The Gone Graveyard's
+        // is dashed and says "hidden" while closed orgs are off the map.
         const selectedOrg = link.selectedId
           ? orgById.get(link.selectedId)
           : undefined
-        const activeArea = selectedOrg
+        const selectedArea = selectedOrg
           ? mapAreaPath(primaryCategory(selectedOrg.category) ?? '', scheme).at(
               -1
             )
           : undefined
         for (const [label, pill] of areaPills) {
-          const active = label === activeArea
-          pill.group
-            .select('rect')
+          if (pill.category === null) continue
+          const isGraveyard = pill.category === INACTIVE_CATEGORY
+          const pressed = isGraveyard
+            ? link.showInactive
+            : link.activeCategories.includes(pill.category)
+          const active = (pressed && !isGraveyard) || label === selectedArea
+          const dashed = isGraveyard && !link.showInactive
+          pill.text
+            .text(dashed ? `${label} · hidden` : pill.restingText)
+            .attr(
+              'fill',
+              active ? 'var(--teal-900)' : dashed ? 'var(--teal-300)' : '#fff'
+            )
+          // The name may have changed length: the pill follows it.
+          const box = pill.text.node()?.getBBox()
+          if (box) {
+            pill.rect
+              .attr('x', box.x - finalPadX)
+              .attr('width', box.width + finalPadX * 2)
+          }
+          pill.rect
             .attr('fill', active ? 'var(--teal-bright-400)' : AREA_PILL_FILL)
+            .attr('stroke', dashed ? 'var(--teal-300)' : 'none')
+            .attr('stroke-width', 2)
+            .attr('stroke-dasharray', dashed ? '8 6' : null)
           pill.group
-            .select('text')
-            .attr('fill', active ? 'var(--teal-900)' : '#fff')
+            .attr('aria-pressed', pressed)
+            .attr(
+              'aria-label',
+              isGraveyard
+                ? `Show inactive organizations (${label}, ${pill.count} organizations)`
+                : `Filter by ${pill.category} (${label}, ${pill.count} organizations)`
+            )
         }
         for (const pin of pins) {
           pin.labelRect.attr(
@@ -1303,20 +1454,38 @@ export default function D3Map({
         }
       }
       const filterChanged =
-        link.matchingIds !== appliedMatching || link.nonMatching !== appliedMode
+        link.matchingIds !== appliedMatching ||
+        link.nonMatching !== appliedMode ||
+        link.hiddenIds !== appliedHidden
       if (
         filterChanged &&
-        (link.nonMatching === 'hide' || appliedMode === 'hide')
+        (link.nonMatching === 'hide' ||
+          appliedMode === 'hide' ||
+          link.hiddenIds !== appliedHidden)
       ) {
-        // Hidden pins leave the layout, so it has to be worked out again.
-        scheduleTiers()
-      }
-      if (filterChanged || link.selectedId !== appliedSelected) {
+        // Hidden pins leave the layout, so it has to be worked out again:
+        // at once, because a pin coming back cannot be drawn without its
+        // place in it. (This also redraws the pins.)
+        applyTiers()
+      } else if (filterChanged || link.selectedId !== appliedSelected) {
         applyPins(appliedK)
+      }
+      if (link.fitArea !== appliedFit) {
+        if (link.fitArea) fitToArea(link.fitArea, link.leftInset)
+        else if (appliedFit) {
+          // The filter has gone: back to the whole island.
+          focus = null
+          scheduleTiers()
+          resetView()
+        }
       }
       appliedMatching = link.matchingIds
       appliedMode = link.nonMatching
       appliedSelected = link.selectedId
+      appliedCategories = link.activeCategories
+      appliedShowInactive = link.showInactive
+      appliedHidden = link.hiddenIds
+      appliedFit = link.fitArea
     }
     applyExplorerRef.current = applyExplorer
     applyExplorer()

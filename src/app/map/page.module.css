@@ -522,6 +522,13 @@ select.explorer-sort {
   transition: all var(--hover-transition);
 }
 
+/* The row of chips and pills is as wide as it needs to be: it floats over the
+   map, so it is not held to the column's width (up to the zoom controls). */
+.explorer-pills {
+  width: max-content;
+  max-width: min(760px, calc(100vw - 160px));
+}
+
 .explorer-pill:hover {
   border-color: var(--teal-bright-750);
 }
@@ -589,13 +596,44 @@ select.explorer-sort {
   list-style: none;
 }
 
+/* Only the rows in view are rendered (MapExplorer's ROW_HEIGHT): the list
+   keeps its full height and each row is placed where it belongs in it. */
+.explorer-rows {
+  position: relative;
+}
+
+.explorer-rows li {
+  position: absolute;
+  right: 0;
+  left: 0;
+}
+
+/* The line under a map fitted to one place: bottom of the pane, clear of the
+   overlay column when that is open. */
+.explorer-fitted {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  z-index: 95;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 120px);
+  padding: 9px 16px;
+  border-radius: 100px;
+}
+
+.explorer-fitted[data-overlay] {
+  left: 408px;
+}
+
 /* One organization in the drawer: the whole 64px row is the button. */
 .result-row {
   display: flex;
   align-items: center;
   gap: 12px;
   width: 100%;
-  min-height: 64px;
+  height: 64px;
   padding: 8px;
   border: none;
   border-radius: 12px;
@@ -881,8 +919,14 @@ select.explorer-sort {
   .explorer[data-pane='map'] .explorer-drawer,
   .explorer[data-pane='list'] .explorer-map,
   .explorer-pill,
+  .explorer-fitted,
   .explorer-legend {
     display: none;
+  }
+
+  .explorer-pills {
+    width: auto;
+    max-width: none;
   }
 
   .details-card {

@@ -66,13 +66,40 @@ export function searchRank(org: ExplorerOrg, query: string): number {
   return 3
 }
 
-export const EXPLORER_SORTS = ['best', 'name', 'recent'] as const
+export const EXPLORER_SORTS = ['best', 'featured', 'name', 'recent'] as const
 export type ExplorerSort = (typeof EXPLORER_SORTS)[number]
+
+/**
+ * The sorts on offer. "Best match" means something only while there is a
+ * search, so it is offered only then; the rest of the time its place is taken
+ * by "Featured", the site's own curated order.
+ */
+export function sortOptions(hasQuery: boolean): ExplorerSort[] {
+  return hasQuery
+    ? ['best', 'featured', 'name', 'recent']
+    : ['featured', 'name', 'recent']
+}
+
+/** The sort the select shows as chosen: the default ('best') reads as
+ *  "Featured" until something is typed, which is also what it does. */
+export function shownSort(sort: ExplorerSort, hasQuery: boolean): ExplorerSort {
+  return sort === 'best' && !hasQuery ? 'featured' : sort
+}
+
+/** What picking an option stores. Picking "Featured" with nothing typed goes
+ *  back to the default, so a later search is ordered by best match again. */
+export function pickedSort(
+  sort: ExplorerSort,
+  hasQuery: boolean
+): ExplorerSort {
+  return sort === 'featured' && !hasQuery ? 'best' : sort
+}
 
 /**
  * The list in the chosen order. Never reorders in place.
  * - best: by searchRank, ties keep the order given (the site's own order).
  *   With nothing typed that is simply the order given.
+ * - featured: the order given, whatever is typed.
  * - name: A–Z, ignoring case and accents.
  * - recent: newest Date added first; orgs with no date go last.
  */
@@ -97,7 +124,7 @@ export function sortOrgs<T extends ExplorerOrg>(
       // ISO dates compare correctly as text.
       return da < db ? 1 : -1
     })
-  } else {
+  } else if (sort === 'best') {
     indexed.sort(
       (a, b) =>
         searchRank(a.org, query) - searchRank(b.org, query) || a.index - b.index
@@ -178,6 +205,56 @@ export function writeExplorerState(
   if (state.selected) next.set('org', state.selected)
   if (state.collapsed) next.set('list', 'hidden')
   return next
+}
+
+/** A category as it is written in the address: "Training and education" is
+ *  ?category=training-and-education. */
+export function categorySlug(category: string): string {
+  return normalizeText(category)
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+}
+
+/** The category an address means, by its slug or (links made before slugs)
+ *  its plain name; null when it is neither. */
+export function categoryFromSlug(
+  value: string,
+  categories: string[]
+): string | null {
+  return categories.find(c => c === value || categorySlug(c) === value) ?? null
+}
+
+/**
+ * The rows of a long list worth rendering: those in view, plus a few either
+ * side so a scroll or a Tab always has a row to land on. `end` is exclusive.
+ */
+export function visibleRange(
+  scrollTop: number,
+  viewportHeight: number,
+  rowHeight: number,
+  count: number,
+  overscan = 6
+): { start: number; end: number } {
+  const first = Math.floor(Math.max(0, scrollTop) / rowHeight)
+  const last = Math.ceil((Math.max(0, scrollTop) + viewportHeight) / rowHeight)
+  return {
+    start: Math.min(count, Math.max(0, first - overscan)),
+    end: Math.min(count, last + overscan),
+  }
+}
+
+/** The line under the map once it has been fitted to one category's place:
+ *  "Map fitted to Training Town · 54 pins here, 8 more in other areas". */
+export function fittedStatus(
+  place: string,
+  here: number,
+  elsewhere: number
+): { place: string; rest: string } {
+  const pins = `${here} ${here === 1 ? 'pin' : 'pins'} here`
+  return {
+    place,
+    rest: elsewhere > 0 ? `${pins}, ${elsewhere} more in other areas` : pins,
+  }
 }
 
 /**
