@@ -26,6 +26,9 @@
 // explanatory) lie on the open coast, so the land can grow outward with them:
 // nothing is held empty for them now.
 //
+// The borders between realms run in a few stretches at different angles, as
+// the classic map's do: none is one long ruled line.
+//
 // Realm polygons overshoot the island and are cut off by its coast. District
 // borders are not part of this: map-realm-layout.ts works them out from the
 // anchors, and moves the coast in and out so every realm's land is in
@@ -103,8 +106,12 @@ export const MAP_35_SPEC: RealmMapSpec = {
     'Media and discourse': [
       [-2, -2],
       [26, -2],
+      [25.2, 8.4],
       [26, 12.2],
       [28.4, 14.4],
+      [22, 13.9],
+      [15.5, 15],
+      [9, 13.5],
       [2, 13.7],
       [-2, 13.7],
     ],
@@ -113,12 +120,18 @@ export const MAP_35_SPEC: RealmMapSpec = {
     'Talent pipeline': [
       [-2, 13.7],
       [2, 13.7],
+      [9, 13.5],
+      [15.5, 15],
+      [22, 13.9],
+      [28.4, 14.4],
       [30.51, 14.46],
       [33.7, 14.46],
       [35.19, 15.95],
       [35.19, 18.79],
       [32.57, 21.42],
       [29.8, 21.42],
+      [24.5, 22.5],
+      [19, 21.2],
       [13, 22.8],
       [10.5, 27],
       [8, 36],
@@ -127,8 +140,11 @@ export const MAP_35_SPEC: RealmMapSpec = {
     // Under the band and the castle town, as far as Technical research.
     'Field infrastructure': [
       [13, 22.8],
+      [19, 21.2],
+      [24.5, 22.5],
       [29.8, 21.42],
       [32.57, 21.42],
+      [39.8, 23.1],
       [46.6, 26.6],
       [48, 36],
       [8, 36],
@@ -141,15 +157,24 @@ export const MAP_35_SPEC: RealmMapSpec = {
       [37.4, -2],
       [64, -2],
       [64, 17.8],
+      [58, 17.4],
+      [52.5, 18.6],
+      [47, 17.1],
+      [41, 18.7],
       [35.19, 17.8],
       [35.19, 15.95],
     ],
     'Technical research': [
       [35.19, 17.8],
+      [41, 18.7],
+      [47, 17.1],
+      [52.5, 18.6],
+      [58, 17.4],
       [64, 17.8],
       [64, 36],
       [48, 36],
       [46.6, 26.6],
+      [39.8, 23.1],
       [32.57, 21.42],
       [35.19, 18.79],
     ],
@@ -167,6 +192,7 @@ export const MAP_35_SPEC: RealmMapSpec = {
       [30.51, 14.46],
       [28.4, 14.4],
       [26, 12.2],
+      [25.2, 8.4],
     ],
     water: [
       [28.7, -2],
@@ -209,8 +235,8 @@ export const MAP_35_SPEC: RealmMapSpec = {
     'Capabilities research': [55, 22.4],
   },
   roads: [
-    // In from the arrival harbour to the west gate of the castle town,
-    // wandering down the middle of the band: the places a newcomer starts from and the policy
+    // In from the arrival harbour to the west gate of the castle town, down
+    // the middle of the band: the places a newcomer starts from and the policy
     // programs to the north, the technical programs (by far the largest
     // district) to the south.
     {
@@ -219,7 +245,15 @@ export const MAP_35_SPEC: RealmMapSpec = {
       fromShore: true,
       settleFrom: true,
       to: [27.9, 17.8],
-      wander: 1.3,
+      // Long straight stretches with a few kinks at uneven spacing, as the
+      // classic map's road runs: down toward the technical programs, along,
+      // sharply up past the policy programs, and in to the gate.
+      bends: [
+        { at: 0.2, swing: -0.9 },
+        { at: 0.46, swing: -1.1 },
+        { at: 0.6, swing: 0.8 },
+        { at: 0.85, swing: 0.4 },
+      ],
       left: [
         'Field-building and local groups',
         'Introductory learning',

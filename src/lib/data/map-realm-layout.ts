@@ -95,8 +95,13 @@ export interface RealmMapSpec {
     settleFrom?: boolean
     settleTo?: boolean
     // How far (grid units) the road swings to either side of the straight
-    // line between its ends. Not given, it runs straight.
+    // line between its ends, as one easy wave. Not given, it runs straight.
     wander?: number
+    // Or the road's own bends, in order: each `at` a share of the way along
+    // (0 to 1) and `swing` grid units to the left of the straight line. The
+    // road runs straight from one bend to the next, as the classic map's
+    // roads do. Given, `wander` is not used.
+    bends?: { at: number; swing: number }[]
     left: string[]
     right: string[]
   }[]
@@ -1063,23 +1068,36 @@ export function layoutRealmMap(
         else roadEnd = settled
       }
     }
-    // The road's line: straight, or swinging to one side and then the other
-    // and easing back to the straight line at both ends.
+    // The road's line: straight, or through the bends the spec gives it, or
+    // swinging to one side and then the other and easing back to the straight
+    // line at both ends.
     const along: Point = [roadEnd[0] - roadStart[0], roadEnd[1] - roadStart[1]]
     const length = Math.hypot(along[0], along[1]) || 1
     // To the left of the way the road runs (north, for a road running east).
     const left: Point = [along[1] / length, -along[0] / length]
+    const roadAt = (t: number, swing: number): Point => [
+      roadStart[0] + along[0] * t + left[0] * swing,
+      roadStart[1] + along[1] * t + left[1] * swing,
+    ]
     const roadLine: Point[] = []
-    for (let step = 0; step <= ROAD_STEPS; step++) {
-      const t = step / ROAD_STEPS
-      const swing =
-        (road?.wander ?? 0) *
-        Math.sin(2 * Math.PI * 1.25 * t) *
-        Math.sin(Math.PI * t)
-      roadLine.push([
-        roadStart[0] + along[0] * t + left[0] * swing,
-        roadStart[1] + along[1] * t + left[1] * swing,
-      ])
+    if (road?.bends) {
+      roadLine.push(
+        roadAt(0, 0),
+        ...road.bends.map(bend => roadAt(bend.at, bend.swing)),
+        roadAt(1, 0)
+      )
+    } else {
+      for (let step = 0; step <= ROAD_STEPS; step++) {
+        const t = step / ROAD_STEPS
+        roadLine.push(
+          roadAt(
+            t,
+            (road?.wander ?? 0) *
+              Math.sin(2 * Math.PI * 1.25 * t) *
+              Math.sin(Math.PI * t)
+          )
+        )
+      }
     }
     if (road) laid.set(realm, roadLine)
     // Everything to one side of the road, as a polygon: the road's line, run

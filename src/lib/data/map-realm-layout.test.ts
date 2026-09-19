@@ -200,6 +200,32 @@ describe('layoutRealmMap', () => {
     }
   })
 
+  it('runs a road straight from one given bend to the next', () => {
+    const bent = layoutRealmMap(pins, graveyard, {
+      ...spec,
+      roads: [
+        {
+          ...spec.roads![0],
+          bends: [
+            { at: 0.3, swing: 1 },
+            { at: 0.7, swing: -1 },
+          ],
+        },
+      ],
+    })
+    const [road] = bent.roads
+    expect(road).toHaveLength(4)
+    const [start, first, second, end] = road
+    // Each bend stands its swing off the straight line between the ends, on
+    // opposite sides of it.
+    const off = ([x, y]: Point) =>
+      ((end[0] - start[0]) * (y - start[1]) -
+        (end[1] - start[1]) * (x - start[0])) /
+      Math.hypot(end[0] - start[0], end[1] - start[1])
+    expect(Math.abs(off(first))).toBeCloseTo(1, 5)
+    expect(off(first) * off(second)).toBeLessThan(0)
+  })
+
   it('makes a town a square block', () => {
     const town = layout.districts.find(d => d.district === 'East two')!
     expect(town.block).toBe(true)
