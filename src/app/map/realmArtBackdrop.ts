@@ -47,7 +47,7 @@ const LINE = '#112928'
 const ROAD = '#972f00'
 const ROAD_EDGE = '#571f02'
 const FOOTPATH = '#ffd1bc'
-const WATER = '#bbe8e1'
+const WATER = '#7dd5c2'
 const PLANK = '#972f00'
 const PLANK_GAP = '#571f02'
 const SAND = '#ffd1bc'
@@ -55,20 +55,18 @@ const SNOW = '#f6fbff'
 const CLIFF_ROCK = { lip: '#ff4b00', face: '#d53d00', foot: '#972f00' }
 const CLIFF_SAND = { lip: '#ffa777', face: '#ff7c25', foot: '#d53d00' }
 const CLIFF_EARTH = { lip: '#00ae85', face: '#008969', foot: '#2f5650' }
-const CLIFF_MARSH = { lip: '#4fb3bf', face: '#358d99', foot: '#2f5650' }
-const CLIFF_STONE = { lip: '#c9d4dd', face: '#9fb0bd', foot: '#6f8290' }
-const CLIFF_GRASS = { lip: '#c5d46a', face: '#97a844', foot: '#5f6f2a' }
 const MOUNTAIN_LIT = ['#ffa777', '#ffd1bc', '#7dd5c2']
 const MOUNTAIN_SHADE = '#972f00'
 const SHORE_DETAIL = '#d53d00'
 const STARFISH = '#ff4b00'
 
-// DESIGN DECISION, for review: each realm is a biome of its own, with its own
-// family of colors, so no two realms are shades of the same green. Its
-// districts step through the family's tones, so a biome has variety inside it
-// too. The greens and oranges are the classic map's; the wetland teal, the
-// harbour stone and the grassland wheat are new, and placeholders like the
-// rest. Matched on the first word of the realm's name.
+// DESIGN DECISION, for review: each realm is a biome of its own, but quietly.
+// The colors stay the classic map's greens, sands and oranges. The three
+// green realms differ in shade and warmth (a deeper, bluer wetland; the
+// classic green along the road; a lighter, warmer grassland), the two sandy
+// ones in depth, and what grows or stands on each does the rest. A realm's
+// districts step through a few close tones of its ground, so a biome has some
+// variety inside it too. Matched on the first word of the realm's name.
 type Terrain = 'shore' | 'trail' | 'delta' | 'plains' | 'range'
 interface RealmTheme {
   // The biome's ground colors; districts take them in turn.
@@ -87,43 +85,43 @@ interface RealmTheme {
 const REALM_THEMES: Record<string, RealmTheme> = {
   // Field infrastructure: sand, the ground along the south
   field: {
-    tones: ['#ffa777', '#ffb68e', '#f59868'],
+    tones: ['#ffa777', '#ffb088', '#f89e6d'],
     cliff: CLIFF_SAND,
     beach: true,
     terrain: 'shore',
   },
-  // Talent pipeline: green farmland along the road
+  // Talent pipeline: the classic green, farmland along the road
   talent: {
-    tones: ['#00ae85', '#1cbb92', '#009c77'],
+    tones: ['#00ae85', '#0cb58c', '#00a57e'],
     cliff: CLIFF_EARTH,
     terrain: 'trail',
-    growth: '#007a5e',
+    growth: '#008969',
   },
-  // Media and discourse: teal wetland, the delta in the north-west
+  // Media and discourse: wetland, a deeper and bluer green
   media: {
-    tones: ['#4fb3bf', '#64c0cb', '#42a3b0'],
-    cliff: CLIFF_MARSH,
+    tones: ['#129a8e', '#1ea398', '#0c9085'],
+    cliff: CLIFF_EARTH,
     beach: true,
     terrain: 'delta',
-    growth: '#2a7c88',
+    growth: '#5cc9b8',
     boats: true,
   },
-  // Advocacy and public engagement: the harbour's pale stone
+  // Advocacy and public engagement: the harbour's pale sand
   advocacy: {
-    tones: ['#c9d4dd', '#d8e0e7'],
-    cliff: CLIFF_STONE,
+    tones: ['#ffd1bc', '#fbc6ad'],
+    cliff: CLIFF_SAND,
     harbour: true,
   },
-  // Policy and strategy: wheat-colored grassland
+  // Policy and strategy: grassland, a lighter and warmer green
   policy: {
-    tones: ['#c5d46a', '#d3de80', '#b5c657'],
-    cliff: CLIFF_GRASS,
+    tones: ['#4fc592', '#5ccb9b', '#43bb88'],
+    cliff: CLIFF_EARTH,
     terrain: 'plains',
-    growth: '#7d8f2e',
+    growth: '#1f9468',
   },
   // Technical research: orange rock
   technical: {
-    tones: ['#ff7c25', '#ff8f42', '#ee6c17'],
+    tones: ['#ff7c25', '#ff8836', '#f4721d'],
     cliff: CLIFF_ROCK,
     terrain: 'range',
   },
