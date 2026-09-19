@@ -294,6 +294,28 @@ describe('layoutHexMap', () => {
     expect(layout.drops).toEqual([])
   })
 
+  it('gives a district its pier on a shore, and its river a dam where it falls in sight', () => {
+    const tiles = SPEC.tiles
+      .replace('..  Aa  Aa', '..  Aa~ Aa')
+      .replace('..  Bb  Bb  Bb  cv', '..  Bb~ Bb  Bb  cv')
+    const layout = layoutHexMap(
+      withTiles(tiles, {
+        districts: [
+          { ...SPEC.districts[0], dam: true },
+          { ...SPEC.districts[1], pier: true, cover: 'fields' },
+        ],
+      }),
+      []
+    )
+    // Alpha's river falls south to Beta: over its dam.
+    expect(layout.drops.filter(drop => drop.dam)).toHaveLength(1)
+    // Beta's pier runs out into the cove, which it has on its east side.
+    const piers = layout.ends.filter(end => end.kind === 'pier')
+    expect(piers).toHaveLength(1)
+    expect(piers[0].toward[0]).toBeGreaterThan(0)
+    expect(at(layout, 1, 2).cover).toBe('fields')
+  })
+
   it('takes up the tiles a district is told to, however few its logos', () => {
     const layout = layoutHexMap(
       {
