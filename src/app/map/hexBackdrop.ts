@@ -104,8 +104,6 @@ const RIM_WIDTH = 0.24
 // where it meets the sea.
 const FACE_LIP = 0.08
 const FACE_FOOT = 0.12
-// Pixels: the line of ground that seals the join of two tiles of a district.
-const JOIN_SEAL = 3
 // Pixels of darker bank either side of the water.
 const BANK = 3
 // Map grid units a river piece runs on past its ends, under the next piece.
@@ -113,10 +111,6 @@ const BANK = 3
 // its own line, so it has to reach well past the side, or a sliver of ground
 // shows at one bank.
 const SEAM_OVERLAP = 0.3
-// Share of the next tile's side a district's rim is carried along past a
-// corner: enough to draw the corner whole, and short of the middle of the
-// side, where a river or road may cross.
-const RIM_CARRY = 0.22
 // A fall this high (map grid units) or more is a large one.
 const LARGE_FALL = 0.55
 // Map grid units the two bands of the border of shallows reach out from the
@@ -321,7 +315,7 @@ export function hexBackdropMarkup(
   // side, the width running from the piece's own to `widthEnd`. Both reach a
   // little past the ends, so that on tiles of one height the next piece
   // overlaps this one and no seam shows.
-  const banksOf = (piece: HexPathPiece): [Point[], Point[]] => {
+  const banksOf = (piece: HexPathPiece, runOn = true): [Point[], Point[]] => {
     const line = piece.points
     const last = line.length - 1
     const extend = (from: Point, to: Point): Point => {
@@ -331,11 +325,9 @@ export function hexBackdropMarkup(
         to[1] + ((to[1] - from[1]) / length) * SEAM_OVERLAP,
       ]
     }
-    const path = [
-      extend(line[1], line[0]),
-      ...line,
-      extend(line[last - 1], line[last]),
-    ]
+    const path = runOn
+      ? [extend(line[1], line[0]), ...line, extend(line[last - 1], line[last])]
+      : [line[0], ...line, line[last]]
     const sides: [Point[], Point[]] = [[], []]
     path.forEach(([x, y], n) => {
       const [px, py] = path[Math.max(0, n - 1)]
@@ -350,7 +342,8 @@ export function hexBackdropMarkup(
       sides[0].push([x + nx * half, y + ny * half])
       sides[1].push([x - nx * half, y - ny * half])
     })
-    return sides
+    // Without the run-on, the doubled end points are dropped again.
+    return runOn ? sides : [sides[0].slice(1, -1), sides[1].slice(1, -1)]
   }
   const clipFor = (piece: HexPathPiece, id: string) => {
     // A ramp rises off its tile's top, so a road with one is not clipped.
@@ -398,19 +391,10 @@ export function hexBackdropMarkup(
           piece.width * g + BANK * 2
         )
       } else {
-        // A bank is kept to the piece's own tile: carried on past the side
-        // it would part from the next piece's bank, which bends its own way.
-        const tile = tileByRef.get(piece.tile)
-        const own = `${id}-bank-${pieces.indexOf(piece)}`
-        if (tile) {
-          clips.push(
-            `<clipPath id="${own}"><path d="${outline(tile.top)}"/></clipPath>`
-          )
-        }
-        for (const bank of banksOf(piece)) {
-          out.push(
-            `<path${tile ? ` clip-path="url(#${own})"` : clip} d="${line(bank)}" fill="none" stroke="${SHALLOWS}" stroke-width="${BANK * 2}" stroke-linejoin="round"/>`
-          )
+        // A bank ends where its piece does: the next piece's bank starts at
+        // the very same point, heading the same way.
+        for (const bank of banksOf(piece, false)) {
+          stroke(clip, line(bank), SHALLOWS, BANK * 2)
         }
       }
     }
@@ -549,14 +533,9 @@ export function hexBackdropMarkup(
     }
   }
 
-  // A slab: faces under the three sides toward the viewer, down to the sea
-  // (nearer tiles cover what of them is out of sight), then the top.
-  const drawSlab = (
-    tile: HexLaidTile,
-    tone: string,
-    theme: RealmTheme,
-    n: number
-  ) => {
+  // A tile's cliff faces: under its three sides toward the viewer, each down
+  // to the top of the tile in front of it.
+  const drawFaces = (tile: HexLaidTile, theme: RealmTheme) => {
     const { top } = tile
     // Corners run E, SE, SW, W, NW, NE: the faces are E-SE, SE-SW and SW-W,
     // the sides toward the south-east, south and south-west.
@@ -622,116 +601,6 @@ export function hexBackdropMarkup(
           )
         }
       })
-    }
-    // No outline in the ground's tone: along the edge of a district it would
-    // lie over the neighbor's dark border as a bright hairline between the
-    // two regions' shadows.
-    out.push(`<path d="${outline(top)}" fill="${tone}"/>`)
-    // Where two tiles of one district meet, the softened edges of their two
-    // shapes let a hairline of what lies behind show through at any zoom. A
-    // line of the ground's own tone along the join seals it. It is drawn by
-    // the tile behind (along its three near sides, 0 to 2), so it lies under
-    // the nearer tile's ground and over nothing that stands on either.
-    const joins = tile.edges
-      .flatMap((edge, k) =>
-        edge || k > 2 ? [] : [`M${xy(top[k])}L${xy(top[k + 1])}`]
-      )
-      .join('')
-    if (joins) {
-      out.push(
-        `<path d="${joins}" fill="none" stroke="${tone}" stroke-width="${JOIN_SEAL}" stroke-linecap="round"/>`
-      )
-    }
-    // The rim: a darker band just inside the sides that are the edge of the
-    // tile's district, with a thin dark line along the edge itself. Tiles of
-    // one district run into each other without one. The edge of a district
-    // is one unbroken line that turns a corner wherever it passes from one
-    // tile to the next, so each run of edge sides is drawn as one line with
-    // square, mitred corners, and carried one side further at either end,
-    // along the next tile's stretch of the same edge. That way the corner at
-    // the join is drawn whole (no gap in the dark line, no knuckle), and the
-    // next tile draws the very same shape over it.
-    const corner = (k: number) => top[((k % 6) + 6) % 6]
-    // Past corner `at`, the third side that meets there: the two sides of
-    // this tile at the corner and that one run off at even angles, so the
-    // three of them, taken from the corner, add up to nothing.
-    const onward = (at: number, from: number, other: number): Point => [
-      corner(at)[0] +
-        (corner(at)[0] * 2 - corner(from)[0] - corner(other)[0]) * RIM_CARRY,
-      corner(at)[1] +
-        (corner(at)[1] * 2 - corner(from)[1] - corner(other)[1]) * RIM_CARRY,
-    ]
-    // The runs of the sides picked out by `include`, each carried on past
-    // its ends where the district's edge goes on along the next tile.
-    const runsOf = (include: boolean[]): Point[][] => {
-      if (include.every(Boolean)) return [[...top, top[0], top[1]]]
-      const found: Point[][] = []
-      for (let k = 0; k < 6; k++) {
-        if (!include[k] || include[(k + 5) % 6]) continue
-        const run: Point[] = [corner(k)]
-        if (!tile.edges[(k + 5) % 6]) run.unshift(onward(k, k + 1, k - 1))
-        let side = k
-        while (include[side % 6] && side < k + 6) {
-          run.push(corner(side + 1))
-          side++
-        }
-        if (!tile.edges[side % 6]) run.push(onward(side, side - 1, side + 1))
-        found.push(run)
-      }
-      return found
-    }
-    const runs = runsOf(tile.edges)
-    // The thin dark line is left off along the foot of a higher neighbor: a
-    // cliff marks that border itself, and the line would end in a stub where
-    // the cliff hides it.
-    const lineRuns = runsOf(
-      tile.edges.map((edge, k) => {
-        const beside = laidByCell.get(hexKey(hexNeighbor(tile, SIDE_NAMES[k])))
-        const higher =
-          beside !== undefined &&
-          beside.state !== 'sea' &&
-          beside.state !== 'water' &&
-          !beside.sunken &&
-          beside.height > tile.height
-        return edge && !higher
-      })
-    )
-    if (runs.length > 0) {
-      // Kept to the top of this tile and of the tiles of its district beside
-      // it, and in solid colors, not see-through ones, so that where this
-      // tile's band and the next tile's overlap they look like one.
-      const tops = [
-        top,
-        ...SIDE_NAMES.flatMap((side, k) => {
-          const beside = laidByCell.get(hexKey(hexNeighbor(tile, side)))
-          return !tile.edges[k] && beside ? [beside.top] : []
-        }),
-      ]
-      clips.push(
-        `<clipPath id="hex-top-${n}"><path d="${tops.map(outline).join('')}"/></clipPath>`
-      )
-      const pathOf = (all: Point[][]) =>
-        all.map(run => `M${run.map(xy).join('L')}`).join('')
-      const band = mixHex(tone, LINE, RIM_SHADE)
-      const line = mixHex(band, LINE, BORDER_LINE.opacity)
-      const stroke = (all: Point[][], color: string, across: number) =>
-        `<path clip-path="url(#hex-top-${n})" d="${pathOf(all)}" fill="none" stroke="${color}" stroke-width="${across.toFixed(1)}" stroke-linejoin="miter" stroke-linecap="butt"/>`
-      out.push(
-        // A hairline of the border's own color right on this tile's edge
-        // sides, unclipped, closes the softened gap between this region's
-        // top and the next's.
-        `<path d="${tile.edges
-          .flatMap((edge, k) =>
-            edge ? [`M${xy(top[k])}L${xy(top[(k + 1) % 6])}`] : []
-          )
-          .join(
-            ''
-          )}" fill="none" stroke="${line}" stroke-width="1.5" stroke-linecap="round"/>`,
-        stroke(runs, band, RIM_WIDTH * 2 * g),
-        ...(lineRuns.length > 0
-          ? [stroke(lineRuns, line, BORDER_LINE.width * 2)]
-          : [])
-      )
     }
   }
 
@@ -848,11 +717,27 @@ export function hexBackdropMarkup(
 
   // The details of a realm's country, in the gaps the logos, the river, the
   // road and a landmark leave on a tile.
-  const drawCountry = (tile: HexLaidTile, theme: RealmTheme, tone: string) => {
+  const drawCountry = (
+    tile: HexLaidTile,
+    theme: RealmTheme,
+    tone: string,
+    // Fields and vines lie flat and are drawn with the ground; everything
+    // else stands up and is drawn in the pass from the back to the front.
+    flat: boolean
+  ) => {
     if (!pins || tile.landmark || !(theme.terrain || tile.cover)) return
+    if (flat !== (tile.cover === 'fields' || tile.cover === 'vineyard')) return
     const ground = insetConvex(
       tile.top,
-      tile.top.map(() => 0.22)
+      tile.top.map((_, k) => {
+        // A taller tile in front covers the ground behind it.
+        const front = laidByCell.get(hexKey(hexNeighbor(tile, SIDE_NAMES[k])))
+        const covered =
+          k <= 2 && front && front.state !== 'sea' && !front.sunken
+            ? Math.max(0, front.height - tile.height) * view.lift
+            : 0
+        return 0.22 + covered
+      })
     )
     const inTile = (x: number, y: number) => insideConvex([x, y], ground)
     const xs = tile.top.map(p => p[0])
@@ -922,11 +807,11 @@ export function hexBackdropMarkup(
     }
   }
 
-  layout.tiles.forEach((tile, n) => {
-    if (tile.state === 'sea' || tile.ref === null) return
+  // How a tile is colored: its realm's look (with the realm's turn of hue
+  // carried to its cliffs) and its district's own tone of the ground.
+  const styleOf = (tile: HexLaidTile) => {
     const turn = REALM_HUE[realmKey(tile.realm)] ?? 0
     const ground = themeFor(tile.realm)
-    // A realm whose ground is turned has its cliffs turned with it.
     const theme: RealmTheme =
       turn === 0
         ? ground
@@ -938,35 +823,189 @@ export function hexBackdropMarkup(
               foot: districtTone(ground.cliff.foot, 0, 1, turn),
             },
           }
-    // Sunken ships lie on open water: no tile is drawn under them.
-    const solid = tile.state !== 'water' && !tile.sunken
-    const tone =
-      tile.ground ?? districtTone(theme.tones[0], tile.tone, tile.tones, turn)
-    if (solid) drawSlab(tile, tone, theme, n)
-    // Corners run E, SE, SW, W, NW, NE: sides 3 to 5 are the far ones.
-    if (tile.walled) drawWall(tile, [3, 4, 5])
-    drawPieces(
-      layout.pieces.filter(piece => piece.tile === tile.ref),
-      `hex-path-${n}`
-    )
-    // A road that climbs to this tile by a ramp on a tile drawn before it:
-    // its top end goes over this tile's edge again, or the edge would show
-    // as a hairline across the road.
-    for (const piece of layout.pieces) {
-      if (!piece.rampTo?.includes(tile.ref)) continue
-      out.push(
-        `<path d="M${piece.points.map(xy).join('L')}" fill="none" stroke="${ROAD}" stroke-width="${(piece.width * g).toFixed(1)}" stroke-linejoin="round" stroke-linecap="round"/>`
-      )
+    // A district with a ground color of its own has cliffs of that color
+    // too, or they would be its realm's under a top that is not.
+    if (tile.ground) {
+      return {
+        theme: {
+          ...theme,
+          cliff: {
+            lip: mixHex(tile.ground, '#ffffff', 0.25),
+            face: mixHex(tile.ground, LINE, 0.35),
+            foot: mixHex(tile.ground, LINE, 0.6),
+          },
+        },
+        tone: tile.ground,
+      }
     }
+    return {
+      theme,
+      tone: districtTone(theme.tones[0], tile.tone, tile.tones, turn),
+    }
+  }
+
+  // THE FLAT OF THE LAND. A district is one plateau, so it is drawn as one:
+  // its ground is a single shape (the outline of all its tiles together), its
+  // rim and its border are that outline drawn as a line, and the river and
+  // the road on it are drawn over the whole of it at once. Nothing is pieced
+  // together tile by tile, so there are no joins to show. Plateaus are drawn
+  // from the lowest to the highest: a higher one hides what it stands in
+  // front of, and two of one height never overlap.
+  interface Plateau {
+    height: number
+    tiles: HexLaidTile[]
+    // The outline, as closed loops of corners (a hole is a loop of its own).
+    loops: Point[][]
+  }
+  const solid = (tile: HexLaidTile) =>
+    tile.state !== 'sea' &&
+    tile.state !== 'water' &&
+    tile.ref !== null &&
+    !tile.sunken
+  const plateauKey = (tile: HexLaidTile) =>
+    tile.district !== null ? `d:${tile.district}` : `t:${tile.ref}`
+  const grouped = new Map<string, HexLaidTile[]>()
+  for (const tile of layout.tiles) {
+    if (!solid(tile)) continue
+    grouped.set(plateauKey(tile), [
+      ...(grouped.get(plateauKey(tile)) ?? []),
+      tile,
+    ])
+  }
+  const plateaus: Plateau[] = [...grouped.values()].map(tiles => {
+    const within = new Set(tiles.map(tile => hexKey(tile)))
+    // Every side with no tile of the plateau across it, as a step from one
+    // corner to the next; corners run the same way round on every tile, so
+    // the steps join up head to tail into loops.
+    const steps = new Map<string, Point[]>()
+    const name = ([x, y]: Point) => `${x.toFixed(4)},${y.toFixed(4)}`
+    for (const tile of tiles) {
+      SIDE_NAMES.forEach((side, k) => {
+        if (within.has(hexKey(hexNeighbor(tile, side)))) return
+        steps.set(name(tile.top[k]), [tile.top[k], tile.top[(k + 1) % 6]])
+      })
+    }
+    const loops: Point[][] = []
+    while (steps.size > 0) {
+      const [first] = steps.keys()
+      const loop: Point[] = []
+      let at = first
+      while (steps.has(at)) {
+        const [from, to] = steps.get(at)!
+        steps.delete(at)
+        loop.push(from)
+        at = name(to)
+      }
+      loops.push(loop)
+    }
+    return { height: tiles[0].height, tiles, loops }
+  })
+  // The lowest first; of one height, a lone feature (the keep) before the
+  // districts, so that the moat, which is the district's, lies over it.
+  plateaus.sort(
+    (a, b) =>
+      a.height - b.height ||
+      Number(a.tiles[0].district !== null) -
+        Number(b.tiles[0].district !== null)
+  )
+  const heightOfRef = (ref: string) => tileByRef.get(ref)?.height ?? 0
+
+  const heights = [...new Set(plateaus.map(plateau => plateau.height))]
+  for (const height of heights) {
+    const level = plateaus.filter(plateau => plateau.height === height)
+    // Cliff faces, then the ground with its cover, rim and border.
+    for (const plateau of level) {
+      for (const tile of plateau.tiles) drawFaces(tile, styleOf(tile).theme)
+    }
+    level.forEach((plateau, n) => {
+      const { tone } = styleOf(plateau.tiles[0])
+      const shape = plateau.loops.map(outline).join('')
+      const id = `hex-plateau-${height}-${n}`.replace('.', '_')
+      clips.push(
+        `<clipPath id="${id}"><path d="${shape}" clip-rule="evenodd"/></clipPath>`
+      )
+      out.push(`<path d="${shape}" fill="${tone}" fill-rule="evenodd"/>`)
+      for (const tile of plateau.tiles) {
+        drawCountry(tile, styleOf(tile).theme, tone, true)
+      }
+      // The rim: a darker band just inside the plateau's edge. The outline
+      // is drawn as a wide line and the outer half clipped away.
+      const band = mixHex(tone, LINE, RIM_SHADE)
+      const line = mixHex(band, LINE, BORDER_LINE.opacity)
+      out.push(
+        // A hairline right on the edge, unclipped, closes the softened gap
+        // between this plateau's ground and whatever it meets.
+        `<path d="${shape}" fill="none" stroke="${line}" stroke-width="1.5" stroke-linejoin="miter"/>`,
+        `<path clip-path="url(#${id})" d="${shape}" fill="none" stroke="${band}" stroke-width="${(RIM_WIDTH * 2 * g).toFixed(1)}" stroke-linejoin="miter"/>`
+      )
+      // The thin dark border along the edge, left off along the foot of a
+      // higher neighbor: a cliff marks that border itself. Each loop is cut
+      // into the stretches that remain.
+      for (const loop of plateau.loops) {
+        const keep = loop.map(from => {
+          // The tile this step is a side of, and the tile across it.
+          const owner = plateau.tiles.find(tile => tile.top.includes(from))
+          if (!owner) return true
+          const side = SIDE_NAMES[owner.top.indexOf(from)]
+          const across = laidByCell.get(hexKey(hexNeighbor(owner, side)))
+          return !(across && solid(across) && across.height > height)
+        })
+        const closed = keep.every(Boolean)
+        const stretches: Point[][] = []
+        if (closed) {
+          stretches.push(loop)
+        } else {
+          const start = keep.findIndex(
+            (kept, k) => kept && !keep[(k + loop.length - 1) % loop.length]
+          )
+          let run: Point[] = []
+          for (let step = 0; step < loop.length; step++) {
+            const k = (start + step) % loop.length
+            if (keep[k]) {
+              if (run.length === 0) run.push(loop[k])
+              run.push(loop[(k + 1) % loop.length])
+            } else if (run.length > 0) {
+              stretches.push(run)
+              run = []
+            }
+          }
+          if (run.length > 0) stretches.push(run)
+        }
+        if (stretches.length === 0) continue
+        out.push(
+          `<path clip-path="url(#${id})" d="${stretches
+            .map(run => `M${run.map(xy).join('L')}${closed ? 'Z' : ''}`)
+            .join(
+              ''
+            )}" fill="none" stroke="${line}" stroke-width="${BORDER_LINE.width * 2}" stroke-linejoin="miter" stroke-linecap="butt"/>`
+        )
+      }
+    })
+    // The river and the road on this level, over all its ground. A road that
+    // climbs by a ramp is drawn with the level it climbs to, so that level's
+    // cliff does not cover the ramp.
+    const refs = new Set(
+      level.flatMap(plateau => plateau.tiles.map(t => t.ref))
+    )
+    const drawnHere = (piece: HexPathPiece) =>
+      Math.max(
+        heightOfRef(piece.tile),
+        ...(piece.rampTo ?? []).map(heightOfRef)
+      ) === height &&
+      (refs.has(piece.tile) || (piece.rampTo ?? []).some(ref => refs.has(ref)))
+    drawPieces(
+      layout.pieces.filter(drawnHere),
+      `hex-path-${height}`.replace('.', '_')
+    )
     for (const spring of layout.springs) {
-      if (spring.tile !== tile.ref) continue
+      if (!refs.has(spring.tile)) continue
       out.push(
         `<ellipse cx="${(spring.at[0] * g).toFixed(1)}" cy="${(spring.at[1] * g).toFixed(1)}" rx="${(spring.width * 0.95 * g).toFixed(1)}" ry="${(spring.width * 0.95 * view.squash * g).toFixed(1)}" fill="${WATER}" stroke="${SHALLOWS}" stroke-width="${BANK}"/>`
       )
     }
-    for (const drop of layout.drops) if (drop.tile === tile.ref) drawDrop(drop)
+    for (const drop of layout.drops) if (refs.has(drop.tile)) drawDrop(drop)
     for (const bridge of layout.bridges) {
-      if (bridge.tile !== tile.ref) continue
+      if (!refs.has(bridge.tile)) continue
       const d = `M${xy(bridge.a)}L${xy(bridge.b)}`
       const across = (bridge.width * g * 1.15).toFixed(1)
       out.push(
@@ -974,7 +1013,17 @@ export function hexBackdropMarkup(
         `<path d="${d}" fill="none" stroke="${PLANK}" stroke-width="${across}" stroke-dasharray="7 3"/>`
       )
     }
-    if (solid) drawCountry(tile, theme, tone)
+  }
+
+  // WHAT STANDS ON THE LAND: trees, houses, peaks, landmarks and the wall of
+  // a walled district, tile by tile from the back of the board to the front,
+  // so that what is nearer stands in front of what is farther.
+  for (const tile of layout.tiles) {
+    if (tile.state === 'sea' || tile.ref === null) continue
+    const { theme, tone } = styleOf(tile)
+    // Corners run E, SE, SW, W, NW, NE: sides 3 to 5 are the far ones.
+    if (tile.walled) drawWall(tile, [3, 4, 5])
+    if (solid(tile)) drawCountry(tile, theme, tone, false)
     if (pins) {
       for (const other of layout.tiles) {
         const mark = other.landmark
@@ -1000,7 +1049,7 @@ export function hexBackdropMarkup(
       }
     }
     if (tile.walled) drawWall(tile, [0, 1, 2])
-  })
+  }
 
   return `<defs>${clips.join('')}</defs>${out.join('')}`
 }
