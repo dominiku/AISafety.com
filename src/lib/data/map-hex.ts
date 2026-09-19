@@ -163,22 +163,37 @@ export function backToFront<T extends HexCell>(cells: T[]): T[] {
   return [...cells].sort((a, b) => depth(a) - depth(b) || a.col - b.col)
 }
 
+// What a tile is marked as on the tile map, by the sign after its letters.
+export type HexMark =
+  // "~": the river runs through it.
+  | 'river'
+  // "=": the road runs through it.
+  | 'road'
+  // "!": its district's landmark stands on it.
+  | 'landmark'
+  | null
+
+const MARKS: Record<string, HexMark> = {
+  '~': 'river',
+  '=': 'road',
+  '!': 'landmark',
+}
+
 export interface HexGridTile extends HexCell {
-  // The tile's name on the tile map, e.g. "Gm2"; null for open sea.
-  ref: string | null
-  // The letters of the name: which district or feature the tile is.
+  // The two letters on the tile map: which district or feature the tile is.
+  // Null for open sea.
   code: string | null
-  // The number of the name: the tile's place in its district's order.
-  order: number | null
+  mark: HexMark
 }
 
 const SEA_TOKEN = '..'
 
 /**
- * Reads the tile map: one token per tile ("..": open sea, or letters and a
- * number such as "Gm2"), in rows of the same length. Lines starting with #
- * are notes. Anything malformed throws, so a slip of the hand is caught when
- * the map is built.
+ * Reads the tile map: one token per tile, in rows of the same length. A token
+ * is ".." for open sea, or two letters (the district or feature), with one of
+ * the signs ~ = ! after them where the tile is marked. Lines starting with
+ * # are notes. Anything malformed throws, so a slip of the hand is caught
+ * when the map is built.
  */
 export function parseHexGrid(tiles: string): HexGridTile[] {
   const rows = tiles
@@ -187,7 +202,6 @@ export function parseHexGrid(tiles: string): HexGridTile[] {
     .filter(line => line !== '' && !line.startsWith('#'))
     .map(line => line.split(/\s+/))
   if (rows.length === 0) throw new Error('Hex map: the tile map is empty')
-  const seen = new Set<string>()
   const grid: HexGridTile[] = []
   rows.forEach((line, row) => {
     if (line.length !== rows[0].length) {
@@ -197,26 +211,16 @@ export function parseHexGrid(tiles: string): HexGridTile[] {
     }
     line.forEach((token, col) => {
       if (token === SEA_TOKEN) {
-        grid.push({ col, row, ref: null, code: null, order: null })
+        grid.push({ col, row, code: null, mark: null })
         return
       }
-      const match = /^([A-Za-z]+)(\d+)$/.exec(token)
+      const match = /^([A-Za-z]{2})([~=!]?)$/.exec(token)
       if (!match) {
         throw new Error(
-          `Hex map: "${token}" at column ${col}, row ${row} is neither ".." nor letters and a number`
+          `Hex map: "${token}" at column ${col}, row ${row} is neither ".." nor two letters with an optional ~ = or !`
         )
       }
-      if (seen.has(token)) {
-        throw new Error(`Hex map: tile "${token}" is on the map twice`)
-      }
-      seen.add(token)
-      grid.push({
-        col,
-        row,
-        ref: token,
-        code: match[1],
-        order: Number(match[2]),
-      })
+      grid.push({ col, row, code: match[1], mark: MARKS[match[2]] ?? null })
     })
   })
   return grid

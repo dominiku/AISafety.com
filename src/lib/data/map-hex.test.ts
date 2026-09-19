@@ -83,33 +83,24 @@ describe('hex grid', () => {
 })
 
 describe('parseHexGrid', () => {
-  it('reads tokens laid out as the tiles lie', () => {
+  it('reads tokens laid out as the tiles lie, with their marks', () => {
     const grid = parseHexGrid(
       `# a note
-       ..  Ab1
-       cv1 Ab2`
+       ..  Ab~
+       cv! Ab=`
     )
-    expect(grid).toHaveLength(4)
-    expect(grid[0]).toEqual({
-      col: 0,
-      row: 0,
-      ref: null,
-      code: null,
-      order: null,
-    })
-    expect(grid[3]).toEqual({
-      col: 1,
-      row: 1,
-      ref: 'Ab2',
-      code: 'Ab',
-      order: 2,
-    })
+    expect(grid).toEqual([
+      { col: 0, row: 0, code: null, mark: null },
+      { col: 1, row: 0, code: 'Ab', mark: 'river' },
+      { col: 0, row: 1, code: 'cv', mark: 'landmark' },
+      { col: 1, row: 1, code: 'Ab', mark: 'road' },
+    ])
   })
 
   it('throws on a slip of the hand', () => {
-    expect(() => parseHexGrid('.. Ab1\n..')).toThrow(/row 1/)
-    expect(() => parseHexGrid('Ab1 Ab1')).toThrow(/twice/)
-    expect(() => parseHexGrid('.. Ab')).toThrow(/neither/)
+    expect(() => parseHexGrid('.. Ab\n..')).toThrow(/row 1/)
+    expect(() => parseHexGrid('.. Abc')).toThrow(/neither/)
+    expect(() => parseHexGrid('.. Ab?')).toThrow(/neither/)
     expect(() => parseHexGrid('  \n# only a note')).toThrow(/empty/)
   })
 })
