@@ -9,12 +9,13 @@
 //   ..    open sea
 //   Gm    a tile of the district with the letters Gm (see the districts
 //         below). Lower-case letters are features, not districts: cv the
-//         cove, mt the peak, kp the castle's keep.
-// A district takes up its most inland tile first (the one nearest the
-// castle) and grows outward tile by tile, only as far as its logos need.
-// Painted tiles it does not need yet are planned growth: they stay sea until
-// the day they are needed. So to give a district room to grow, paint more of
-// its letters toward the coast.
+//         cove, hb the harbor, mt the peak, kp the castle's keep.
+// Every painted tile is land (takeAllTiles below), so the coast is exactly
+// what is painted here: keep it smooth, with no single tile sticking out. The
+// two rows at the top are left to the sea for the map's title. Logos fill a
+// district from its most inland tile (the one nearest the castle) outward.
+// With takeAllTiles off, a district takes only as many tiles as its logos
+// need and the rest stay sea until the day they are needed.
 // A sign after the letters marks the tile:
 //   Gm~   the RIVER runs through the tile. The river is every tile marked ~,
 //         joined up from the highest one downhill; where marked tiles branch,
@@ -51,23 +52,23 @@ import { QUIET_REALM } from './map-realms'
 // prettier-ignore
 const TILES = `
 # 0   1   2   3   4   5   6   7   8   9   10  11  12  13  14  15  16  17  18
-  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  Go  Th  Th  ..  ..  ..
-  ..  Fo  Fo  Fo~ Ne  Ne~ Ne  Ne  ..  Gr  ..  Pa  ..  Go  Go  Th  Th  Lo  ..
-  ..  Fo! Fo  Fo~ Ne  Ne~ Ne  Ne  Gr  Gr  cv  Pa  Pa  Go  Th  Th  Th  Lo  Lo
-  ..  ..  Fo~ Fo~ Fo~ Ne~ Ne  Ne  Gr  Gr  cv! Pa  Pa  Ma  Ma  Th! Th  Lo  Lo
-  ..  Fb  Fo  Fo  Fo  Ne  Ne~ Ne~ Fr  Fr  cv  Ma  Ma  Ma  Ma! St  St  ..  Lo
-  ..  Fb! Fb  In  In  Pp  Pp  Pp  Fr~ Ca~ Ca  Ca  Ma  Ma  St  Ev  Ev  mt~ ..
-  ..  Fb= In= In= Pp= Pp= Tp= Tp= Tp= Ca= kp  Ca~ Al~ Al~ Al  Ev~ Ev~ Cp  Cp
-  ..  ..  In  In  Tp  Tp  Tp! Tp  Tp  Hu  Ca  Gm  Al  Al  Al~ Al  Ev  Cp  Cp!
-  ..  ..  Tp  Tp  Tp  Tp  Tp  Tp  To  Hu  Gm  Gm  Gm  Al  Al  Co  Co  Ip! Ip
-  Gy  ..  Tp  Tp  Tp  Op  Op  Op  To  Gm  Gm! Gm  Gm  Vc  Co  Co  Co! Ip  ..
-  Gy  Gy  ..  Tp  Tp  Op  Op  To  To  Gm  Gm  Gm  Gm  Vc  Vc  Co  Co  ..  ..
-  Gy! Gy  Gy  ..  ..  ..  Op  To  To  Gm  Gm  Gm  Gm  Vc  Vc  Co  ..  ..  ..
+  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..
+  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..
+  ..  Fo  Fo  Fo~ Ne  Ne~ Ne  Ne  Gr  Gr  cv  Pa  Pa  Go  Go  Th  Th  Lo  ..
+  ..  Fo! Fo  Fo~ Ne  Ne~ Ne  Ne  Fr  Gr  cv  Pa  Pa  Go  Th  Th  Th  Lo  Lo
+  ..  Fo~ Fo~ Fo  Fo~ Ne~ Ne  Ne  Fr  Gr  cv! Pa  Pa  Go  Th  Th! Th  Lo  Lo
+  ..  In  Fo  Fo  Fo  Ne  Ne~ Ne~ Fr  Fr  cv  Ma  Ma  Ma  Ma! St  St  ..  ..
+  In! hb  In  Fb  Pp  Pp  Pp  Pp  Fr~ Ca~ Ca  Ca  Ma  Ma  St  Ev  Ev  mt~ ..
+  hb  hb  In= Fb= Pp= Pp= Tp= Tp= Tp= Ca= kp  Ca~ Al~ Al~ Al  Ev~ Ev~ Ip  Ip
+  In  In  In  Fb  Tp  Tp  Tp! Tp  Tp  Hu  Ca  Gm  Al  Al  Al~ Al  Ev  Ip  Ip!
+  ..  ..  Fb  Tp  Tp  Tp  Tp  Tp  To  Hu  Gm  Gm  Gm  Al  Al  Co  Co  Cp! Cp
+  Gy  Gy  ..  ..  Tp  Op  Op  Op  To  Gm  Gm! Gm  Gm  Vc  Co  Co  Co! Cp  Cp
+  Gy! Gy  Gy  ..  ..  Op  Op  To  To  Gm  Gm  Gm  Gm  Vc  Vc  Co  Co  ..  ..
 `
 
 export const MAP_35_HEX_SPEC: HexMapSpec = {
   // Sizes are in map grid units (the map is 60 wide).
-  view: { size: 2.05, squash: 0.66, lift: 0.4, origin: [2.33, 3.2] },
+  view: { size: 2.05, squash: 0.66, lift: 0.4, origin: [2.33, 1.9] },
   tiles: TILES,
   // prettier-ignore
   districts: [
@@ -77,9 +78,10 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
     { code: 'Fr', district: 'Forums and online communities', realm: 'Media and discourse', height: 2.5 },
     { code: 'Gr', district: 'Grassroots campaigns', realm: 'Advocacy and public engagement', height: 1 },
     { code: 'Pa', district: 'Professional advocacy and communication', realm: 'Advocacy and public engagement', height: 1.5 },
-    { code: 'Fb', district: 'Field-building and local groups', realm: 'Talent pipeline', height: 1,
+    // The landing: the arms of a sheltered harbor, where the road starts.
+    { code: 'In', district: 'Introductory learning', realm: 'Talent pipeline', height: 1,
       landmark: { symbol: 'lighthouse', width: 1, height: 1.8 } },
-    { code: 'In', district: 'Introductory learning', realm: 'Talent pipeline', height: 1.5 },
+    { code: 'Fb', district: 'Field-building and local groups', realm: 'Talent pipeline', height: 1.5 },
     { code: 'Pp', district: 'Policy and governance programs', realm: 'Talent pipeline', height: 2 },
     { code: 'Tp', district: 'Technical research programs', realm: 'Talent pipeline', height: 2.5,
       landmark: { symbol: 'training-town', width: 3, height: 2.54 } },
@@ -102,9 +104,9 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
     { code: 'Ev', district: 'Evaluations and threat research', realm: 'Technical research', height: 5 },
     { code: 'Co', district: 'Conceptual and foundations research', realm: 'Technical research', height: 4.5,
       landmark: { symbol: 'cave', width: 1.7, height: 1.63 } },
-    { code: 'Ip', district: 'Interpretability and model understanding', realm: 'Technical research', height: 3.5,
+    { code: 'Ip', district: 'Interpretability and model understanding', realm: 'Technical research', height: 5.5,
       landmark: { symbol: 'range', width: 2.8, height: 1.98 } },
-    { code: 'Cp', district: 'Capabilities research', realm: 'Technical research', height: 5.5,
+    { code: 'Cp', district: 'Capabilities research', realm: 'Technical research', height: 3.5,
       landmark: { symbol: 'skull-mountain', width: 2.6, height: 2.25 } },
     { code: 'Gy', district: QUIET_REALM, realm: QUIET_REALM, height: 1,
       landmark: { symbol: 'gravestones', width: 3, height: 1.42 } },
@@ -114,6 +116,8 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
     // The cove: water inside the coast, between the two arms of Advocacy.
     { code: 'cv', kind: 'water', height: 0,
       landmark: { symbol: 'boats', width: 3.4, height: 1.26 } },
+    // The harbor the road starts from: a bay between the arms of the landing.
+    { code: 'hb', kind: 'water', height: 0 },
     // The high peak the river rises on.
     { code: 'mt', kind: 'scenery', realm: 'Technical research', height: 6.5 },
     // The castle's keep, level with the six tiles of Career support round it:
@@ -123,6 +127,9 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
   ],
   river: { width: 0.85, branch: 0.78 },
   road: { width: 0.55 },
+  // For now every painted tile is land, so the coast is as smooth as it is
+  // painted. To give a district room to grow, paint more tiles for it.
+  takeAllTiles: true,
 }
 
 // District codes whose tiles are an island of their own, not part of the

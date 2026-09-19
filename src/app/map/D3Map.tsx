@@ -406,7 +406,9 @@ export default function D3Map({
 
     // Add main title
     const titleX = 30 * GRID_SIZE
-    const titleY = 2.5 * GRID_SIZE
+    // PROTOTYPE Hex work: a little lower, in the room the board leaves along
+    // the middle of its north coast.
+    const titleY = (hexBackdrop ? 3.1 : 2.5) * GRID_SIZE
     // Beside the explorer column the page shows the title as its real <h1>.
     if (!hasExplorer)
       svgGroup

@@ -25,7 +25,6 @@ import {
   insetConvex,
   insideConvex,
   projectPoint,
-  HEX_DIRECTIONS,
   type Point,
 } from '@/lib/data/map-hex'
 import type {
@@ -46,7 +45,6 @@ import {
   ROAD_PEBBLE,
   SEA,
   SHALLOWS,
-  SHELF_INNER,
   SHELF_OUTER,
   SNOW,
   TERRAIN_SCATTER,
@@ -86,6 +84,9 @@ const FACE_FOOT = 0.12
 const BANK = 3
 // A fall this high (map grid units) or more is a large one.
 const LARGE_FALL = 0.55
+// Share of a sea tile the shallows reach in from the side it shares with the
+// land.
+const SHALLOWS_REACH = 0.6
 // Sea tiles are drawn this far past the board, so zooming out shows no edge.
 const SEA_REACH = 8
 
@@ -167,41 +168,48 @@ export function hexBackdropMarkup(
     `<rect x="${-width}" y="${-height}" width="${width * 3}" height="${height * 3}" fill="${SEA}"/>`
   )
 
-  // The sea, tiled like the land: a faint honeycomb, and two rings of
-  // shallower water round the island.
+  // The sea, tiled like the land: a faint honeycomb. Round the island one
+  // narrow band of shallows: in each sea tile that touches land, the water
+  // is pale along the side it shares with the land and fades toward the
+  // tile's middle.
   const land = new Set(
     layout.tiles.filter(tile => tile.state !== 'sea').map(tile => hexKey(tile))
   )
-  const stepsFromLand = new Map<string, number>()
-  let ring = [...land].map(key => {
-    const [col, row] = key.split(',').map(Number)
-    return { col, row }
-  })
-  for (const steps of [1, 2]) {
-    const next: typeof ring = []
-    for (const cell of ring) {
-      for (const direction of HEX_DIRECTIONS) {
-        const neighbor = hexNeighbor(cell, direction)
-        const key = hexKey(neighbor)
-        if (land.has(key) || stepsFromLand.has(key)) continue
-        stepsFromLand.set(key, steps)
-        next.push(neighbor)
-      }
-    }
-    ring = next
-  }
+  const seaHex = (cell: { col: number; row: number }, scale = 1) =>
+    hexCorners(cell, view.size, scale).map(corner =>
+      projectPoint(view, corner, 0)
+    )
+  const shallows: string[] = []
+  // Sides in the order the corners run: SE, S, SW, NW, N, NE.
+  const sides = ['SE', 'S', 'SW', 'NW', 'N', 'NE'] as const
   for (let col = -SEA_REACH; col < layout.columns + SEA_REACH; col++) {
     for (let row = -SEA_REACH; row < layout.rows + SEA_REACH; row++) {
-      const key = hexKey({ col, row })
-      if (land.has(key)) continue
-      const steps = stepsFromLand.get(key)
-      const hexagon = hexCorners({ col, row }, view.size, 0.95).map(corner =>
-        projectPoint(view, corner, 0)
-      )
+      const cell = { col, row }
+      if (land.has(hexKey(cell))) continue
       out.push(
-        `<path d="${outline(hexagon)}" fill="${steps === 1 ? SHELF_INNER : steps === 2 ? SHELF_OUTER : 'none'}" stroke="${SHELF_OUTER}" stroke-width="2"/>`
+        `<path d="${outline(seaHex(cell, 0.95))}" fill="none" stroke="${SHELF_OUTER}" stroke-width="2"/>`
       )
+      const corners = seaHex(cell)
+      const inner = seaHex(cell, 1 - SHALLOWS_REACH)
+      sides.forEach((side, k) => {
+        if (!land.has(hexKey(hexNeighbor(cell, side)))) return
+        const [a, b] = [corners[k], corners[(k + 1) % 6]]
+        const [c, d] = [inner[(k + 1) % 6], inner[k]]
+        const id = `hex-shallows-${clips.length}`
+        clips.push(
+          `<linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="${(((a[0] + b[0]) / 2) * g).toFixed(1)}" y1="${(((a[1] + b[1]) / 2) * g).toFixed(1)}" x2="${(((c[0] + d[0]) / 2) * g).toFixed(1)}" y2="${(((c[1] + d[1]) / 2) * g).toFixed(1)}"><stop offset="0" stop-color="${SHALLOWS}"/><stop offset="1" stop-color="${SHALLOWS}" stop-opacity="0"/></linearGradient>`
+        )
+        shallows.push(`<path d="${outline([a, b, c, d])}" fill="url(#${id})"/>`)
+      })
     }
+  }
+  out.push(...shallows)
+  // Coves and harbors: water inside the coast, under the piers and boats.
+  for (const tile of layout.tiles) {
+    if (tile.state !== 'water') continue
+    out.push(
+      `<path d="${outline(tile.top)}" fill="${SHALLOWS}" stroke="${SHELF_OUTER}" stroke-width="3"/>`
+    )
   }
 
   // Off each of the river's mouths: shallows fanning out over the sea, the
@@ -522,11 +530,7 @@ export function hexBackdropMarkup(
   layout.tiles.forEach((tile, n) => {
     if (tile.state === 'sea' || tile.ref === null) return
     const theme = themeFor(tile.realm)
-    if (tile.state === 'water') {
-      out.push(
-        `<path d="${outline(tile.top)}" fill="${SHALLOWS}" stroke="${SHELF_INNER}" stroke-width="3"/>`
-      )
-    } else {
+    if (tile.state !== 'water') {
       drawSlab(
         tile,
         districtTone(theme.tones[0], tile.tone, tile.tones),

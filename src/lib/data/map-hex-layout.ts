@@ -96,6 +96,11 @@ export interface HexMapSpec {
   // `branch` times as wide as the stream above.
   river: { width: number; branch: number }
   road: { width: number }
+  // Every painted tile is land, needed or not: the coast is exactly as it is
+  // painted, and a district gets room to grow by painting more tiles.
+  // Without it a district takes only the tiles its logos need and the rest
+  // stay sea, which leaves a ragged coast.
+  takeAllTiles?: boolean
 }
 
 export interface HexLogo {
@@ -626,8 +631,10 @@ export function layoutHexMap(
                   6) -
                   3
               )
+        // turn() is 3 for the side straight across, 0 for the side it came
+        // in by.
         const out = HEX_DIRECTIONS.filter(side => isWater(tile, side)).sort(
-          (a, b) => turn(a) - turn(b)
+          (a, b) => turn(b) - turn(a)
         )[0]
         outSides.push(out ?? null)
         if (out) {
@@ -802,7 +809,9 @@ export function layoutHexMap(
     let spots: (Point | null)[] = own.map(() => null)
     let taken = 0
     for (
-      let count = Math.min(minTiles, tiles.length);
+      let count = spec.takeAllTiles
+        ? tiles.length
+        : Math.min(minTiles, tiles.length);
       count <= tiles.length;
       count++
     ) {
