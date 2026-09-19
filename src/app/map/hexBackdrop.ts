@@ -1469,28 +1469,38 @@ export function hexBackdropMarkup(
     for (const tile of layout.tiles) {
       if (tile.deck?.height !== height) continue
       const { shape, along, platform } = tile.deck
+      // The sides a platform shares with the next tile's part of it, as drawn
+      // (the platform stands above its tile, which lies at sea level).
+      const joins: [Point, Point][] = []
       if (platform) {
-        // Gangways: to the next platform of the village on each near side,
-        // and ashore wherever land of this height lies alongside.
-        const middle = (points: Point[]): Point => [
-          points.reduce((sum, point) => sum + point[0], 0) / points.length,
-          points.reduce((sum, point) => sum + point[1], 0) / points.length,
-        ]
+        const rise = height * view.lift
         SIDE_NAMES.forEach((side, k) => {
           const next = laidByCell.get(hexKey(hexNeighbor(tile, side)))
           if (!next) return
-          const village =
-            k <= 2 && !!next.deck && next.district === tile.district
-          const ashore = isGround(next) && next.height === height
-          if (!village && !ashore) return
-          const to = village
-            ? middle(next.deck!.shape)
-            : middle([next.top[(k + 3) % 6], next.top[(k + 4) % 6]])
-          const d = `M${xy(middle(shape))}L${xy(to)}`
-          out.push(
-            `<path d="${d}" fill="none" stroke="${PLANK_GAP}" stroke-width="${(0.42 * g).toFixed(1)}"/>`,
-            `<path d="${d}" fill="none" stroke="${PLANK}" stroke-width="${(0.42 * g).toFixed(1)}" stroke-dasharray="7 3"/>`
-          )
+          const [a, b] = [tile.top[k], tile.top[(k + 1) % 6]]
+          if (next.deck && next.district === tile.district) {
+            joins.push([
+              [a[0], a[1] - rise],
+              [b[0], b[1] - rise],
+            ])
+          } else if (isGround(next) && next.height === height) {
+            // A gangway ashore, wherever land of this height lies alongside.
+            const from: Point = [
+              shape.reduce((sum, point) => sum + point[0], 0) / shape.length,
+              shape.reduce((sum, point) => sum + point[1], 0) / shape.length,
+            ]
+            const to: Point = [
+              (a[0] + b[0]) / 2 + ((a[0] + b[0]) / 2 - from[0]) * 0.15,
+              (a[1] + b[1]) / 2 -
+                rise +
+                ((a[1] + b[1]) / 2 - rise - from[1]) * 0.15,
+            ]
+            const d = `M${xy(from)}L${xy(to)}`
+            out.push(
+              `<path d="${d}" fill="none" stroke="${PLANK_GAP}" stroke-width="${(0.42 * g).toFixed(1)}"/>`,
+              `<path d="${d}" fill="none" stroke="${PLANK}" stroke-width="${(0.42 * g).toFixed(1)}" stroke-dasharray="7 3"/>`
+            )
+          }
         })
       }
       out.push(
@@ -1500,26 +1510,31 @@ export function hexBackdropMarkup(
           height * view.lift,
           g,
           !platform,
-          platform ? PLATFORM_WOOD : undefined
+          platform ? PLATFORM_WOOD : undefined,
+          joins
         )
       )
       if (platform && pins) {
-        // Tool sheds on the platform, where the logos leave room.
+        // Huts on the platform, where the logos leave room: a stilt hut, or
+        // now and then one of the classic cottages.
         const deck = insetConvex(
           shape,
-          shape.map(() => 0.2)
+          shape.map(() => 0.12)
         )
         scatterSpots((x, y) => insideConvex([x, y], deck), pins, board, {
-          spacing: 0.85,
-          minRoom: 0.3,
+          spacing: 0.7,
+          minRoom: 0.24,
           maxRoom: 0.8,
-        }).forEach(spot =>
+        }).forEach(spot => {
+          const foot = spot.y + 0.3
           stand(
-            spot.y + 0.35,
+            foot,
             height,
-            `<use href="#cottage" x="${((spot.x - 0.4) * g).toFixed(1)}" y="${((spot.y + 0.35 - 1.03) * g).toFixed(1)}" width="${(0.8 * g).toFixed(1)}" height="${(1.03 * g).toFixed(1)}"/>`
+            spot.roll > 0.7
+              ? `<use href="#cottage" x="${((spot.x - 0.36) * g).toFixed(1)}" y="${((foot - 0.93) * g).toFixed(1)}" width="${(0.72 * g).toFixed(1)}" height="${(0.93 * g).toFixed(1)}"/>`
+              : beachHutMarkup(spot.x, foot, 0.72, g)
           )
-        )
+        })
       }
     }
     const refs = new Set(

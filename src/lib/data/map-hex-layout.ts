@@ -42,6 +42,7 @@ import {
   hexNeighbor,
   hexSide,
   hexSideMiddle,
+  insetConvex,
   insideConvex,
   parseHexGrid,
   projectPoint,
@@ -416,8 +417,8 @@ const CONE_RUN = 0.35
 // A pier's deck: half its width, and how far past the middle of its last tile
 // its head reaches (map grid units).
 const DECK_HALF_WIDTH = 0.3
-// A stilt village's platform, as a share of its tile.
-const STILT_PLATFORM = 0.88
+// How far a stilt village's platform keeps in from its outer edge.
+const STILT_MARGIN = 0.16
 const DECK_HEAD = 1.1
 
 interface Plateau {
@@ -753,13 +754,19 @@ export function layoutHexMap(
       platform: false,
     })
   }
-  // A stilt village: a platform on every tile, in from the tile's sides, so
-  // that water shows between one platform and the next.
+  // A stilt village is one platform over all its tiles: each tile's part of
+  // it reaches to the sides the tile shares with the rest of the village, and
+  // keeps in from the others, so that water shows round the village's edge.
   for (const { code, stilts } of spec.districts) {
     if (!stilts) continue
     for (const tile of tilesOf.get(code) ?? []) {
       deckOn.set(tile.ref, {
-        shape: topOf(tile, STILT_PLATFORM),
+        shape: insetConvex(
+          topOf(tile),
+          SIDES.map(side =>
+            neighborOf(tile, side)?.code === code ? 0 : STILT_MARGIN
+          )
+        ),
         along: [0, 1],
         height: tile.height,
         platform: true,

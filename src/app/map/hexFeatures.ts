@@ -8,7 +8,7 @@
 // DESIGN REVIEW (Melissa): all three are stand-ins in the classic map's colors,
 // until the artists draw them.
 
-import type { Point } from '@/lib/data/map-hex'
+import { distanceToStretch, type Point } from '@/lib/data/map-hex'
 import {
   LINE,
   PLANK,
@@ -97,9 +97,12 @@ export function deckMarkup(
   // How far above the water the deck stands.
   drop: number,
   g: number,
-  // Mooring posts along its sides (a pier's; a platform has none).
+  // Mooring posts and side beams (a pier's; a platform has none).
   moorings = true,
-  wood: string = PLANK
+  wood: string = PLANK,
+  // Where a platform runs on onto the next tile's: no edge is drawn there,
+  // and nothing under it.
+  joins: [Point, Point][] = []
 ): string {
   const xy = ([x, y]: Point) => `${(x * g).toFixed(1)},${(y * g).toFixed(1)}`
   const outline = `M${shape.map(xy).join('L')}Z`
@@ -116,13 +119,19 @@ export function deckMarkup(
   const id = `hex-deck-${xy(shape[0]).replace(/[.,]/g, '_')}`
   // Under the deck, along each side of it that faces the viewer: the posts it
   // stands on, down to the water, and the shadow between them.
+  const joined = (a: Point, b: Point) => {
+    const middle: Point = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
+    return joins.some(
+      ([from, to]) => distanceToStretch(middle, from, to) < 0.05
+    )
+  }
   const under: string[] = []
   shape.forEach((a, n) => {
     const b = shape[(n + 1) % shape.length]
     const length = Math.hypot(b[0] - a[0], b[1] - a[1])
     // Corners run clockwise on the screen, so a side faces the viewer where
     // it runs from right to left.
-    if (length < 0.3 || a[0] - b[0] < 0.2) return
+    if (length < 0.3 || a[0] - b[0] < 0.2 || joined(a, b)) return
     under.push(
       `<path d="M${xy(a)}L${xy(b)}L${xy([b[0], b[1] + drop * 0.55])}L${xy([a[0], a[1] + drop * 0.55])}Z" fill="${PLANK_GAP}" fill-opacity="0.55"/>`
     )
@@ -140,17 +149,29 @@ export function deckMarkup(
     `<path d="${outline}" fill="${wood}"/>`,
     `<g clip-path="url(#${id})">`,
   ]
-  for (let s = from + 0.24; s < to; s += 0.24) {
+  // Planks lie on one grid for the whole board, so that they run on from
+  // tile to tile of a platform.
+  for (let s = Math.ceil(from / 0.24) * 0.24; s < to; s += 0.24) {
     out.push(
       `<path d="M${xy(point(s, left))}L${xy(point(s, right))}" stroke="${PLANK_GAP}" stroke-width="1.6"/>`
     )
   }
-  for (const t of [left, right]) {
+  for (const t of moorings ? [left, right] : []) {
     out.push(
       `<path d="M${xy(point(from, t))}L${xy(point(to, t))}" stroke="${PLANK_GAP}" stroke-width="4"/>`
     )
   }
   out.push('</g>')
+  // A platform's edge, where it does not run on.
+  if (!moorings) {
+    shape.forEach((a, n) => {
+      const b = shape[(n + 1) % shape.length]
+      if (joined(a, b)) return
+      out.push(
+        `<path d="M${xy(a)}L${xy(b)}" stroke="${PLANK_GAP}" stroke-width="3.5" stroke-linecap="round"/>`
+      )
+    })
+  }
   // Mooring posts, a little in from each beam.
   for (let s = from + 0.35; moorings && s < to - 0.1; s += 0.85) {
     for (const t of [left + 0.06, right - 0.06]) {
