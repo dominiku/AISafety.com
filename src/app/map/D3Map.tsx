@@ -3,6 +3,7 @@
 // @refresh reset — d3 pipeline is inside useEffect; force remount on edit.
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { MutableRefObject } from 'react'
 import * as d3 from 'd3'
 import MapControls from '@/components/MapControls'
 import MapSearch, { NO_MAP_SEARCH_CONTROL } from './MapSearch'
@@ -71,6 +72,24 @@ interface D3MapProps {
   // PROTOTYPE Map 3.5: the schematic, or the same layout in the classic art's
   // hand (realmArtBackdrop.ts).
   realmBackdropStyle?: 'schematic' | 'art'
+  // The explorer column beside the map (MapExplorer). When given, the map
+  // follows the column: it shows the column's matches, marks its selection,
+  // and a pin click selects the org's card instead of opening its site. The
+  // map's own search box and title are left to the column and the page.
+  explorer?: MapExplorerLink
+}
+
+export interface MapExplorerLink {
+  // Ids of the orgs the column's search and filters match; null = all.
+  matchingIds: Set<string> | null
+  // What becomes of the pins that don't match (both are being tested).
+  nonMatching: 'hide' | 'dim'
+  selectedId: string | null
+  // The card being hovered or focused.
+  highlightedId: string | null
+  onSelect: (id: string) => void
+  // Filled in by the map: bring a pin to the middle of the view.
+  apiRef: MutableRefObject<{ panTo: (id: string) => void }>
 }
 
 // Map constants from WebFlow
@@ -102,6 +121,11 @@ const AREA_FRAME_MARGIN = 2
 const FOCUS_MARGIN = 0.85
 const LANDMARK_FRAME_MARGIN = 6
 const REALM_SUB_LABEL_ZOOM = 1.5
+// PROTOTYPE explorer: when the column's search and filters leave this many
+// matches or fewer, every one of them shows at any zoom — having asked for a
+// dozen orgs, a visitor should not have to zoom in to find five of them. Past
+// this the zoom tiers thin them as usual, or the map would crowd again.
+const EXPLORER_SHOW_ALL_MAX = 60
 
 export default function D3Map({
   orgs,
@@ -109,8 +133,19 @@ export default function D3Map({
   scheme = CLASSIC_MAP_SCHEME,
   realmBackdrop,
   realmBackdropStyle = 'schematic',
+  explorer,
 }: D3MapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
+  // The d3 pipeline below reads the column's state through this ref, and is
+  // told to redraw through applyExplorerRef, so a filter or a selection never
+  // rebuilds the whole map.
+  const explorerRef = useRef(explorer)
+  const applyExplorerRef = useRef(() => {})
+  const hasExplorer = explorer !== undefined
+  useEffect(() => {
+    explorerRef.current = explorer
+    applyExplorerRef.current()
+  }, [explorer])
   const tooltipRef = useRef<HTMLDivElement>(null)
   // Zoom actions live in the d3 pipeline inside useEffect; the buttons reach
   // them through this ref.
@@ -192,7 +227,12 @@ export default function D3Map({
       .attr('width', '100%')
       .attr('height', '100%')
       .attr('viewBox', `0 0 ${PADDED_WIDTH} ${PADDED_HEIGHT}`)
-      .attr('preserveAspectRatio', 'xMidYMin meet')
+      // Under the navbar the map hangs from the top of the viewport; in the
+      // explorer's pane it sits in the middle.
+      .attr(
+        'preserveAspectRatio',
+        hasExplorer ? 'xMidYMid meet' : 'xMidYMin meet'
+      )
       .style('transform', 'translateZ(0)')
       .style('backface-visibility', 'hidden')
 
@@ -350,17 +390,19 @@ export default function D3Map({
     // Add main title
     const titleX = 30 * GRID_SIZE
     const titleY = 2.5 * GRID_SIZE
-    svgGroup
-      .append('text')
-      .attr('x', titleX)
-      .attr('y', titleY)
-      .attr('text-anchor', 'middle')
-      .attr('font-family', 'Inter, sans-serif')
-      .attr('font-weight', 400)
-      .attr('font-size', 72)
-      .style('letter-spacing', '-2.16px')
-      .attr('fill', '#fff')
-      .text('Map of AI Existential Safety')
+    // Beside the explorer column the page shows the title as its real <h1>.
+    if (!hasExplorer)
+      svgGroup
+        .append('text')
+        .attr('x', titleX)
+        .attr('y', titleY)
+        .attr('text-anchor', 'middle')
+        .attr('font-family', 'Inter, sans-serif')
+        .attr('font-weight', 400)
+        .attr('font-size', 72)
+        .style('letter-spacing', '-2.16px')
+        .attr('fill', '#fff')
+        .text('Map of AI Existential Safety')
 
     // Add area labels
     const labelScale = 1.75
@@ -542,6 +584,16 @@ export default function D3Map({
               })
               return
             }
+            // Beside the explorer column a pin selects its card (a phone keeps
+            // the tap-for-tooltip above, which has the link in it); the way to
+            // the org's site is the card's title. (Not tracked as a listing
+            // click: nothing was opened.)
+            if (explorerRef.current) {
+              event.preventDefault()
+              hideTooltip()
+              explorerRef.current.onSelect(org.id)
+              return
+            }
             trackListingClick(
               'Map',
               org.title,
@@ -560,6 +612,16 @@ export default function D3Map({
               ;(event.currentTarget as SVGElement | null)?.blur?.()
             }
           })
+      }
+
+      // Beside the explorer column a pin is a button named after its org.
+      // It is kept out of the tab order: 369 pins in map order make no sane
+      // keyboard route, and the card list reaches every one of them.
+      if (hasLink && hasExplorer) {
+        linkEl
+          .attr('role', 'button')
+          .attr('aria-label', org.tooltipTitle)
+          .attr('tabindex', -1)
       }
 
       // White circle background
@@ -765,6 +827,17 @@ export default function D3Map({
     let forcedPinId: string | null = null
     // An area picked from the search shows all its pins once framed.
     let focus: MapFocus | null = null
+    // Map furniture (Merch, Last updated) is never in the column's list, so
+    // a filter must not take it off the map.
+    const furnitureIds = new Set(
+      orgs
+        .filter(org => org.isMagic || !org.link || org.link === '#')
+        .map(org => org.id)
+    )
+    const matchesExplorer = (id: string) => {
+      const matching = explorerRef.current?.matchingIds
+      return !matching || matching.has(id) || furnitureIds.has(id)
+    }
     applyPins = (k: number) => {
       appliedK = k
       if (!layout) return
@@ -783,14 +856,29 @@ export default function D3Map({
       // The pins on screen, where they are drawn, for the panel's readout.
       const showing: TierPin[] = []
       let largeHeldBack = 0
+      const link = explorerRef.current
+      const showAllMatches =
+        !!link?.matchingIds && link.matchingIds.size <= EXPLORER_SHOW_ALL_MAX
       for (const { tier, group } of pins) {
-        const revealed = (layout.reveal.get(tier.id) ?? 0) <= z
+        const matches = matchesExplorer(tier.id)
+        // A hidden non-match has no place in the layout (see applyTiers).
+        if (!matches && link?.nonMatching === 'hide') {
+          group.classed('mapFadeHidden', true).classed('mapDimmed', false)
+          continue
+        }
+        const revealed =
+          (showAllMatches && !!link?.matchingIds?.has(tier.id)) ||
+          (layout.reveal.get(tier.id) ?? 0) <= z
         const at = pinPositionAt(layout, tier.id, z)
         if (revealed) showing.push({ ...tier, ...at })
         else if (tier.scale === 'Large') largeHeldBack++
         group
           .attr('transform', `translate(${at.x}, ${at.y}) scale(${s})`)
-          .classed('mapFadeHidden', !revealed && tier.id !== forcedPinId)
+          .classed(
+            'mapFadeHidden',
+            !revealed && tier.id !== forcedPinId && tier.id !== link?.selectedId
+          )
+          .classed('mapDimmed', !matches)
       }
       if (tierReadoutRef.current) {
         const { pairs, onObstacles } = countOverlaps(
@@ -812,8 +900,14 @@ export default function D3Map({
       if (tierTimer !== null) clearTimeout(tierTimer)
       tierTimer = null
       measureScreenScale()
+      // Pins the explorer column has filtered out and hidden leave the
+      // layout, so the ones that remain get the room: eight matches all show
+      // at rest, where eight among 369 would mostly be held back.
+      const hiding = explorerRef.current?.nonMatching === 'hide'
       layout = layoutPins(
-        pins.map(pin => pin.tier),
+        pins
+          .filter(pin => !hiding || matchesExplorer(pin.tier.id))
+          .map(pin => pin.tier),
         obstacles,
         tierConfigRef.current,
         zoomOf(1),
@@ -871,7 +965,12 @@ export default function D3Map({
     const flyToPoint = (px: number, py: number, k: number) => {
       svg
         .transition()
-        .duration(800)
+        // Someone who asked for less motion gets the new view at once.
+        .duration(
+          window.matchMedia('(prefers-reduced-motion: reduce)').matches
+            ? 0
+            : 800
+        )
         .call(
           zoom.transform,
           d3.zoomIdentity
@@ -1023,6 +1122,81 @@ export default function D3Map({
       },
     }
 
+    // The explorer column's selection and hover: a ring inside the pin's own
+    // group, so it moves and resizes with the pin. The selected pin's ring is
+    // solid; a hovered or focused card's pin gets a lighter one.
+    const orgById = new Map(orgs.map(org => [org.id, org]))
+    let explorerRings: d3.Selection<
+      SVGCircleElement,
+      unknown,
+      null,
+      undefined
+    >[] = []
+    const drawExplorerRing = (id: string, width: number, opacity: number) => {
+      const group = pins.find(pin => pin.tier.id === id)?.group
+      const org = orgById.get(id)
+      if (!group || !org) return
+      const rawScale = SIZE_TO_SCALE[org.scale || 'Medium'] || 0.6
+      explorerRings.push(
+        group
+          .append('circle')
+          .attr('r', (BASE_LOGO_SIZE * rawScale) / 2 + 6)
+          .attr('fill', 'none')
+          .attr('stroke', 'var(--white)')
+          .attr('stroke-width', width)
+          .attr('stroke-opacity', opacity)
+          .attr('vector-effect', 'non-scaling-stroke')
+          .style('pointer-events', 'none')
+      )
+      // Above its neighbors, so the ring is not cut by an overlapping pin.
+      group.raise()
+    }
+    let appliedMatching: Set<string> | null | undefined
+    let appliedMode: string | undefined
+    let appliedSelected: string | null | undefined
+    const applyExplorer = () => {
+      const link = explorerRef.current
+      if (!link) return
+      explorerRings.forEach(ring => ring.remove())
+      explorerRings = []
+      if (link.highlightedId && link.highlightedId !== link.selectedId) {
+        drawExplorerRing(link.highlightedId, 2, 0.6)
+      }
+      if (link.selectedId) drawExplorerRing(link.selectedId, 3.5, 1)
+      const filterChanged =
+        link.matchingIds !== appliedMatching || link.nonMatching !== appliedMode
+      if (
+        filterChanged &&
+        (link.nonMatching === 'hide' || appliedMode === 'hide')
+      ) {
+        // Hidden pins leave the layout, so it has to be worked out again.
+        scheduleTiers()
+      }
+      if (filterChanged || link.selectedId !== appliedSelected) {
+        applyPins(appliedK)
+      }
+      appliedMatching = link.matchingIds
+      appliedMode = link.nonMatching
+      appliedSelected = link.selectedId
+    }
+    applyExplorerRef.current = applyExplorer
+    applyExplorer()
+    if (explorerRef.current) {
+      explorerRef.current.apiRef.current = {
+        panTo: id => {
+          const org = orgById.get(id)
+          if (!org || org.x === null || org.y === null) return
+          // Keep the visitor's zoom unless it is too far out to tell the pin
+          // from its neighbors.
+          const k = Math.max(d3.zoomTransform(svgNode).k, 2)
+          const at = layout?.positions.has(id)
+            ? pinPositionAt(layout, id, zoomOf(k))
+            : { x: org.x * GRID_SIZE, y: org.y * GRID_SIZE }
+          flyToPoint(at.x, at.y, k)
+        },
+      }
+    }
+
     // ESC resets the view, same as the recenter button. Skip while typing in
     // a form field — ESC there shouldn't yank the map.
     const handleEscKey = (e: KeyboardEvent) => {
@@ -1099,6 +1273,7 @@ export default function D3Map({
       tierResizeObserver.disconnect()
       if (tierTimer !== null) clearTimeout(tierTimer)
       applyTiersRef.current = () => {}
+      applyExplorerRef.current = () => {}
       if (tooltipEl) tooltipEl.removeEventListener('click', handleTooltipClick)
       document.removeEventListener('click', handleDocumentClick)
       document.removeEventListener('keydown', handleEscKey)
@@ -1106,7 +1281,14 @@ export default function D3Map({
         d3.select(container).select('svg').remove()
       }
     }
-  }, [orgs, showAreaCounts, scheme, realmBackdrop, realmBackdropStyle])
+  }, [
+    orgs,
+    showAreaCounts,
+    scheme,
+    realmBackdrop,
+    realmBackdropStyle,
+    hasExplorer,
+  ])
 
   return (
     <>
@@ -1128,16 +1310,19 @@ export default function D3Map({
         readoutRef={tierReadoutRef}
       />
 
-      <MapSearch
-        className={styles['map-search']}
-        orgs={searchOrgs}
-        scheme={scheme}
-        suggestEntryUrl={suggestEntryUrl}
-        controlRef={searchControlRef}
-        onPick={org => searchRef.current.flyTo(org)}
-        onPickArea={area => searchRef.current.flyToArea(area)}
-        onClear={() => searchRef.current.clearHighlight()}
-      />
+      {/* Beside the explorer column the search lives in the column. */}
+      {!hasExplorer && (
+        <MapSearch
+          className={styles['map-search']}
+          orgs={searchOrgs}
+          scheme={scheme}
+          suggestEntryUrl={suggestEntryUrl}
+          controlRef={searchControlRef}
+          onPick={org => searchRef.current.flyTo(org)}
+          onPickArea={area => searchRef.current.flyToArea(area)}
+          onClear={() => searchRef.current.clearHighlight()}
+        />
+      )}
 
       {/* Tooltip — always in DOM for measuring, visibility toggled via ref */}
       <div

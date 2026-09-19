@@ -1,7 +1,7 @@
 'use client'
 
 import Icon from './Icon'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { trackFilterApply } from '@/lib/analytics'
 import { trackedFilterGroup, trackedFilterValue } from '@/lib/filter-tracking'
 import styles from './FilterDropdown.module.css'
@@ -19,6 +19,9 @@ interface FilterDropdownProps {
    *  Renamed titles and options keep logging their original names via
    *  lib/filter-tracking, so history stays in one line. */
   trackingPage?: string
+  /** Label an active pill "Category · 2" (how many are ticked) instead of
+   *  naming the first tick. For a narrow row where the pill must stay short. */
+  countLabel?: boolean
 }
 
 // A single pill-shaped filter that opens a checkbox popover. Used in the
@@ -31,8 +34,10 @@ export default function FilterDropdown({
   onToggle,
   icon,
   trackingPage,
+  countLabel = false,
 }: FilterDropdownProps) {
   const [open, setOpen] = useState(false)
+  const popoverId = useId()
   const [pos, setPos] = useState({ top: 0, left: 0 })
   const ref = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
@@ -59,11 +64,20 @@ export default function FilterDropdown({
         setOpen(false)
       }
     }
+    // Esc closes the popover and hands focus back to the pill.
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      e.stopPropagation()
+      setOpen(false)
+      buttonRef.current?.focus()
+    }
     document.addEventListener('mousedown', handleClick)
+    document.addEventListener('keydown', handleKey, true)
     window.addEventListener('scroll', position, true)
     window.addEventListener('resize', position)
     return () => {
       document.removeEventListener('mousedown', handleClick)
+      document.removeEventListener('keydown', handleKey, true)
       window.removeEventListener('scroll', position, true)
       window.removeEventListener('resize', position)
     }
@@ -72,15 +86,19 @@ export default function FilterDropdown({
   const label =
     selected.length === 0
       ? title
-      : selected.length === 1
-        ? `${title}: ${selected[0]}`
-        : `${title}: ${selected[0]} +${selected.length - 1}`
+      : countLabel
+        ? `${title} · ${selected.length}`
+        : selected.length === 1
+          ? `${title}: ${selected[0]}`
+          : `${title}: ${selected[0]} +${selected.length - 1}`
 
   return (
     <div ref={ref} style={{ position: 'relative' }}>
       <button
         ref={buttonRef}
         type="button"
+        aria-expanded={open}
+        aria-controls={open ? popoverId : undefined}
         className={`${styles.pill} border-plus-fill paragraph-xs-bold${selected.length > 0 ? ` ${styles.pillActive}` : ''}${
           open ? ` ${styles.pillOpen}` : ''
         }`}
@@ -106,6 +124,9 @@ export default function FilterDropdown({
       {open && (
         <div
           ref={popoverRef}
+          id={popoverId}
+          role="group"
+          aria-label={title}
           className={`${styles.popover} border-plus-fill drop-shadow-extra-dark`}
           style={{ top: pos.top, left: pos.left }}
         >
