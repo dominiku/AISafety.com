@@ -217,22 +217,24 @@ export const MAP_35_SPEC: RealmMapSpec = {
     'Technical research programs': [16, 19.5],
     'Career support and placement': [31.5, 17.8],
     // Field infrastructure, west to east under the journey: what a newcomer
-    // leans on first, then what careers and research lean on.
-    'Tools, databases and research infrastructure': [17, 25],
-    'Operations and services': [22.5, 27.5],
-    'Hubs and coworking': [27.5, 24],
+    // leans on first, then what careers and research lean on. The narrow
+    // western tip goes to a district big enough to fill it (Operations), with
+    // Hubs and Tools one above the other east of it.
+    'Tools, databases and research infrastructure': [23.5, 28.3],
+    'Operations and services': [18, 25],
+    'Hubs and coworking': [25.5, 23.6],
     'Grantmakers and donor advisory': [34, 26.5],
     'Venture capital and incubators': [41.5, 26],
-    'Macrostrategy and forecasting': [39, 14.8],
-    'Governments and multi-stakeholder bodies': [42.5, 10],
+    'Macrostrategy and forecasting': [40.5, 15.3],
+    'Governments and multi-stakeholder bodies': [40.5, 9.4],
     'Policy research and think tanks': [49, 12],
     'Standards, assurance and verification': [46.5, 16.2],
     'Policy advocacy and lobbying': [54.5, 14.5],
     'Alignment and control': [39.5, 20.6],
-    'Evaluations and threat research': [47.5, 19.8],
-    'Conceptual and foundations research': [45.5, 23.6],
-    'Interpretability and model understanding': [50.5, 26.6],
-    'Capabilities research': [55, 22.4],
+    'Evaluations and threat research': [49, 20],
+    'Conceptual and foundations research': [45.5, 24.8],
+    'Interpretability and model understanding': [54, 26.2],
+    'Capabilities research': [55.8, 21.4],
   },
   roads: [
     // In from the arrival harbour to the west gate of the castle town, down
@@ -276,18 +278,17 @@ export const MAP_35_SPEC: RealmMapSpec = {
     // between the cove's land and the Talent pipeline.
     'Forums and online communities': { seed: [26, 12.2] },
   },
-  // Out from the castle town at leisure. Through Policy and strategy in one
-  // easy arc: up over Macrostrategy, by the Governments district to the
-  // north, through the think tanks and out to Lobbying on the east tip, with
-  // Standards beside the way, on the border with Evaluations. Through
-  // Technical research: by Alignment, down through Conceptual research on
-  // the south coast, up to Evaluations and out to Capabilities, with
-  // Interpretability beside the way.
+  // Out from the castle town at leisure, each in one easy line. Through Policy
+  // and strategy: over Macrostrategy, through the think tanks and out to
+  // Lobbying on the east tip, with the Governments district beside the way to
+  // the north and Standards to the south, on the border with Evaluations.
+  // Through Technical research: by Alignment, down through Conceptual research
+  // and out to Capabilities, with Evaluations beside the way to the north and
+  // Interpretability to the south.
   trails: [
     [
       'Career support and placement',
       'Macrostrategy and forecasting',
-      'Governments and multi-stakeholder bodies',
       'Policy research and think tanks',
       'Policy advocacy and lobbying',
     ],
@@ -295,7 +296,6 @@ export const MAP_35_SPEC: RealmMapSpec = {
       'Career support and placement',
       'Alignment and control',
       'Conceptual and foundations research',
-      'Evaluations and threat research',
       'Capabilities research',
     ],
   ],

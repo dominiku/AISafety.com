@@ -41,6 +41,8 @@
 // Everything is deterministic: the same records give the same map. Pure
 // module with no dependencies, so it can be unit tested.
 
+import { splitByHalves } from './map-realm-split'
+
 export interface LayoutPin {
   id: string
   realm: string
@@ -1145,18 +1147,35 @@ export function layoutRealmMap(
       )
       return cellOf(there, there.indexOf(sites[index]), sideOfRoad(side))
     }
+    // Beside a road or round the cove a district is its cell of the power
+    // diagram. Any other realm is divided by halving (map-realm-split.ts),
+    // which gives chunkier districts: a cell there is often a strip right
+    // across the realm, or a wedge in a corner of it.
+    const halved =
+      road || harbour
+        ? null
+        : splitByHalves(
+            open.map((i): Point => [xs[i], ys[i]]),
+            sites.map(site => ({
+              share: site.share,
+              anchor: [site.homeX, site.homeY],
+            })),
+            frame
+          )
     shared.forEach(([district, inDistrict], index) => {
       planned.push({
         district,
         realm,
         pins: inDistrict,
         block: false,
-        pieces: road
-          ? ([-1, 1] as const)
-              .filter(side => [0, side].includes(sideOfSite[index]))
-              .map(side => pieceOn(index, side))
-              .filter(piece => piece.length > 0)
-          : [cellOf(sites, index, frame)],
+        pieces: halved
+          ? [halved[index]]
+          : road
+            ? ([-1, 1] as const)
+                .filter(side => [0, side].includes(sideOfSite[index]))
+                .map(side => pieceOn(index, side))
+                .filter(piece => piece.length > 0)
+            : [cellOf(sites, index, frame)],
       })
     })
     planned.push(...towns)
