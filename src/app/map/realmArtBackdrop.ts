@@ -151,6 +151,11 @@ const PIER_LENGTH = 1.7
 const ROAD_STRETCHES = 5
 const ROAD_WIDTH = 24
 const ROAD_BEND = 46
+const STREET_WIDTH = 17
+// The training town's art: where the gap between its houses is (a share of
+// its width from its middle) and where its two rows' streets are (shares of
+// its height from its middle).
+const TOWN_STREET = { across: 0.2, near: -0.08, far: 0.3 }
 
 // The map's frame, in grid units.
 const FRAME = { width: 60, height: 32.7 }
@@ -197,7 +202,12 @@ function landmarksFor(
     layout.districtAt,
     onLand,
     FRAME,
-    taken
+    [
+      ...taken,
+      ...layout.roads
+        .flatMap(alongLine)
+        .map(([x, y]) => ({ x, y, radius: 1.6 })),
+    ]
   )
 
   const [harbourX, harbourY] = layout.landmarks.arrivalHarbour
@@ -452,7 +462,8 @@ export function artBackdropMarkup(
     const inOrder = [...shore].sort(
       (a, b) => bearing(a.middle) - bearing(b.middle)
     )
-    const mouths = [0.2, 0.42, 0.64, 0.86].flatMap(share => {
+    // Kept in from the ends of the coast, so no arm runs along a border.
+    const mouths = [0.3, 0.47, 0.64, 0.8].flatMap(share => {
       const stretch = inOrder[Math.floor(share * inOrder.length)]
       return stretch ? [stretch.middle] : []
     })
@@ -632,28 +643,62 @@ export function artBackdropMarkup(
       `<path d="${curve(trail)}" fill="none" stroke="${FOOTPATH}" stroke-width="7" stroke-dasharray="16 12" stroke-linecap="round"/>`
     )
   }
+  // Dark pebbles strewn along a road, the same every time.
+  const pebbles = (line: Point[], across: number) =>
+    alongLine(line).forEach(([x, y], n) => {
+      if (n % 2 === 1) return
+      const roll = Math.sin((n + line[0][0]) * 12.9898) * 43758.5453
+      const side = (roll - Math.floor(roll) - 0.5) * across * 0.55
+      out.push(
+        `<circle cx="${(x * g + side).toFixed(1)}" cy="${(y * g + side * 0.6).toFixed(1)}" r="${n % 3 === 0 ? 3.2 : 2.2}" fill="${ROAD_PEBBLE}"/>`
+      )
+    })
   // The road as the classic map draws its brown one: one flat brown, in a few
   // straight stretches with eased bends (not a winding curve), and dark
   // pebbles strewn along it.
   for (const road of layout.roads) {
+    // A road the spec gives bends to is drawn through them; one laid as a
+    // wave is drawn through a few of its points.
     const every = Math.max(1, Math.round((road.length - 1) / ROAD_STRETCHES))
-    const corners = road.filter(
-      (_, n) => n % every === 0 || n === road.length - 1
-    )
+    const corners =
+      road.length <= ROAD_STRETCHES + 2
+        ? road
+        : road.filter((_, n) => n % every === 0 || n === road.length - 1)
     out.push(
       `<path d="${easedLine(
         corners.map(([x, y]): Point => [x * g, y * g]),
         ROAD_BEND
       )}" fill="none" stroke="${ROAD}" stroke-width="${ROAD_WIDTH}" stroke-linejoin="round"/>`
     )
-    alongLine(corners).forEach(([x, y], n) => {
-      if (n % 2 === 1) return
-      const roll = Math.sin(n * 12.9898) * 43758.5453
-      const side = (roll - Math.floor(roll) - 0.5) * ROAD_WIDTH * 0.55
+    pebbles(corners, ROAD_WIDTH)
+
+    // A street from the road to the town that stands beside it, down the gap
+    // between its houses to the row of them farther from the road.
+    const town = landmarks.find(mark => mark.symbol === 'training-town')
+    const streetX = town ? town.x + town.width * TOWN_STREET.across : null
+    const onRoad = corners.findIndex(
+      (corner, n) =>
+        streetX !== null &&
+        n + 1 < corners.length &&
+        (corner[0] - streetX) * (corners[n + 1][0] - streetX) <= 0
+    )
+    if (town && streetX !== null && onRoad >= 0) {
+      const [ax, ay] = corners[onRoad]
+      const [bx, by] = corners[onRoad + 1]
+      const roadY = ay + ((by - ay) * (streetX - ax)) / (bx - ax || 1)
+      const below = town.y > roadY
+      const street: Point[] = [
+        [streetX, roadY],
+        [
+          streetX,
+          town.y + town.height * (below ? TOWN_STREET.far : TOWN_STREET.near),
+        ],
+      ]
       out.push(
-        `<circle cx="${(x * g + side * 0.3).toFixed(1)}" cy="${(y * g + side).toFixed(1)}" r="${n % 3 === 0 ? 3.2 : 2.2}" fill="${ROAD_PEBBLE}"/>`
+        `<path d="M${street.map(px).join('L')}" fill="none" stroke="${ROAD}" stroke-width="${STREET_WIDTH}"/>`
       )
-    })
+      pebbles(street, STREET_WIDTH)
+    }
   }
 
   // Planks: the boardwalk to the cove, and a pier out from the arrival
