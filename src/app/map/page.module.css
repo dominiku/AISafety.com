@@ -372,48 +372,82 @@
 }
 
 /* ===============================
-   Explorer: the column (search, chips, sort, cards) beside the map.
-   Utilities can't express two independently scrolling panes of fixed and
-   fluid width, so the frame is written here; everything inside the column
-   uses the shared components and utilities.
+   Explorer: the map is the page; search, filter chips and then the details
+   card or the results drawer float over its left side. Utilities can't
+   express a pane sized to the viewport with an overlay column that scrolls
+   inside it, so the frame is written here; everything inside uses the shared
+   components and utilities where they exist.
    =============================== */
 
-/* Fills the viewport under the 88px navbar, with 24px to spare, so both
-   panes are fully on screen once the title has scrolled away. */
-.explorer {
+/* One line of title and one of facts, 64px tall, so the pane below can be
+   sized to what is left of the viewport. */
+.explorer-title-row {
   display: flex;
-  height: calc(100vh - 112px);
-  min-height: 600px;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 24px;
+  height: 64px;
+  padding-top: 12px;
+}
+
+/* The page title is smaller than the site's 72px h1: this page is a tool,
+   and every line the title takes is a line the map loses. Tracking keeps the
+   h1's -6%. */
+.explorer-title {
+  font-size: 32px;
+  letter-spacing: -1.92px;
+  white-space: nowrap;
+}
+
+/* The map pane: the viewport under the 88px navbar and the 64px title row,
+   with 24px to spare. */
+.explorer {
+  position: relative;
+  height: calc(100vh - 88px - 64px - 24px);
+  min-height: 640px;
+  border: 1px solid color-mix(in srgb, var(--teal-bright-300) 12%, transparent);
   border-radius: 16px;
   background-color: var(--teal-900);
   overflow: hidden;
 }
 
-.explorer-list {
-  flex: none;
-  width: 600px;
-  padding: 24px;
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--teal-700) transparent;
+.explorer-map {
+  position: absolute;
+  inset: 0;
 }
 
-.explorer-list ul {
-  list-style: none;
+/* The map fills its pane instead of the viewport. */
+.explorer-map .map-container {
+  height: 100%;
+  min-height: 0;
 }
 
-/* The page title is smaller than the site's 72px h1: this page is a tool,
-   and every line the title takes is a line the map and the list lose.
-   Tracking keeps the h1's -6%. (Figma: map3.5_v1, "Page Title".) */
-.explorer-title {
-  font-size: 48px;
-  letter-spacing: -2.88px;
+/* The overlay column. It lets clicks through to the map wherever it has
+   nothing of its own. Same z-index reasoning as .map-controls: below the
+   assistant scrim/panel/pill (96-100). */
+.explorer-overlay {
+  position: absolute;
+  top: 16px;
+  bottom: 16px;
+  left: 16px;
+  z-index: 95;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 376px;
+  pointer-events: none;
 }
 
-/* The design system's inline search field (Figma: Search Field, Inline):
-   a 48px pill on a 7% white fill, with the magnifying glass inside. */
+.explorer-overlay > * {
+  pointer-events: auto;
+}
+
+/* The design system's inline search field (Figma: Search Field, Inline): a
+   48px pill with the magnifying glass inside. Over the map it needs a solid
+   fill to be read. */
 .explorer-search {
   position: relative;
+  flex: none;
 }
 
 .explorer-search-icon {
@@ -436,7 +470,7 @@ select.explorer-sort {
   height: 48px;
   border-color: var(--teal-500);
   border-radius: 24px;
-  background-color: color-mix(in srgb, var(--white) 7%, transparent);
+  background-color: var(--teal-850);
   color: var(--white);
   font-size: 15px;
   letter-spacing: -0.3px;
@@ -444,6 +478,7 @@ select.explorer-sort {
 
 .explorer-search-input {
   padding-left: 42px;
+  box-shadow: var(--shadow-dark);
 }
 
 .explorer-search-input::placeholder {
@@ -458,125 +493,395 @@ select.explorer-sort {
   }
 }
 
-.explorer-collapsed .explorer-list {
-  display: none;
-}
-
-.explorer-map {
-  position: relative;
-  flex: 1;
-  min-width: 0;
-}
-
-/* The map fills its pane instead of the viewport. */
-.explorer-map .map-container {
-  height: 100%;
-  min-height: 0;
-}
-
-/* The tab on the seam between the panes. Same z-index reasoning as
-   .map-controls: below the assistant scrim/panel/pill (96-100). */
-.explorer-edge-tab {
-  position: absolute;
-  top: 50%;
-  left: 0;
-  z-index: 95;
+/* A plain toggle pill beside the filter dropdowns, sized and colored like
+   theirs (FilterDropdown.module.css .pill / .pillActive). */
+.explorer-pill {
   display: flex;
   align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 64px;
-  transform: translateY(-50%);
-  border: 1px solid var(--teal-700);
-  border-left: none;
-  border-radius: 0 12px 12px 0;
-  background-color: var(--teal-850);
-  color: var(--white);
+  gap: 4px;
+  height: 40px;
+  padding: 7px 16px;
+  border-radius: 100px;
+  color: var(--teal-300);
   cursor: pointer;
-  transition: background-color var(--hover-transition);
+  transition: all var(--hover-transition);
 }
 
-.explorer-edge-tab:hover {
-  background-color: var(--teal-800);
+.explorer-pill:hover {
+  border-color: var(--teal-bright-750);
 }
 
-/* One chevron, turned: left to hide the list, right to show it. */
-.explorer-edge-tab > span {
-  transform: rotate(90deg);
+.explorer-pill-active {
+  background: var(--teal-bright-800);
+  color: var(--white);
 }
 
-.explorer-collapsed .explorer-edge-tab > span {
-  transform: rotate(-90deg);
-}
-
-.explorer-show-list {
-  position: absolute;
-  top: 24px;
-  left: 24px;
-  z-index: 95;
-}
-
-/* PROTOTYPE dim/hide switch: bottom-left of the map. */
-.explorer-nonmatching {
-  position: absolute;
-  bottom: 24px;
-  left: 24px;
-  z-index: 95;
-}
-
-.explorer-pane-switch {
-  display: none;
-}
-
-/* "Clear all" reads as a text link; this only removes the browser's button
-   box. Its type, color and underline are utilities. */
+/* "Clear all" and the like read as text links; this only removes the
+   browser's button box. Type, color and underline are utilities. */
 .explorer-clear {
   padding: 0;
   border: none;
   background: none;
 }
 
+/* The results drawer fills what is left of the column. */
+.explorer-drawer {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.explorer-drawer[hidden],
+.explorer[data-drawer='closed'] .explorer-drawer {
+  display: none;
+}
+
+.explorer-drawer-head,
+.explorer-drawer-others {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--teal-700);
+}
+
 select.explorer-sort {
-  width: 180px;
+  width: 152px;
+  height: 40px;
 }
 
-.explorer-card-selected {
-  outline: 2px solid var(--teal-bright-400);
+.explorer-count {
+  white-space: nowrap;
 }
 
-/* One pane at a time, chosen with the List / Map switch. The collapse toggle
-   is a two-pane idea and is not offered here. */
+.explorer-drawer-list {
+  flex: 1;
+  min-height: 0;
+  padding: 8px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--teal-700) transparent;
+}
+
+.explorer-drawer-list ul,
+.details-nearby ul,
+.details-chips {
+  list-style: none;
+}
+
+/* One organization in the drawer: the whole 64px row is the button. */
+.result-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 64px;
+  padding: 8px;
+  border: none;
+  border-radius: 12px;
+  background: none;
+  color: var(--white);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--hover-transition);
+}
+
+.result-row:hover {
+  background-color: var(--teal-bright-850);
+}
+
+.result-row-selected {
+  background-color: var(--teal-bright-800);
+}
+
+/* Map logos are drawn for a white disc, like the pins. */
+.result-row-logo {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background-color: var(--white);
+  overflow: hidden;
+}
+
+.result-row-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.result-row-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.result-row-name {
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.result-row-category {
+  overflow: hidden;
+  color: var(--teal-300);
+  font-size: 13px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The shared chevron points down; here it points on to the details. */
+.result-row-chevron {
+  flex: none;
+  transform: rotate(-90deg);
+}
+
+/* The selected organization's details: docked in the column on a desktop, a
+   bottom sheet on a phone (below). */
+.details-card {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.details-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 12px 0 20px;
+}
+
+.details-place {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 12px;
+  border-radius: 100px;
+  background-color: var(--teal-bright-800);
+  color: var(--teal-bright-300);
+}
+
+.details-title {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.details-close {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--white);
+  cursor: pointer;
+  transition: background-color var(--hover-transition);
+}
+
+.details-close:hover {
+  background-color: var(--teal-bright-800);
+}
+
+.details-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 12px 20px 20px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--teal-700) transparent;
+}
+
+/* Card logos are made for the dark card, so there is no white plate. */
+.details-logo {
+  flex: none;
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  object-fit: contain;
+}
+
+.details-name {
+  font-size: 22px;
+  font-weight: 300;
+  line-height: 28px;
+  letter-spacing: -0.44px;
+}
+
+.details-name:focus {
+  outline: none;
+}
+
+.details-description {
+  font-size: 15px;
+  font-weight: 300;
+  line-height: 22px;
+}
+
+.details-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.details-chip {
+  padding: 4px 12px;
+  border: 1px solid var(--teal-700);
+  border-radius: 100px;
+  color: var(--teal-300);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.details-chip-category {
+  border-color: transparent;
+  background-color: var(--teal-bright-800);
+  color: var(--teal-bright-300);
+}
+
+.details-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.details-nearby {
+  align-self: stretch;
+  padding-top: 16px;
+  border-top: 1px solid var(--teal-700);
+}
+
+/* How to read the map: bottom right, out of the way of the assistant pill. */
+.explorer-legend {
+  position: absolute;
+  right: 88px;
+  bottom: 16px;
+  z-index: 95;
+  width: 280px;
+  padding: 16px;
+  border-radius: 16px;
+  background-color: color-mix(in srgb, var(--teal-850) 92%, transparent);
+}
+
+.explorer-legend ul {
+  padding-left: 16px;
+}
+
+.explorer-pane-switch {
+  display: none;
+}
+
+/* On a desktop the details card takes the whole column: the search and the
+   chips make way for it. (A phone's details are a sheet at the bottom, so
+   they stay.) */
+@media (min-width: 992px) {
+  .explorer-overlay[data-selected] .explorer-controls {
+    display: none;
+  }
+}
+
+/* A phone shows one thing at a time, chosen with the List / Map switch: the
+   search and chips stay on top, then the list or the map. The details card
+   is a sheet over the bottom of the screen. */
 @media (max-width: 991px) {
+  .explorer-title-row {
+    height: auto;
+    flex-direction: column;
+    gap: 4px;
+    padding-bottom: 8px;
+  }
+
+  .explorer-title {
+    font-size: 24px;
+    letter-spacing: -1.44px;
+  }
+
   .explorer {
+    display: flex;
     flex-direction: column;
     height: auto;
     min-height: 0;
+    border: none;
     overflow: visible;
   }
 
   .explorer-pane-switch {
     display: flex;
     justify-content: center;
-    padding: 16px;
+    order: -2;
+    padding: 0 16px 16px;
   }
 
-  .explorer-list,
-  .explorer-collapsed .explorer-list {
-    display: block;
+  .explorer-overlay {
+    position: static;
+    order: -1;
     width: 100%;
     padding: 0 16px 16px;
-    overflow-y: visible;
+    pointer-events: auto;
   }
 
   .explorer-map {
-    flex: none;
+    position: relative;
+    inset: auto;
     height: calc(100dvh - 88px - 72px);
   }
 
-  .explorer[data-pane='map'] .explorer-list,
+  .explorer-drawer,
+  .explorer[data-drawer='closed'] .explorer-drawer {
+    display: flex;
+  }
+
+  .explorer-drawer[hidden] {
+    display: none;
+  }
+
+  .explorer-drawer-list {
+    overflow-y: visible;
+  }
+
+  .explorer[data-pane='map'] .explorer-drawer,
   .explorer[data-pane='list'] .explorer-map,
-  .explorer-edge-tab,
-  .explorer-show-list {
+  .explorer-pill,
+  .explorer-legend {
+    display: none;
+  }
+
+  .details-card {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 95;
+    max-height: 372px;
+    border-radius: 16px 16px 0 0;
+  }
+
+  /* The sheet is short: what else is nearby is left to the list. */
+  .details-nearby {
     display: none;
   }
 }

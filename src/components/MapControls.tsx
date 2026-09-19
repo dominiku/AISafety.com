@@ -20,21 +20,36 @@ export default function MapControls({
   return (
     <div className={className}>
       <div className={styles.group}>
-        <button className={styles.button} title="Zoom in" onClick={onZoomIn}>
+        <button
+          className={styles.button}
+          title="Zoom in"
+          aria-label="Zoom in"
+          onClick={onZoomIn}
+        >
           <Icon
             src="/images/icons/plus.svg"
             size={16}
             className="color-white"
           />
         </button>
-        <button className={styles.button} title="Zoom out" onClick={onZoomOut}>
+        <button
+          className={styles.button}
+          title="Zoom out"
+          aria-label="Zoom out"
+          onClick={onZoomOut}
+        >
           <Icon
             src="/images/icons/minus.svg"
             size={16}
             className="color-white"
           />
         </button>
-        <button className={styles.button} title="Zoom to fit" onClick={onReset}>
+        <button
+          className={styles.button}
+          title="Zoom to fit"
+          aria-label="Zoom to fit the whole map"
+          onClick={onReset}
+        >
           <Icon
             src="/images/icons/scan.svg"
             size={16}

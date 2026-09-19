@@ -19,7 +19,6 @@ import ModeToggle from '@/components/ModeToggle'
 import RelativeDate from '@/components/RelativeDate'
 import SearchBar from '@/components/SearchBar'
 import CardsViewTracker from '@/components/CardsViewTracker'
-import { placementsById } from '@/lib/placements'
 import { filterItems, optionCounts } from '@/lib/filter-counts'
 import { isPlacedOnMap } from '@/lib/map-images'
 import {
@@ -34,7 +33,9 @@ import {
 } from '@/lib/map-explorer'
 import type { MapOrg } from '@/lib/data/map'
 import type { MapExplorerLink } from './D3Map'
-import MapOrgCard from './MapOrgCard'
+import { mapAreaFor } from '@/lib/data/map-areas'
+import MapListingDetails from './MapListingDetails'
+import MapResultRow from './MapResultRow'
 import styles from './page.module.css'
 
 const D3Map = dynamic(() => import('./D3Map'), {
@@ -79,6 +80,9 @@ const NO_STATUS = 'any'
 
 const COLLAPSED_STORAGE_KEY = 'map-list-collapsed'
 const LIST_ID = 'map-explorer-list'
+const LEGEND_ID = 'map-explorer-legend'
+// The overlay on the map's left side: a 376px column, 16px in from the edge.
+const OVERLAY_WIDTH = 408
 
 const sameValues = (a: string[], b: string[]) =>
   a.length === b.length && a.every(value => b.includes(value))
@@ -105,9 +109,11 @@ interface MapExplorerProps {
   dataToggle: ReactNode
 }
 
-// The /map explorer: one column (search, filter chips, sort, cards) beside
-// the map, with a toggle that hides the column. The column is the accessible
-// way to everything on the map; the map follows it.
+// The /map explorer: the map is the page, and everything else floats over its
+// left side — search, filter chips, and then either the selected org's
+// details or a drawer of results. Selecting (a pin or a row) opens details;
+// nothing on the map itself leaves the site. The drawer is the accessible way
+// to everything on the map; the map follows it.
 export default function MapExplorer({
   orgs,
   lastUpdatedIso,
@@ -123,7 +129,12 @@ export default function MapExplorer({
   const [sort, setSort] = useState<ExplorerSort>(DEFAULT_EXPLORER_STATE.sort)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [highlightedId, setHighlightedId] = useState<string | null>(null)
-  const [collapsed, setCollapsed] = useState(false)
+  // The results drawer starts closed, so the first thing seen is the map.
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [legendOpen, setLegendOpen] = useState(true)
+  // ?tuning=1 shows the developers' tools: the zoom-tier panel and the
+  // prototype's data source switch.
+  const [tuning, setTuning] = useState(false)
   // Below the breakpoint there is one pane at a time.
   const [pane, setPane] = useState<'list' | 'map'>('list')
   // PROTOTYPE: which treatment of non-matching pins reads better is an open
@@ -131,7 +142,6 @@ export default function MapExplorer({
   const [nonMatching, setNonMatching] = useState<'hide' | 'dim'>('dim')
 
   const searchRef = useRef<HTMLInputElement>(null)
-  const showListRef = useRef<HTMLButtonElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const mapApiRef = useRef<{ panTo: (id: string) => void }>({
     panTo: () => {},
@@ -201,8 +211,8 @@ export default function MapExplorer({
       ),
     [listed, basePass, groups]
   )
-  const placements = useMemo(() => placementsById(shown), [shown])
 
+  const showInactive = statuses.includes('No longer active')
   const isFiltered =
     query.trim() !== '' ||
     categories.length > 0 ||
@@ -245,7 +255,9 @@ export default function MapExplorer({
         },
         sort,
         selected: selectedId,
-        collapsed,
+        // Whether the drawer is open is this visitor's habit, not part of a
+        // link: it is kept in their browser, never in the address.
+        collapsed: false,
       },
       FILTER_KEYS
     ).toString()
@@ -254,7 +266,7 @@ export default function MapExplorer({
     url.search = next
     // history.state is passed through: Next.js keeps its routing state there.
     window.history.replaceState(window.history.state, '', url)
-  }, [settledQuery, categories, statuses, sort, selectedId, collapsed])
+  }, [settledQuery, categories, statuses, sort, selectedId])
 
   const readUrl = useCallback(
     (params: string) => {
@@ -278,46 +290,39 @@ export default function MapExplorer({
             : urlStatuses.filter(s => STATUSES.includes(s))
       )
       setSort(state.sort)
-      setSelectedId(
+      const linked =
         state.selected && listed.some(org => org.id === state.selected)
           ? state.selected
           : null
-      )
-      if (state.collapsed) {
-        setCollapsed(true)
-      } else if (first) {
-        // No say in the link: fall back to what this visitor chose last time.
-        // Storage can be blocked; the list then simply starts open.
+      setSelectedId(linked)
+      // On a phone a shared link lands on the map, with the details sheet
+      // over it.
+      if (linked && isSinglePane()) setPane('map')
+      setTuning(new URLSearchParams(params).get('tuning') === '1')
+      if (first) {
+        // What this visitor chose last time. Storage can be blocked; the
+        // drawer then simply starts closed.
         try {
-          setCollapsed(localStorage.getItem(COLLAPSED_STORAGE_KEY) === '1')
+          setDrawerOpen(localStorage.getItem(COLLAPSED_STORAGE_KEY) === '0')
         } catch {
-          setCollapsed(false)
+          setDrawerOpen(false)
         }
-      } else {
-        setCollapsed(false)
       }
     },
     [listed]
   )
 
-  // A shared link's selected card is brought into view once it is drawn.
-  const scrolledToSelectedRef = useRef(false)
-  useEffect(() => {
-    if (scrolledToSelectedRef.current || !selectedId) return
-    scrolledToSelectedRef.current = true
-    document.getElementById(selectedId)?.scrollIntoView({ block: 'nearest' })
-  }, [selectedId])
-
-  // ── Sidebar toggle ───────────────────────────────────────────────────────
-  // Focus follows the toggle: collapsing lands on "Show list", expanding on
-  // the search field.
+  // ── Results drawer ───────────────────────────────────────────────────────
+  // Focus follows the toggle: opening lands on the search field, closing
+  // stays on the pill that closed it.
   const focusAfterToggleRef = useRef(false)
-  const toggleCollapsed = () => {
-    const next = !collapsed
-    focusAfterToggleRef.current = true
-    setCollapsed(next)
+  const toggleDrawer = () => {
+    const next = !drawerOpen
+    focusAfterToggleRef.current = next
+    setDrawerOpen(next)
+    setLegendOpen(false)
     try {
-      localStorage.setItem(COLLAPSED_STORAGE_KEY, next ? '1' : '0')
+      localStorage.setItem(COLLAPSED_STORAGE_KEY, next ? '0' : '1')
     } catch {
       // Storage blocked: the choice just isn't remembered.
     }
@@ -325,76 +330,129 @@ export default function MapExplorer({
   useEffect(() => {
     if (!focusAfterToggleRef.current) return
     focusAfterToggleRef.current = false
-    if (collapsed) showListRef.current?.focus()
-    else searchRef.current?.focus()
-  }, [collapsed])
+    searchRef.current?.focus()
+  }, [drawerOpen])
 
-  // ── List and map sync ────────────────────────────────────────────────────
-  const scrollToCard = (id: string) => {
-    // After the render that may have opened the list or switched the pane.
+  // ── Selection ────────────────────────────────────────────────────────────
+  const selectedIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    selectedIdRef.current = selectedId
+  }, [selectedId])
+  // A row is brought into view inside the drawer only: the page itself never
+  // scrolls because something was selected.
+  const showRow = (id: string) => {
     requestAnimationFrame(() => {
-      document.getElementById(id)?.scrollIntoView({
-        block: 'nearest',
-        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
-          ? 'auto'
-          : 'smooth',
-      })
+      const list = listRef.current
+      const row = document.getElementById(id)
+      if (!list || !row || !list.contains(row)) return
+      const top = row.offsetTop - list.offsetTop
+      if (top < list.scrollTop) list.scrollTop = top
+      else if (top + row.offsetHeight > list.scrollTop + list.clientHeight) {
+        list.scrollTop = top + row.offsetHeight - list.clientHeight
+      }
     })
   }
-  const selectFromCard = (id: string) => {
-    if (selectedId === id) {
-      setSelectedId(null)
-      return
-    }
+  const select = useCallback((id: string) => {
     setSelectedId(id)
-    mapApiRef.current.panTo(id)
-  }
-  const selectFromPin = useCallback((id: string) => {
-    setSelectedId(id)
-    // The card is where the org's details and its link are, so it has to be
-    // on screen: open the list, or switch to it below the breakpoint.
-    setCollapsed(false)
-    if (isSinglePane()) setPane('list')
-    scrollToCard(id)
+    setLegendOpen(false)
+    // Below the breakpoint the details sheet sits over the map.
+    if (isSinglePane()) setPane('map')
+    // After the render, so the map pans clear of the details card.
+    requestAnimationFrame(() => mapApiRef.current.panTo(id))
   }, [])
+  const clearSelection = useCallback(() => {
+    if (selectedIdRef.current) showRow(selectedIdRef.current)
+    setSelectedId(null)
+  }, [])
+
+  // A shared link's pin is shown once the map is there to show it.
+  const onMapReady = useCallback(() => {
+    if (selectedIdRef.current) mapApiRef.current.panTo(selectedIdRef.current)
+  }, [])
+
+  const selected = useMemo(
+    () => listed.find(org => org.id === selectedId) ?? null,
+    [listed, selectedId]
+  )
+  const firstCategory = (org: MapOrg) => org.category.split(',')[0].trim()
+  const selectedPlace = selected ? mapAreaFor(selected.category) : null
+  const inSelectedPlace = useMemo(
+    () =>
+      selected
+        ? listed.filter(
+            org =>
+              org.status === 'Active' &&
+              firstCategory(org) === firstCategory(selected)
+          )
+        : [],
+    [listed, selected]
+  )
 
   const matchingIds = useMemo(
     () =>
       shown.length === listed.length ? null : new Set(shown.map(o => o.id)),
     [shown, listed]
   )
+  const overlayOpen = selected !== null || drawerOpen
   const explorerLink = useMemo(
     (): MapExplorerLink => ({
       matchingIds,
       nonMatching,
       selectedId,
       highlightedId,
-      onSelect: selectFromPin,
+      onSelect: select,
+      onClear: clearSelection,
+      leftInset: overlayOpen && !isSinglePane() ? OVERLAY_WIDTH : 0,
       apiRef: mapApiRef,
+      onReady: onMapReady,
     }),
-    [matchingIds, nonMatching, selectedId, highlightedId, selectFromPin]
+    [
+      matchingIds,
+      nonMatching,
+      selectedId,
+      highlightedId,
+      select,
+      clearSelection,
+      overlayOpen,
+      onMapReady,
+    ]
   )
+
+  // The places the counted orgs stand in (closed orgs have a place of their
+  // own, which counts only while they are shown).
+  const areaCount = new Set(
+    filterItems(listed, () => true, { status: groups.status }).map(org =>
+      mapAreaFor(org.category)
+    )
+  ).size
 
   return (
     <>
       <Suspense fallback={null}>
         <ParamSync onParams={readUrl} />
       </Suspense>
-      <div className="container-wide padding-top-8px padding-bottom-40px">
-        <h1 className={`padding-bottom-12px ${styles['explorer-title']}`}>
+      <div className={`container-wide ${styles['explorer-title-row']}`}>
+        <h1 className={styles['explorer-title']}>
           Map of AI Existential Safety
         </h1>
-        {lastUpdatedIso && (
-          <RelativeDate
-            iso={lastUpdatedIso}
-            className="paragraph-xs color-white"
-          />
-        )}
+        <p className="paragraph-small color-teal-300">
+          {total} organizations in {areaCount} areas ·{' '}
+          <button
+            type="button"
+            className={`color-teal-bright-300 underline cursor-pointer ${styles['explorer-clear']}`}
+            aria-expanded={legendOpen}
+            aria-controls={LEGEND_ID}
+            onClick={() => setLegendOpen(open => !open)}
+          >
+            How to read the map
+          </button>
+        </p>
       </div>
 
       <div
-        className={`container-wide ${styles.explorer}${collapsed ? ` ${styles['explorer-collapsed']}` : ''}`}
+        className={`container-wide ${styles.explorer}`}
         data-pane={pane}
+        data-drawer={drawerOpen ? 'open' : 'closed'}
       >
         <div className={styles['explorer-pane-switch']}>
           <ModeToggle
@@ -408,16 +466,44 @@ export default function MapExplorer({
           />
         </div>
 
-        <section
-          id={LIST_ID}
-          ref={listRef}
-          aria-label="Organizations"
-          className={styles['explorer-list']}
+        <section aria-label="Map" className={styles['explorer-map']}>
+          <D3Map
+            orgs={mapOrgs}
+            suggestEntryUrl={suggestEntryLink}
+            tuning={tuning}
+            explorer={explorerLink}
+          />
+          {tuning && dataToggle}
+          {!overlayOpen && (
+            <aside
+              id={LEGEND_ID}
+              aria-label="How to read the map"
+              className={`border-plus-fill ${styles['explorer-legend']}`}
+              hidden={!legendOpen}
+            >
+              <p className="paragraph-small-bold padding-bottom-8px">
+                How to read the map
+              </p>
+              <ul className="paragraph-xs color-teal-300">
+                <li>Each place on the island is a category of work.</li>
+                <li>A bigger logo marks a larger organization.</li>
+                <li>Zooming in shows more organizations.</li>
+                <li>Selecting a logo shows its details.</li>
+              </ul>
+            </aside>
+          )}
+        </section>
+
+        {/* Over the map's left side: search and filters with the results
+            drawer under them, or the selected org's details in their place. */}
+        <div
+          className={styles['explorer-overlay']}
+          data-selected={selected ? 'true' : undefined}
         >
           <CardsViewTracker page="Map" />
           <div
             role="search"
-            className={`padding-bottom-16px ${styles['explorer-search']}`}
+            className={`${styles['explorer-search']} ${styles['explorer-controls']}`}
           >
             <span
               className={styles['explorer-search-icon']}
@@ -433,7 +519,9 @@ export default function MapExplorer({
             />
           </div>
 
-          <div className="flex flex-wrap items-center gap-8px padding-bottom-16px">
+          <div
+            className={`flex flex-wrap items-center gap-8px ${styles['explorer-controls']}`}
+          >
             <FilterDropdown
               trackingPage="Map"
               title="Category"
@@ -449,146 +537,167 @@ export default function MapExplorer({
                 )
               }
             />
-            <FilterDropdown
-              trackingPage="Map"
-              title="Status"
-              options={STATUSES}
-              selected={statuses}
-              counts={statusCounts}
-              countLabel
-              onToggle={value =>
-                setStatuses(current =>
-                  current.includes(value)
-                    ? current.filter(s => s !== value)
-                    : [...current, value]
-                )
+            <button
+              type="button"
+              className={`border-plus-fill paragraph-small ${styles['explorer-pill']}${showInactive ? ` ${styles['explorer-pill-active']}` : ''}`}
+              aria-pressed={showInactive}
+              onClick={() =>
+                setStatuses(showInactive ? DEFAULT_STATUSES : STATUSES)
               }
-            />
+            >
+              <Icon src="/images/icons/eye.svg" size={16} />
+              Show inactive · {statusCounts['No longer active'] ?? 0}
+            </button>
+            <button
+              type="button"
+              className={`border-plus-fill paragraph-small ${styles['explorer-pill']}${drawerOpen ? ` ${styles['explorer-pill-active']}` : ''}`}
+              aria-expanded={drawerOpen}
+              aria-controls={LIST_ID}
+              onClick={toggleDrawer}
+            >
+              <Icon src="/images/icons/list.svg" size={16} />
+              List · {shown.length}
+            </button>
             {isFiltered && (
               <button
                 type="button"
-                className={`paragraph-small-bold color-teal-bright-300 underline cursor-pointer ${styles['explorer-clear']}`}
+                className={`border-plus-fill paragraph-small ${styles['explorer-pill']}`}
                 onClick={clearAll}
               >
+                <Icon src="/images/icons/x.svg" size={16} />
                 Clear all
               </button>
             )}
           </div>
+          {/* Announced apart from the visible count, so a screen reader hears
+              it once typing stops instead of on every keystroke. */}
+          <p role="status" className="visually-hidden">
+            {announced}
+          </p>
 
-          <div className="flex items-center justify-between gap-16px padding-bottom-16px">
-            <p className="paragraph-small color-teal-300">{countLabel}</p>
-            {/* Announced apart from the visible count, so a screen reader
-                hears it once typing stops instead of on every keystroke. */}
-            <p role="status" className="visually-hidden">
-              {announced}
-            </p>
-            <label className="flex items-center gap-8px">
-              <span className="visually-hidden">Sort by</span>
-              <select
-                className={`text-field ${styles['explorer-sort']}`}
-                value={sort}
-                onChange={event => setSort(event.target.value as ExplorerSort)}
-              >
-                {EXPLORER_SORTS.map(option => (
-                  <option key={option} value={option}>
-                    {SORT_LABELS[option]}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-
-          {shown.length > 0 ? (
-            <ul className="flex flex-col gap-16px padding-bottom-24px">
-              {shown.map(org => (
-                <li
-                  key={org.id}
-                  onMouseEnter={() => setHighlightedId(org.id)}
-                  onMouseLeave={() => setHighlightedId(null)}
-                  onFocus={() => setHighlightedId(org.id)}
-                  onBlur={() => setHighlightedId(null)}
-                >
-                  <MapOrgCard
-                    org={org}
-                    placement={placements.get(org.id)}
-                    selected={org.id === selectedId}
-                    onSelect={() => selectFromCard(org.id)}
-                  />
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <div className="padding-bottom-24px">
-              <p className="paragraph-small color-teal-300 padding-bottom-16px">
-                No organizations match.
-              </p>
-              <button
-                type="button"
-                className="button-secondary"
-                onClick={clearAll}
-              >
-                Clear filters
-              </button>
-            </div>
-          )}
-
-          <ContributeButtons
-            trackingPage="Map"
-            suggestEntryUrl={suggestEntryLink}
-            suggestCorrectionUrl={suggestCorrectionLink}
-            noun="listing"
-            airtableUrl="https://airtable.com/appF8XfZUGXtfi40E/shrLojIEOsNCKg1BL"
-          />
-        </section>
-
-        <section aria-label="Map" className={styles['explorer-map']}>
-          <button
-            type="button"
-            className={styles['explorer-edge-tab']}
-            aria-expanded={!collapsed}
-            aria-controls={LIST_ID}
-            aria-label={collapsed ? 'Show list' : 'Hide list'}
-            // Collapsed, the "Show list" button beside it is the accessible
-            // control; two tab stops with one name would only be noise. The
-            // tab stays for the mouse, where the button is easy to miss.
-            aria-hidden={collapsed || undefined}
-            tabIndex={collapsed ? -1 : undefined}
-            onClick={toggleCollapsed}
-          >
-            <Icon src="/images/icons/chevron-down.svg" size={16} />
-          </button>
-          {collapsed && (
-            <button
-              ref={showListRef}
-              type="button"
-              className={`button-primary ${styles['explorer-show-list']}`}
-              aria-expanded={false}
-              aria-controls={LIST_ID}
-              onClick={toggleCollapsed}
-            >
-              Show list · {shown.length}
-            </button>
-          )}
-          <D3Map
-            orgs={mapOrgs}
-            suggestEntryUrl={suggestEntryLink}
-            explorer={explorerLink}
-          />
-          {dataToggle}
-          {/* PROTOTYPE: try both treatments of pins that don't match. */}
-          <div className={styles['explorer-nonmatching']}>
-            <ModeToggle
-              mode={nonMatching}
-              onChange={setNonMatching}
-              ariaLabel="Pins that don't match"
-              tabs={[
-                { value: 'dim', icon: '/images/icons/eye.svg', label: 'Dim' },
-                { value: 'hide', icon: '/images/icons/x.svg', label: 'Hide' },
-              ]}
+          {selected && (
+            <MapListingDetails
+              org={selected}
+              place={selectedPlace}
+              nearby={inSelectedPlace
+                .filter(org => org.id !== selected.id)
+                .slice(0, 3)}
+              placeCount={inSelectedPlace.length}
+              suggestCorrectionUrl={suggestCorrectionLink}
+              onSelect={select}
+              onSeeAllInPlace={() => {
+                setCategories([firstCategory(selected)])
+                setSelectedId(null)
+                setDrawerOpen(true)
+              }}
+              onClose={clearSelection}
             />
-          </div>
-        </section>
+          )}
+
+          <section
+            id={LIST_ID}
+            aria-label="Organizations"
+            className={`border-plus-fill drop-shadow-dark ${styles['explorer-drawer']}`}
+            hidden={selected !== null}
+          >
+            <div className={styles['explorer-drawer-head']}>
+              <p
+                className={`paragraph-small color-teal-300 ${styles['explorer-count']}`}
+              >
+                {countLabel}
+              </p>
+              <label className="flex items-center gap-8px">
+                <span className="visually-hidden">Sort by</span>
+                <select
+                  className={`text-field ${styles['explorer-sort']}`}
+                  value={sort}
+                  onChange={event =>
+                    setSort(event.target.value as ExplorerSort)
+                  }
+                >
+                  {EXPLORER_SORTS.map(option => (
+                    <option key={option} value={option}>
+                      {SORT_LABELS[option]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            {isFiltered && (
+              <div className={styles['explorer-drawer-others']}>
+                <span className="paragraph-xs color-teal-300">Other pins</span>
+                <ModeToggle
+                  mode={nonMatching}
+                  onChange={setNonMatching}
+                  ariaLabel="Pins that don't match"
+                  tabs={[
+                    {
+                      value: 'dim',
+                      icon: '/images/icons/eye.svg',
+                      label: 'Dim',
+                    },
+                    {
+                      value: 'hide',
+                      icon: '/images/icons/x.svg',
+                      label: 'Hide',
+                    },
+                  ]}
+                />
+              </div>
+            )}
+
+            <div ref={listRef} className={styles['explorer-drawer-list']}>
+              {shown.length > 0 ? (
+                <ul>
+                  {shown.map(org => (
+                    <li
+                      key={org.id}
+                      onMouseEnter={() => setHighlightedId(org.id)}
+                      onMouseLeave={() => setHighlightedId(null)}
+                      onFocus={() => setHighlightedId(org.id)}
+                      onBlur={() => setHighlightedId(null)}
+                    >
+                      <MapResultRow
+                        org={org}
+                        selected={org.id === selectedId}
+                        onSelect={() => select(org.id)}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="padding-bottom-24px">
+                  <p className="paragraph-small color-teal-300 padding-bottom-16px">
+                    No organizations match.
+                  </p>
+                  <button
+                    type="button"
+                    className="button-secondary"
+                    onClick={clearAll}
+                  >
+                    Clear filters
+                  </button>
+                </div>
+              )}
+              <ContributeButtons
+                trackingPage="Map"
+                suggestEntryUrl={suggestEntryLink}
+                suggestCorrectionUrl={suggestCorrectionLink}
+                noun="listing"
+                airtableUrl="https://airtable.com/appF8XfZUGXtfi40E/shrLojIEOsNCKg1BL"
+              />
+            </div>
+          </section>
+        </div>
       </div>
+      {lastUpdatedIso && (
+        <div className="container-wide padding-top-8px padding-bottom-40px">
+          <RelativeDate
+            iso={lastUpdatedIso}
+            className="paragraph-xs color-teal-300"
+          />
+        </div>
+      )}
     </>
   )
 }

@@ -67,6 +67,8 @@ interface D3MapProps {
   // PROTOTYPE Map 3.5: the island, realms and districts worked out for that
   // layout. When given, they are drawn in place of the island art.
   realmBackdrop?: RealmBackdrop
+  // The zoom-tier tuning panel is a developer's tool: off unless asked for.
+  tuning?: boolean
   // The explorer column beside the map (MapExplorer). When given, the map
   // follows the column: it shows the column's matches, marks its selection,
   // and a pin click selects the org's card instead of opening its site. The
@@ -80,11 +82,18 @@ export interface MapExplorerLink {
   // What becomes of the pins that don't match (both are being tested).
   nonMatching: 'hide' | 'dim'
   selectedId: string | null
-  // The card being hovered or focused.
+  // The result row being hovered or focused.
   highlightedId: string | null
   onSelect: (id: string) => void
-  // Filled in by the map: bring a pin to the middle of the view.
+  // A click on bare map, or Esc: nothing is selected any more.
+  onClear: () => void
+  // Pixels of the map's left side covered by the overlay (search, details
+  // card, results drawer). A pin is brought to the middle of what is left.
+  leftInset: number
+  // Filled in by the map: bring a pin to the middle of the free view.
   apiRef: MutableRefObject<{ panTo: (id: string) => void }>
+  // Called once apiRef is filled in, so a shared link's pin can be shown.
+  onReady?: () => void
 }
 
 // Map constants from WebFlow
@@ -127,6 +136,7 @@ export default function D3Map({
   suggestEntryUrl,
   scheme = CLASSIC_MAP_SCHEME,
   realmBackdrop,
+  tuning = true,
   explorer,
 }: D3MapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -316,9 +326,36 @@ export default function D3Map({
       searchControlRef.current.close()
     })
 
-    if (savedTransformRef.current) {
-      svg.call(zoom.transform, savedTransformRef.current)
+    // The view "Zoom to fit" returns to. Under the navbar that is the whole
+    // padded canvas. In the explorer's pane the illustration itself fills the
+    // pane (its width, or its height where that binds first), in the middle:
+    // the canvas's sea margin would only make the island smaller.
+    const fitTransform = () => {
+      const node = svg.node()
+      if (!hasExplorer || !node) return d3.zoomIdentity
+      const { width, height } = node.getBoundingClientRect()
+      if (width === 0 || height === 0) return d3.zoomIdentity
+      const unit = Math.min(width / PADDED_WIDTH, height / PADDED_HEIGHT)
+      const k = Math.min(
+        width / (MAP_WIDTH * unit),
+        height / (MAP_HEIGHT * unit)
+      )
+      return d3.zoomIdentity
+        .translate(
+          PADDED_WIDTH / 2 - offsetX - (k * MAP_WIDTH) / 2,
+          PADDED_HEIGHT / 2 - offsetY - (k * MAP_HEIGHT) / 2
+        )
+        .scale(k)
     }
+    svg.call(zoom.transform, savedTransformRef.current ?? fitTransform())
+
+    // A click on bare map lets go of the explorer's selection. Pins and their
+    // labels live inside <a>; a pan does not reach here because the drag
+    // cancels the synthetic click.
+    svg.on('click.explorer', event => {
+      if ((event.target as Element | null)?.closest('a')) return
+      explorerRef.current?.onClear()
+    })
 
     // Prevent wheel events over the map from zooming the whole page
     // (once D3's zoom hits its scaleExtent limit, the browser would
@@ -902,7 +939,14 @@ export default function D3Map({
 
     // Setup zoom controls
     const resetView = () => {
-      svg.transition().duration(500).call(zoom.transform, d3.zoomIdentity)
+      svg
+        .transition()
+        .duration(
+          window.matchMedia('(prefers-reduced-motion: reduce)').matches
+            ? 0
+            : 500
+        )
+        .call(zoom.transform, fitTransform())
     }
     controlsRef.current = {
       zoomIn: () => {
@@ -936,7 +980,12 @@ export default function D3Map({
     // Centers map point (px, py) in the rendered viewBox area at zoom k: the
     // group transform places map point p at viewBox coordinate
     // t + offset + k*p.
-    const flyToPoint = (px: number, py: number, k: number) => {
+    const flyToPoint = (px: number, py: number, k: number, leftInset = 0) => {
+      // The overlay covers the map's left side: the middle of what is left
+      // lies half its width to the right, in viewBox units.
+      const { width, height } = svgNode.getBoundingClientRect()
+      const unit = Math.min(width / PADDED_WIDTH, height / PADDED_HEIGHT) || 1
+      const shift = Math.min(leftInset, width / 2) / 2 / unit
       svg
         .transition()
         // Someone who asked for less motion gets the new view at once.
@@ -949,7 +998,7 @@ export default function D3Map({
           zoom.transform,
           d3.zoomIdentity
             .translate(
-              PADDED_WIDTH / 2 - offsetX - k * px,
+              PADDED_WIDTH / 2 + shift - offsetX - k * px,
               PADDED_HEIGHT / 2 - offsetY - k * py
             )
             .scale(k)
@@ -1106,17 +1155,35 @@ export default function D3Map({
       null,
       undefined
     >[] = []
-    const drawExplorerRing = (id: string, width: number, opacity: number) => {
+    const drawExplorerRing = (
+      id: string,
+      width: number,
+      opacity: number,
+      selected = false
+    ) => {
       const group = pins.find(pin => pin.tier.id === id)?.group
       const org = orgById.get(id)
       if (!group || !org) return
       const rawScale = SIZE_TO_SCALE[org.scale || 'Medium'] || 0.6
+      if (selected) {
+        // The selected pin's halo, under its ring.
+        explorerRings.push(
+          group
+            .insert('circle', ':first-child')
+            .attr('r', (BASE_LOGO_SIZE * rawScale) / 2 + 14)
+            .attr(
+              'fill',
+              'color-mix(in srgb, var(--teal-bright-400) 32%, transparent)'
+            )
+            .style('pointer-events', 'none')
+        )
+      }
       explorerRings.push(
         group
           .append('circle')
           .attr('r', (BASE_LOGO_SIZE * rawScale) / 2 + 6)
           .attr('fill', 'none')
-          .attr('stroke', 'var(--white)')
+          .attr('stroke', selected ? 'var(--teal-bright-400)' : 'var(--white)')
           .attr('stroke-width', width)
           .attr('stroke-opacity', opacity)
           .attr('vector-effect', 'non-scaling-stroke')
@@ -1136,7 +1203,7 @@ export default function D3Map({
       if (link.highlightedId && link.highlightedId !== link.selectedId) {
         drawExplorerRing(link.highlightedId, 2, 0.6)
       }
-      if (link.selectedId) drawExplorerRing(link.selectedId, 3.5, 1)
+      if (link.selectedId) drawExplorerRing(link.selectedId, 3.5, 1, true)
       const filterChanged =
         link.matchingIds !== appliedMatching || link.nonMatching !== appliedMode
       if (
@@ -1166,9 +1233,10 @@ export default function D3Map({
           const at = layout?.positions.has(id)
             ? pinPositionAt(layout, id, zoomOf(k))
             : { x: org.x * GRID_SIZE, y: org.y * GRID_SIZE }
-          flyToPoint(at.x, at.y, k)
+          flyToPoint(at.x, at.y, k, explorerRef.current?.leftInset ?? 0)
         },
       }
+      explorerRef.current.onReady?.()
     }
 
     // ESC resets the view, same as the recenter button. Skip while typing in
@@ -1188,6 +1256,12 @@ export default function D3Map({
       // still mean "close the search", not "reset the view".
       if (searchControlRef.current.isOpen()) {
         searchControlRef.current.escape()
+        return
+      }
+      // In the explorer ESC first lets go of the selection; the view is reset
+      // only when there is none.
+      if (explorerRef.current?.selectedId) {
+        explorerRef.current.onClear()
         return
       }
       resetView()
@@ -1268,14 +1342,16 @@ export default function D3Map({
         onReset={() => controlsRef.current.reset()}
       />
 
-      <MapTuningPanel
-        className={styles['map-tuning']}
-        config={tierConfig}
-        onChange={setTierConfig}
-        showAreaCounts={showAreaCounts}
-        onShowAreaCounts={setShowAreaCounts}
-        readoutRef={tierReadoutRef}
-      />
+      {tuning && (
+        <MapTuningPanel
+          className={styles['map-tuning']}
+          config={tierConfig}
+          onChange={setTierConfig}
+          showAreaCounts={showAreaCounts}
+          onShowAreaCounts={setShowAreaCounts}
+          readoutRef={tierReadoutRef}
+        />
+      )}
 
       {/* Beside the explorer column the search lives in the column. */}
       {!hasExplorer && (
