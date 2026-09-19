@@ -59,6 +59,14 @@ export interface HexLandmarkArt {
   height: number
 }
 
+export type HexCover =
+  | 'forest'
+  | 'grove'
+  | 'thicket'
+  | 'fields'
+  | 'vineyard'
+  | 'hamlet'
+
 export interface HexDistrictSpec {
   // The two letters its tiles carry on the tile map.
   code: string
@@ -70,6 +78,15 @@ export interface HexDistrictSpec {
   height: number
   // Tiles it takes up however few its logos are.
   minTiles?: number
+  // What grows or stands in the gaps its logos leave, in place of its
+  // realm's usual country.
+  cover?: HexCover
+  // A ground color of its own, where its realm's would not suit it.
+  ground?: string
+  // The river leaves it over a dam: its fall toward the viewer is a spillway.
+  dam?: boolean
+  // A plank pier runs out from its shore (into a cove, if it is on one).
+  pier?: boolean
   // Its logos may stand over the river (the castle's, over its moat).
   overWater?: boolean
   // Ringed by a wall of dark peaks along its edge (a forbidding country).
@@ -154,6 +171,10 @@ export interface HexLaidTile extends HexGridTile {
   sunken: boolean
   // Its district is ringed by peaks (see HexDistrictSpec.walled).
   walled: boolean
+  // What its district is covered with (see HexDistrictSpec.cover).
+  cover: HexCover | null
+  // Its district's own ground color, if it has one.
+  ground: string | null
   district: string | null
   realm: string | null
   // The district's place among its realm's districts, and how many those
@@ -191,6 +212,9 @@ export interface HexPathPiece {
   // A road climbing to a higher tile: the side of each ramp, as a shape. A
   // ramp rises off its own tile's top, so the piece is not clipped to it.
   ramps?: Point[][]
+  // The higher tiles its ramps climb to. Where such a tile is drawn after
+  // this piece, the road is drawn again over the tile's edge.
+  rampTo?: string[]
   // It runs into the moat, which is drawn later and over its end.
   joinsMoat?: boolean
 }
@@ -206,12 +230,15 @@ export interface HexPathDrop {
   b: Point
   fall: number
   visible: boolean
+  // A dam stands across it: the fall is its spillway.
+  dam?: boolean
 }
 
-// Where a river runs out into the sea, or a road out onto a pier: the point
-// on the coast, at sea level, and the way out from the land.
+// Where a river runs out into the sea, a road out onto a pier, or a district's
+// own pier stands: the point on the coast, at sea level, and the way out from
+// the land.
 export interface HexPathEnd {
-  kind: 'road' | 'river'
+  kind: 'road' | 'river' | 'pier'
   width: number
   at: Point
   toward: Point
@@ -803,6 +830,7 @@ export function layoutHexMap(
         ).map(point => drawn(tile, point))
         // A road climbs to a higher tile by a ramp on the lower one.
         const ramps: Point[][] = []
+        const rampTo: string[] = []
         if (kind === 'road') {
           const climbs: [PlannedTile | null | undefined, boolean][] = [
             [above, true],
@@ -814,6 +842,7 @@ export function layoutHexMap(
             ramps.push(
               raise(points, atStart, (other.height - tile.height) * view.lift)
             )
+            rampTo.push(other.ref)
           }
         }
         // Where the river runs into the moat, or out of it, it is no wider
@@ -832,7 +861,7 @@ export function layoutHexMap(
           tile: tile.ref,
           clip,
           points,
-          ...(ramps.length > 0 ? { ramps } : {}),
+          ...(ramps.length > 0 ? { ramps, rampTo } : {}),
           ...(kind === 'river' &&
           keep &&
           [inSide, outSide].some(
@@ -895,12 +924,52 @@ export function layoutHexMap(
           b: drawn(high, along(0.5 + share)),
           fall: (high.height - low.height) * view.lift,
           visible: SOUTH_FACING.includes(face),
+          ...(SOUTH_FACING.includes(face) && districtByCode.get(high.code!)?.dam
+            ? { dam: true }
+            : {}),
         })
       }
     }
   }
   joinUp('river', spec.river.width)
   joinUp('road', spec.road.width)
+
+  // A district's pier: out from one of its shores, into a cove for choice,
+  // and on a side the viewer sees for choice.
+  for (const { code, pier } of spec.districts) {
+    if (!pier) continue
+    const shores = (tilesOf.get(code) ?? []).flatMap(tile =>
+      HEX_DIRECTIONS.filter(side => isWater(tile, side)).map(side => ({
+        tile,
+        side,
+        // Of equal shores, the one farthest out: it is the least likely to
+        // lie hidden behind higher ground.
+        worth:
+          (neighborOf(tile, side) ? 2 : 0) +
+          (SOUTH_FACING.includes(side) ? 1 : 0) +
+          inland(tile) / 1000,
+      }))
+    )
+    const best = shores.sort((a, b) => b.worth - a.worth)[0]
+    if (!best) {
+      throw new Error(
+        `Hex map: district "${code}" is to have a pier but has no shore`
+      )
+    }
+    const from = projectPoint(view, flatCenter(best.tile), 0)
+    const to = projectPoint(
+      view,
+      hexSideMiddle(best.tile, best.side, view.size),
+      0
+    )
+    const length = Math.hypot(to[0] - from[0], to[1] - from[1])
+    ends.push({
+      kind: 'pier',
+      width: spec.road.width,
+      at: to,
+      toward: [(to[0] - from[0]) / length, (to[1] - from[1]) / length],
+    })
+  }
 
   // Each district's logos onto its plateau: its first tiles, then one more,
   // and so on until all its logos have room. Tiles the river, the road or a
@@ -1085,6 +1154,8 @@ export function layoutHexMap(
       state,
       sunken: district?.sunken === true && state !== 'sea',
       walled: district?.walled === true && state !== 'sea',
+      cover: state === 'sea' ? null : (district?.cover ?? null),
+      ground: state === 'sea' ? null : (district?.ground ?? null),
       district: state === 'sea' ? null : (district?.district ?? null),
       realm: state === 'sea' ? null : realm,
       tone:

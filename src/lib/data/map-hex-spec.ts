@@ -57,15 +57,15 @@ const TILES = `
 # 0   1   2   3   4   5   6   7   8   9   10  11  12  13  14  15  16  17  18
   ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..
   ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..
-  ..  ..  Fo  Fo~ Fo  Ne~ Ne  Ne  Ne  Gr  ..  Pa  Go  Go  Th  Th  Th  Lo  ..
-  ..  ..  Fo  Fo~ Fo~ Ne~ Ne  Ne  Fr  Gr  cv! Pa  Pa  Go  Th  Th! Th  Lo  ..
-  ..  ..  Fo~ Fo! Fo  Ne  Ne~ Ne~ Fr  Gr  cv  Pa  Ma  Ma  Ma! St  Lo  ..  ..
+  ..  ..  Ne  Ne~ Ne  Fo~ Fo  Fo  Fo  Gr  ..  Pa  Go  Go  Th  Th  Th  Lo  ..
+  ..  ..  Ne  Ne~ Ne~ Fo~ Fo! Fo  Fr  Gr  cv! Pa  Pa  Go  Th  Th! Th  Lo  ..
+  ..  ..  Ne~ Ne! Ne  Fo  Fo~ Fo~ Fr  Gr  cv  Pa  Ma  Ma  Ma! St  Lo  ..  ..
   ..  In! In  In  Fb  Pp  Pp  Pp  Fr~ Ca~ Ca  Ca  Ma  Ma  St  Ev  Ev  mt~ ..
   ..  hb  hb  In= Fb= Pp= Pp= Tp= Tp= Ca= kp  Ca~ Al~ Al~ Al  Ev~ Ev~ Ip  ..
-  ..  In  hb  In  Fb  Tp  Tp! Tp  Tp  Hu  Ca  Gm  Al  Al  Al~ Co  Ip  Ip! ..
-  ..  ..  In  Tp  Tp  Tp  Tp  Op  Hu  Gm  Gm  Gm  Gm  Co  Co  Co! Cp  Cp! ..
+  ..  In  hb  In  Fb  Tp  Tp  Tp  Tp  Hu  Ca  Vc  Al  Al  Al~ Co  Ip  Ip! ..
+  ..  ..  In  Tp  Tp  Tp  Tp  Op  Hu  Gm  Gm  Vc  Gm  Co  Co  Co! Cp  Cp! ..
   Gy! Gy  ..  ..  ..  Op  Op  To  Hu  Gm  Gm! Gm  Gm  Co  Co  Cp  Cp  ..  ..
-  Gy  Gy  Gy  ..  ..  ..  ..  ..  To  To  Gm  Gm  Vc  Vc  ..  ..  ..  ..  ..
+  Gy  Gy  Gy  ..  ..  ..  ..  ..  To  To  Gm  Gm  Gm  Gm  ..  ..  ..  ..  ..
   ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..
 `
 
@@ -75,37 +75,43 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
   tiles: TILES,
   // prettier-ignore
   districts: [
-    { code: 'Fo', district: 'Foundational and explanatory', realm: 'Media and discourse', height: 1,
+    // Woodland along the river, inland of the delta's coast.
+    { code: 'Fo', district: 'Foundational and explanatory', realm: 'Media and discourse', height: 1.5, cover: 'forest',
+      landmark: { symbol: 'forest', width: 2.6, height: 2.15 } },
+    // The delta's coast: the river's mouths, and the camp on the beach.
+    { code: 'Ne', district: 'News and commentary', realm: 'Media and discourse', height: 1,
       landmark: { symbol: 'beach-camp', width: 1.9, height: 2.05 } },
-    { code: 'Ne', district: 'News and commentary', realm: 'Media and discourse', height: 1.5 },
     { code: 'Fr', district: 'Forums and online communities', realm: 'Media and discourse', height: 2.5 },
     { code: 'Gr', district: 'Grassroots campaigns', realm: 'Advocacy and public engagement', height: 1 },
-    { code: 'Pa', district: 'Professional advocacy and communication', realm: 'Advocacy and public engagement', height: 1.5 },
+    { code: 'Pa', district: 'Professional advocacy and communication', realm: 'Advocacy and public engagement', height: 1.5, pier: true },
     // The landing: the arms of a sheltered harbor, where the road starts.
     { code: 'In', district: 'Introductory learning', realm: 'Talent pipeline', height: 0.5,
       landmark: { symbol: 'lighthouse', width: 1, height: 1.8 } },
     { code: 'Fb', district: 'Field-building and local groups', realm: 'Talent pipeline', height: 1.5 },
     { code: 'Pp', district: 'Policy and governance programs', realm: 'Talent pipeline', height: 2 },
-    { code: 'Tp', district: 'Technical research programs', realm: 'Talent pipeline', height: 2.5,
-      landmark: { symbol: 'training-town', width: 3, height: 2.54 } },
+    { code: 'Tp', district: 'Technical research programs', realm: 'Talent pipeline', height: 2.5, cover: 'fields' },
     // The castle: the six tiles round the keep, whatever its logos need.
     { code: 'Ca', district: 'Career support and placement', realm: 'Talent pipeline', height: 3, minTiles: 6, overWater: true },
-    { code: 'Op', district: 'Operations and services', realm: 'Field infrastructure', height: 1.5 },
-    { code: 'Hu', district: 'Hubs and coworking', realm: 'Field infrastructure', height: 1 },
+    // Support Shoreline, west to east along the beach: a boat service station
+    // with its jetty, the low terrace of the toolsheds, a fishing hamlet and a
+    // grove by the shore; the vineyard on the sheltered slope behind them.
+    { code: 'Op', district: 'Operations and services', realm: 'Field infrastructure', height: 1.5, pier: true },
+    { code: 'Hu', district: 'Hubs and coworking', realm: 'Field infrastructure', height: 1, cover: 'hamlet' },
     { code: 'To', district: 'Tools, databases and research infrastructure', realm: 'Field infrastructure', height: 0.5 },
-    { code: 'Gm', district: 'Grantmakers and donor advisory', realm: 'Field infrastructure', height: 1.5,
-      landmark: { symbol: 'forest', width: 2.6, height: 2.15 } },
-    { code: 'Vc', district: 'Venture capital and incubators', realm: 'Field infrastructure', height: 1 },
+    { code: 'Gm', district: 'Grantmakers and donor advisory', realm: 'Field infrastructure', height: 1.5, cover: 'grove',
+      landmark: { symbol: 'grove', width: 3, height: 1.93 } },
+    { code: 'Vc', district: 'Venture capital and incubators', realm: 'Field infrastructure', height: 2, cover: 'vineyard', ground: '#8fae55' },
     { code: 'Go', district: 'Governments and multi-stakeholder bodies', realm: 'Policy and strategy', height: 2 },
     { code: 'Ma', district: 'Macrostrategy and forecasting', realm: 'Policy and strategy', height: 3.5,
       landmark: { symbol: 'summit', width: 3, height: 1.9 } },
     { code: 'Th', district: 'Policy research and think tanks', realm: 'Policy and strategy', height: 2.5,
-      landmark: { symbol: 'grove', width: 3, height: 1.93 } },
+      landmark: { symbol: 'training-town', width: 3, height: 2.54 } },
     { code: 'St', district: 'Standards, assurance and verification', realm: 'Policy and strategy', height: 3 },
-    { code: 'Lo', district: 'Policy advocacy and lobbying', realm: 'Policy and strategy', height: 2 },
-    { code: 'Al', district: 'Alignment and control', realm: 'Technical research', height: 4 },
+    { code: 'Lo', district: 'Policy advocacy and lobbying', realm: 'Policy and strategy', height: 2, pier: true },
+    // The Control Dam: the river leaves it for the castle over a dam.
+    { code: 'Al', district: 'Alignment and control', realm: 'Technical research', height: 4, dam: true },
     { code: 'Ev', district: 'Evaluations and threat research', realm: 'Technical research', height: 5 },
-    { code: 'Co', district: 'Conceptual and foundations research', realm: 'Technical research', height: 4.5,
+    { code: 'Co', district: 'Conceptual and foundations research', realm: 'Technical research', height: 4.5, cover: 'thicket',
       landmark: { symbol: 'cave', width: 1.7, height: 1.63 } },
     { code: 'Ip', district: 'Interpretability and model understanding', realm: 'Technical research', height: 5.5,
       landmark: { symbol: 'range', width: 2.8, height: 1.98 } },
@@ -177,7 +183,9 @@ export const MAP_35_HEX_NAMES: Record<string, string> = {
   'Operations and services': 'Service Station',
   'Hubs and coworking': 'Hub Hamlet',
   'Grantmakers and donor advisory': 'Grant Grove',
-  'Venture capital and incubators': 'Venture Valley',
+  // Was "Venture Valley": a valley under the Range would be hidden behind it.
+  // Vines suit an incubator, on the sheltered slope above the shore.
+  'Venture capital and incubators': 'Venture Vineyard',
 
   'Foundational and explanatory': 'Foundation Forest',
   'News and commentary': 'Commentary Coast',
@@ -196,8 +204,10 @@ export const MAP_35_HEX_NAMES: Record<string, string> = {
 
   'Alignment and control': 'Control Dam',
   'Evaluations and threat research': 'Evaluation Escarpment',
-  // Or "Interpretability Inlet".
-  'Interpretability and model understanding': 'Circuit Cove',
+  // Was "Circuit Cove" (or "Interpretability Inlet"): it lies high beside the
+  // peak, and its art has a mountain lake.
+  'Interpretability and model understanding': 'Circuit Crater',
   'Conceptual and foundations research': 'Theory Thicket',
-  'Capabilities research': 'Capabilities Cove',
+  // Was "Capabilities Cove": it is a walled high plateau now.
+  'Capabilities research': 'Capabilities Crag',
 }
