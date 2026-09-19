@@ -56,12 +56,19 @@ import {
   type ArtPin,
   type RealmTheme,
 } from './realmArtBackdrop'
+import { buildingMarkup } from './hexBuildings'
 import {
   beachCornerMarkup,
   beachMarkup,
+  canopyMarkup,
+  type BeachLayer,
   craterMarkup,
   deckMarkup,
   duneMarkup,
+  geyserMarkup,
+  palmMarkup,
+  beachHutMarkup,
+  sulphurPoolMarkup,
   slopeCornerMarkup,
   slopeMarkup,
   tuftMarkup,
@@ -99,6 +106,9 @@ const TURNED_SATURATION = 0.8
 // the classic map's sands, oranges and dark greens.
 const DAM = { stone: '#ffd1bc', cap: '#f6fbff', line: '#972f00' }
 const FIELD_RIPE = '#ffd1bc'
+// DESIGN REVIEW (Melissa): a stilt village's timber, lighter than a pier's.
+const PLATFORM_WOOD = '#d98a5a'
+const FOREST = { lit: '#00ae85', shade: '#008969' }
 const VINE = '#2f5650'
 // The peaks that wall a forbidding district in.
 const WALL = { lit: '#972f00', shade: '#571f02' }
@@ -778,22 +788,27 @@ export function hexBackdropMarkup(
     tile.beach
       ? faceDrops(tile).filter(face => face.drop > 0 && face.ground === 0)
       : []
-  // How many beach sides end at each corner: two where the beach runs on.
+  // How many beach sides of a district end at each corner: two where its
+  // beach runs on.
   const beachCorners = new Map<string, number>()
   for (const tile of layout.tiles) {
     for (const { k } of beachSides(tile)) {
       for (const corner of [tile.top[k], tile.top[k + 1]]) {
-        beachCorners.set(xy(corner), (beachCorners.get(xy(corner)) ?? 0) + 1)
+        const key = `${tile.district}|${xy(corner)}`
+        beachCorners.set(key, (beachCorners.get(key) ?? 0) + 1)
       }
     }
   }
-  const drawBeach = (tile: HexLaidTile, layer: 'under' | 'over') => {
+  const BEACH_SHALLOWS = mixHex(SEA, WATER, 0.3)
+  const drawBeach = (tile: HexLaidTile, layer: BeachLayer) => {
     if (!tile.beach) return
     // The dry sand is the district's own ground, running on down the beach.
     const { tone: sand } = styleOf(tile)
     const wet = mixHex(sand, SHALLOWS, 0.45)
     const sides = beachSides(tile).map(face => {
-      const run = BEACH_RUN * tile.height
+      // Higher ground (a terrace) comes down to a beach no longer than
+      // low ground does.
+      const run = BEACH_RUN * Math.min(1, tile.height)
       const reach: Point = [
         SLOPE_OUT[face.k][0] * run,
         SLOPE_OUT[face.k][1] * run * view.squash + face.drop,
@@ -811,22 +826,26 @@ export function hexBackdropMarkup(
           g,
           sand,
           wet,
+          BEACH_SHALLOWS,
           layer
         )
       )
     })
     for (const side of sides) {
       const [a, b] = [tile.top[side.k], tile.top[side.k + 1]]
-      out.push(beachMarkup(a, b, side.reach, g, sand, wet, layer))
+      out.push(
+        beachMarkup(a, b, side.reach, g, sand, wet, BEACH_SHALLOWS, layer)
+      )
       // No rim along the top of a beach: the ground runs straight on, and
       // round a corner where the beach does.
-      if (layer === 'over') {
+      if (layer === 'dry') {
         const cover = RIM_WIDTH * 2 * g + BORDER_LINE.width * 2
         out.push(
           `<path d="M${xy(a)}L${xy(b)}" stroke="${sand}" stroke-width="${cover.toFixed(1)}"/>`
         )
         for (const corner of [a, b]) {
-          if ((beachCorners.get(xy(corner)) ?? 0) < 2) continue
+          const key = `${tile.district}|${xy(corner)}`
+          if ((beachCorners.get(key) ?? 0) < 2) continue
           out.push(
             `<circle cx="${(corner[0] * g).toFixed(1)}" cy="${(corner[1] * g).toFixed(1)}" r="${(cover / 2).toFixed(1)}" fill="${sand}"/>`
           )
@@ -844,6 +863,8 @@ export function hexBackdropMarkup(
   // What lies flat (fields, vines) is drawn with the ground. What stands up
   // (trees, houses, peaks, dunes, tufts) is gathered with everything else that
   // stands, and drawn from the back of the board to the front.
+  // The whole picture, in map grid units: where things may be scattered.
+  const board = { width: width / g, height: height / g }
   const standing: { depth: number; markup: string }[] = []
   // How far back something stands: its foot as drawn, with its tile's lift
   // taken off again, so that height does not count as distance.
@@ -868,7 +889,13 @@ export function hexBackdropMarkup(
             k <= 2 && front && front.state !== 'sea' && !front.sunken
               ? Math.max(0, front.height - tile.height) * view.lift
               : 0
-          return 0.22 + covered
+          // (For a far side, `front` is the tile behind.) Where that tile's
+          // slope leans out onto this one, nothing stands on the slope's foot.
+          const foot =
+            k > 2 && front && front.slope > 0
+              ? front.slope * Math.max(0, front.height - tile.height) + 0.25
+              : 0
+          return 0.22 + covered + foot
         })
       )
     )
@@ -954,6 +981,82 @@ export function hexBackdropMarkup(
     out.push('</g>')
   }
 
+  // What lies under the logos, so that it reads however crowded the
+  // district: a forest's canopy, hot springs, or a field of great dunes.
+  const drawRelief = (
+    plateau: { tiles: HexLaidTile[]; height: number },
+    tone: string,
+    clip: string
+  ) => {
+    const cover = plateau.tiles[0].cover
+    if ((cover === 'forest' || cover === 'thermals') && pins) {
+      // A forest's canopy, seen from above, over all its ground; or hot
+      // springs wherever the river and the road leave room.
+      const { inside, fixed } = canvasOf(plateau)
+      const extent = { width: width / g, height: height / g }
+      out.push(`<g clip-path="url(#${clip})">`)
+      scatterSpots(
+        inside,
+        fixed,
+        extent,
+        cover === 'forest'
+          ? { spacing: 0.42, minRoom: 0.05, maxRoom: 0.4 }
+          : { spacing: 1.15, minRoom: 0.3, maxRoom: 0.8 }
+      )
+        .sort((a, b) => a.y - b.y)
+        .forEach((spot, n) =>
+          out.push(
+            cover === 'forest'
+              ? canopyMarkup(
+                  spot.x,
+                  spot.y,
+                  0.5 + spot.roll * 0.25,
+                  view.squash,
+                  g,
+                  mixHex(tone, FOREST.lit, 0.8),
+                  FOREST.shade
+                )
+              : sulphurPoolMarkup(
+                  spot.x,
+                  spot.y,
+                  0.95 + spot.roll * 0.7,
+                  view.squash,
+                  g,
+                  n,
+                  false
+                )
+          )
+        )
+      out.push('</g>')
+    }
+    if (cover === 'dunes' && pins) {
+      const { inside, fixed } = canvasOf(plateau)
+      const extent = { width: width / g, height: height / g }
+      out.push(`<g clip-path="url(#${clip})">`)
+      scatterSpots(inside, fixed, extent, {
+        spacing: 1.9,
+        minRoom: 0.3,
+        maxRoom: 1.2,
+      })
+        .sort((a, b) => a.y - b.y)
+        .forEach((spot, n) =>
+          out.push(
+            duneMarkup(
+              spot.x,
+              spot.y + 0.45,
+              1.9 + spot.roll * 0.9,
+              g,
+              mixHex(tone, '#ffffff', 0.38),
+              mixHex(tone, LINE, 0.3),
+              VINE,
+              n
+            )
+          )
+        )
+      out.push('</g>')
+    }
+  }
+
   // What stands on a plateau: its district's cover where the spec gives one
   // (woodland, a pine thicket, a hamlet, dunes, meadow), or else its realm's
   // usual country; in the gaps the logos leave, with a thin back row under
@@ -979,29 +1082,83 @@ export function hexBackdropMarkup(
       `<use href="#${symbol}" x="${((x - w / 2) * g).toFixed(1)}" y="${((y - h) * g).toFixed(1)}" width="${(w * g).toFixed(1)}" height="${(h * g).toFixed(1)}"/>`
     const level = plateau.height
 
-    if (cover === 'dunes' || cover === 'meadow') {
-      // Dunes along a beach, or the grass of a valley floor.
+    const building = plateau.tiles[0].building
+    if (building) {
+      const [site] = scatterSpots(inside, [...logos, ...fixed], extent, {
+        spacing: 0.45,
+        minRoom: 0.6,
+        maxRoom: 1.5,
+      }).sort((a, b) => b.room - a.room)
+      if (site) {
+        const across = Math.min(2.8, site.room * 2.1)
+        const foot = site.y + across * 0.2
+        stand(foot, level, buildingMarkup(building, site.x, foot, across, g))
+        // Nothing else stands where it does.
+        fixed.push({ x: site.x, y: site.y, radius: across * 0.6 })
+      } else {
+        console.warn(
+          `Hex map: no gap large enough for the ${building} of "${plateau.tiles[0].district}"`
+        )
+      }
+    }
+
+    // (Dunes and terraces lie under the logos: see drawRelief.)
+    if (cover === 'dunes') return
+    if (cover === 'tropical') {
+      // A tropical beach: palms, and a beach hut or two where there is room.
+      let huts = 0
       scatterSpots(inside, [...logos, ...fixed], extent, {
-        spacing: cover === 'dunes' ? 1.05 : 0.7,
-        minRoom: cover === 'dunes' ? 0.35 : 0.15,
-        maxRoom: 0.7,
+        spacing: 1.15,
+        minRoom: 0.3,
+        maxRoom: 0.8,
       }).forEach((spot, n) => {
-        const markup =
-          cover === 'dunes'
-            ? duneMarkup(
+        const hut = huts < 2 && spot.room > 0.55 && spot.roll > 0.45
+        if (hut) huts++
+        stand(
+          spot.y + 0.3,
+          level,
+          hut
+            ? beachHutMarkup(spot.x, spot.y + 0.3, 0.85, g)
+            : palmMarkup(
                 spot.x,
-                spot.y + 0.2,
-                0.7 + spot.roll * 0.5,
+                spot.y + 0.3,
+                1.05 + spot.roll * 0.45,
                 g,
-                mixHex(tone, '#ffffff', 0.45),
-                mixHex(tone, LINE, 0.4),
-                VINE,
                 seed * 97 + n
               )
-            : spot.roll > 0.82 && spot.room > 0.4
-              ? stamp('tree', spot.x, spot.y + 0.3, 0.45, 0.9)
-              : tuftMarkup(spot.x, spot.y, g, VINE, FIELD_RIPE, seed * 97 + n)
-        stand(spot.y, level, markup)
+        )
+      })
+      return
+    }
+    if (cover === 'thermals') {
+      // Geysers, in the gaps among the hot springs that lie under the logos.
+      scatterSpots(inside, [...logos, ...fixed], extent, {
+        spacing: 1.6,
+        minRoom: 0.3,
+        maxRoom: 0.8,
+      }).forEach(spot =>
+        stand(
+          spot.y + 0.25,
+          level,
+          geyserMarkup(spot.x, spot.y + 0.25, 1.5, g, theme.cliff.foot)
+        )
+      )
+      return
+    }
+    if (cover === 'meadow') {
+      // The grass of a valley floor, with a tree here and there.
+      scatterSpots(inside, [...logos, ...fixed], extent, {
+        spacing: 0.7,
+        minRoom: 0.15,
+        maxRoom: 0.7,
+      }).forEach((spot, n) => {
+        stand(
+          spot.y,
+          level,
+          spot.roll > 0.82 && spot.room > 0.4
+            ? stamp('tree', spot.x, spot.y + 0.3, 0.45, 0.9)
+            : tuftMarkup(spot.x, spot.y, g, VINE, FIELD_RIPE, seed * 97 + n)
+        )
       })
       return
     }
@@ -1013,13 +1170,13 @@ export function hexBackdropMarkup(
           ? { spacing: 0.55, minRoom: 0.2, maxRoom: 0.5 }
           : cover === 'grove'
             ? { spacing: 0.95, minRoom: 0.3, maxRoom: 0.6 }
-            : { spacing: 0.72, minRoom: 0.26, maxRoom: 0.6 }
+            : { spacing: 0.4, minRoom: 0.16, maxRoom: 0.6 }
         : { spacing: 1.25, minRoom: 0.5, maxRoom: 0.8 }
       const spots = [
         ...(wood
           ? scatterSpots(inside, fixed, extent, {
               spacing:
-                cover === 'thicket' ? 0.95 : cover === 'grove' ? 1.7 : 1.25,
+                cover === 'thicket' ? 0.95 : cover === 'grove' ? 1.7 : 0.6,
               minRoom: 0.3,
               maxRoom: 0.6,
             })
@@ -1219,9 +1376,11 @@ export function hexBackdropMarkup(
       }
     }
     for (const plateau of level) {
-      for (const tile of plateau.tiles) {
-        drawSlopes(tile)
-        drawBeach(tile, 'under')
+      for (const tile of plateau.tiles) drawSlopes(tile)
+    }
+    for (const layer of ['shallows', 'foam', 'wet'] as const) {
+      for (const plateau of level) {
+        for (const tile of plateau.tiles) drawBeach(tile, layer)
       }
     }
     level.forEach((plateau, n) => {
@@ -1233,6 +1392,7 @@ export function hexBackdropMarkup(
       )
       out.push(`<path d="${shape}" fill="${tone}" fill-rule="evenodd"/>`)
       drawPlots(plateau, tone, id)
+      drawRelief(plateau, tone, id)
       for (const tile of plateau.tiles) {
         if (tile.state === 'crater') {
           out.push(
@@ -1303,13 +1463,64 @@ export function hexBackdropMarkup(
     // climbs by a ramp is drawn with the level it climbs to, so that level's
     // cliff does not cover the ramp.
     for (const plateau of level) {
-      for (const tile of plateau.tiles) drawBeach(tile, 'over')
+      for (const tile of plateau.tiles) drawBeach(tile, 'dry')
     }
     // The piers that stand at this height, over the water of their tiles.
     for (const tile of layout.tiles) {
       if (tile.deck?.height !== height) continue
-      const { shape, along } = tile.deck
-      out.push(deckMarkup(shape, along, height * view.lift, g))
+      const { shape, along, platform } = tile.deck
+      if (platform) {
+        // Gangways: to the next platform of the village on each near side,
+        // and ashore wherever land of this height lies alongside.
+        const middle = (points: Point[]): Point => [
+          points.reduce((sum, point) => sum + point[0], 0) / points.length,
+          points.reduce((sum, point) => sum + point[1], 0) / points.length,
+        ]
+        SIDE_NAMES.forEach((side, k) => {
+          const next = laidByCell.get(hexKey(hexNeighbor(tile, side)))
+          if (!next) return
+          const village =
+            k <= 2 && !!next.deck && next.district === tile.district
+          const ashore = isGround(next) && next.height === height
+          if (!village && !ashore) return
+          const to = village
+            ? middle(next.deck!.shape)
+            : middle([next.top[(k + 3) % 6], next.top[(k + 4) % 6]])
+          const d = `M${xy(middle(shape))}L${xy(to)}`
+          out.push(
+            `<path d="${d}" fill="none" stroke="${PLANK_GAP}" stroke-width="${(0.42 * g).toFixed(1)}"/>`,
+            `<path d="${d}" fill="none" stroke="${PLANK}" stroke-width="${(0.42 * g).toFixed(1)}" stroke-dasharray="7 3"/>`
+          )
+        })
+      }
+      out.push(
+        deckMarkup(
+          shape,
+          along,
+          height * view.lift,
+          g,
+          !platform,
+          platform ? PLATFORM_WOOD : undefined
+        )
+      )
+      if (platform && pins) {
+        // Tool sheds on the platform, where the logos leave room.
+        const deck = insetConvex(
+          shape,
+          shape.map(() => 0.2)
+        )
+        scatterSpots((x, y) => insideConvex([x, y], deck), pins, board, {
+          spacing: 0.85,
+          minRoom: 0.3,
+          maxRoom: 0.8,
+        }).forEach(spot =>
+          stand(
+            spot.y + 0.35,
+            height,
+            `<use href="#cottage" x="${((spot.x - 0.4) * g).toFixed(1)}" y="${((spot.y + 0.35 - 1.03) * g).toFixed(1)}" width="${(0.8 * g).toFixed(1)}" height="${(1.03 * g).toFixed(1)}"/>`
+          )
+        )
+      }
     }
     const refs = new Set(
       level.flatMap(plateau => plateau.tiles.map(t => t.ref))

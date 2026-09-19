@@ -96,7 +96,10 @@ export function deckMarkup(
   along: Point,
   // How far above the water the deck stands.
   drop: number,
-  g: number
+  g: number,
+  // Mooring posts along its sides (a pier's; a platform has none).
+  moorings = true,
+  wood: string = PLANK
 ): string {
   const xy = ([x, y]: Point) => `${(x * g).toFixed(1)},${(y * g).toFixed(1)}`
   const outline = `M${shape.map(xy).join('L')}Z`
@@ -134,7 +137,7 @@ export function deckMarkup(
   const out = [
     ...under,
     `<clipPath id="${id}"><path d="${outline}"/></clipPath>`,
-    `<path d="${outline}" fill="${PLANK}"/>`,
+    `<path d="${outline}" fill="${wood}"/>`,
     `<g clip-path="url(#${id})">`,
   ]
   for (let s = from + 0.24; s < to; s += 0.24) {
@@ -149,7 +152,7 @@ export function deckMarkup(
   }
   out.push('</g>')
   // Mooring posts, a little in from each beam.
-  for (let s = from + 0.35; s < to - 0.1; s += 0.85) {
+  for (let s = from + 0.35; moorings && s < to - 0.1; s += 0.85) {
     for (const t of [left + 0.06, right - 0.06]) {
       const [x, y] = point(s, t)
       out.push(
@@ -254,8 +257,11 @@ export function slopeCornerMarkup(
   )
 }
 
-/** A dune: a low hump of sand with its lee side in shade, and marram grass on
- *  its crest. `size` is its width in map grid units. */
+/**
+ * A dune: a crescent of sand with a sharp crest, its windward side lit and
+ * its slip face in shade, ripples on the lit side and marram grass at its
+ * foot. `size` is its width in map grid units.
+ */
 export function duneMarkup(
   x: number,
   y: number,
@@ -267,18 +273,29 @@ export function duneMarkup(
   seed: number
 ): string {
   const [cx, cy, w] = [x * g, y * g, size * g]
-  const h = w * 0.3
-  const hump = `M${(cx - w / 2).toFixed(1)},${cy.toFixed(1)}Q${(cx - w * 0.15).toFixed(1)},${(cy - h * 1.9).toFixed(1)} ${(cx + w * 0.12).toFixed(1)},${(cy - h).toFixed(1)}T${(cx + w / 2).toFixed(1)},${cy.toFixed(1)}Z`
-  const lee = `M${(cx + w * 0.12).toFixed(1)},${(cy - h).toFixed(1)}Q${(cx + w * 0.34).toFixed(1)},${(cy - h * 0.55).toFixed(1)} ${(cx + w / 2).toFixed(1)},${cy.toFixed(1)}L${(cx + w * 0.05).toFixed(1)},${cy.toFixed(1)}Z`
+  const h = w * 0.42
+  const p = (dx: number, dy: number) =>
+    `${(cx + dx * w).toFixed(1)},${(cy - dy * h).toFixed(1)}`
+  // The crest runs in an S from the left foot over the top to the right horn.
+  const crest = `C${p(-0.3, 0.55)} ${p(-0.12, 1.05)} ${p(0.08, 1)}C${p(0.24, 0.95)} ${p(0.36, 0.4)} ${p(0.5, 0)}`
   const markup = [
-    `<path d="${hump}" fill="${lit}"/>`,
-    `<path d="${lee}" fill="${shade}" fill-opacity="0.55"/>`,
+    // The whole dune in shade, then its lit windward side over that.
+    `<path d="M${p(-0.5, 0)}${crest}Q${p(0.2, -0.22)} ${p(-0.5, 0)}Z" fill="${shade}"/>`,
+    `<path d="M${p(-0.5, 0)}C${p(-0.3, 0.55)} ${p(-0.12, 1.05)} ${p(0.08, 1)}Q${p(0.02, 0.35)} ${p(0.22, -0.1)}Q${p(-0.1, -0.2)} ${p(-0.5, 0)}Z" fill="${lit}"/>`,
   ]
-  if (roll(seed) > 0.35) {
-    const [gx, gy] = [cx - w * 0.12, cy - h * 1.05]
+  for (const [dx, dy, length] of [
+    [-0.3, 0.16, 0.26],
+    [-0.2, 0.4, 0.2],
+  ]) {
+    markup.push(
+      `<path d="M${p(dx, dy)}q${(length * w * 0.5).toFixed(1)},-3 ${(length * w).toFixed(1)},0" fill="none" stroke="${shade}" stroke-opacity="0.6" stroke-width="1.6" stroke-linecap="round"/>`
+    )
+  }
+  if (roll(seed) > 0.3) {
+    const gx = cx - w * 0.42
     for (const lean of [-5, 0, 5]) {
       markup.push(
-        `<path d="M${gx.toFixed(1)},${gy.toFixed(1)}l${lean},-9" stroke="${grass}" stroke-width="1.8" stroke-linecap="round"/>`
+        `<path d="M${gx.toFixed(1)},${(cy + 1).toFixed(1)}l${lean},-10" stroke="${grass}" stroke-width="1.8" stroke-linecap="round"/>`
       )
     }
   }
@@ -307,13 +324,39 @@ export function tuftMarkup(
   return markup.join('')
 }
 
+// A beach is drawn in layers, each for every beach on a level before the
+// next, so that where two beaches meet or overlap (round a corner, in a bay of
+// the coast) they read as one: first the clear shallows and then the foam,
+// both as an outline round the beach's shape; then the wet sand over the
+// inner half of those outlines; and last the dry sand.
+export type BeachLayer = 'shallows' | 'foam' | 'wet' | 'dry'
+
+// The share of a beach, from the land out, that is dry sand.
+const BEACH_DRY = 0.68
+
+function beachLayerMarkup(
+  // The whole beach, and its dry part, as closed paths.
+  whole: string,
+  dry: string,
+  g: number,
+  sand: string,
+  wet: string,
+  shallows: string,
+  layer: BeachLayer
+): string {
+  const line = (color: string, across: number) =>
+    `<path d="${whole}" fill="${color}" stroke="${color}" stroke-width="${(across * g).toFixed(1)}" stroke-linejoin="round"/>`
+  if (layer === 'shallows') return line(shallows, 0.5)
+  if (layer === 'foam') return line(WATER_STREAK, 0.17)
+  if (layer === 'wet') return line(wet, 0.02)
+  return `<path d="${dry}" fill="${sand}" stroke="${sand}" stroke-width="1" stroke-linejoin="round"/>`
+}
+
 /**
  * A beach in place of a sea cliff: from the edge of a tile's side (`a` to
- * `b`) the sand runs gently down and out to the water, `reach` away as drawn.
- * Dry sand, then a band of wet sand, a line of foam where the sea meets it,
- * and a little clear shallow water beyond. Drawn in two layers, so that where
- * two beaches overlap in a bay of the coast the dry sand of both lies over
- * the wet: "under" is the water, the wet sand and the foam, "over" the dry.
+ * `b`) the sand runs gently down and out to the water, `reach` away as drawn:
+ * dry sand, a band of wet sand, a line of foam where the sea meets it, and a
+ * little clear shallow water beyond.
  */
 export function beachMarkup(
   a: Point,
@@ -322,25 +365,23 @@ export function beachMarkup(
   g: number,
   sand: string,
   wet: string,
-  layer: 'under' | 'over'
+  shallows: string,
+  layer: BeachLayer
 ): string {
   const at = (t: number, down: number) =>
     `${((a[0] + (b[0] - a[0]) * t + reach[0] * down) * g).toFixed(1)},${((a[1] + (b[1] - a[1]) * t + reach[1] * down) * g).toFixed(1)}`
-  const band = (from: number, to: number) =>
-    `M${at(0, from)}L${at(1, from)}L${at(1, to)}L${at(0, to)}Z`
-  if (layer === 'over') {
-    return `<path d="${band(0, BEACH_DRY)}" fill="${sand}" stroke="${sand}" stroke-width="1" stroke-linejoin="round"/>`
-  }
-  return [
-    `<path d="${band(1, 1.22)}" fill="${WATER}" fill-opacity="0.35"/>`,
-    `<path d="${band(0, 1)}" fill="${wet}" stroke="${wet}" stroke-width="1" stroke-linejoin="round"/>`,
-    `<path d="M${at(0, 1)}L${at(1, 1)}" stroke="${WATER_STREAK}" stroke-width="3.5" stroke-linecap="round"/>`,
-    `<path d="M${at(0.05, 1.12)}L${at(0.95, 1.12)}" stroke="${WATER_STREAK}" stroke-opacity="0.7" stroke-width="2" stroke-dasharray="14 9" stroke-linecap="round"/>`,
-  ].join('')
+  const band = (to: number) =>
+    `M${at(0, 0)}L${at(1, 0)}L${at(1, to)}L${at(0, to)}Z`
+  return beachLayerMarkup(
+    band(1),
+    band(BEACH_DRY),
+    g,
+    sand,
+    wet,
+    shallows,
+    layer
+  )
 }
-
-// The share of a beach, from the land out, that is dry sand.
-const BEACH_DRY = 0.68
 
 /** The beach round a corner, between the beaches of two sides that meet
  *  there. */
@@ -351,18 +392,167 @@ export function beachCornerMarkup(
   g: number,
   sand: string,
   wet: string,
-  layer: 'under' | 'over'
+  shallows: string,
+  layer: BeachLayer
 ): string {
   const xy = (by: Point, share: number) =>
     `${((corner[0] + by[0] * share) * g).toFixed(1)},${((corner[1] + by[1] * share) * g).toFixed(1)}`
   const fan = (share: number) =>
     `M${xy(first, 0)}L${xy(first, share)}L${xy(second, share)}Z`
-  if (layer === 'over') {
-    return `<path d="${fan(BEACH_DRY)}" fill="${sand}" stroke="${sand}" stroke-width="1" stroke-linejoin="round"/>`
+  return beachLayerMarkup(fan(1), fan(BEACH_DRY), g, sand, wet, shallows, layer)
+}
+
+// The classic art's own colors for what grows and what is built.
+const LEAF = { lit: '#00ae85', shade: '#008969' }
+const BUILT = { roof: '#d53d00', wall: '#ffa777', trim: '#ff7c25' }
+// DESIGN REVIEW (Melissa): sulphur is the one yellow on the map.
+const SULPHUR = { crust: '#f2c84b', pale: '#fbe9a6' }
+
+/** A palm: a leaning trunk and a crown of drooping fronds. `size` is its
+ *  height in map grid units; its foot stands at x, y. */
+export function palmMarkup(
+  x: number,
+  y: number,
+  size: number,
+  g: number,
+  seed: number
+): string {
+  const [fx, fy, h] = [x * g, y * g, size * g]
+  const lean = (roll(seed) - 0.5) * 0.5 * h
+  const [tx, ty] = [fx + lean, fy - h * 0.78]
+  const markup = [
+    `<path d="M${fx.toFixed(1)},${fy.toFixed(1)}Q${(fx + lean * 0.2).toFixed(1)},${(fy - h * 0.45).toFixed(1)} ${tx.toFixed(1)},${ty.toFixed(1)}" fill="none" stroke="${PLANK}" stroke-width="${(h * 0.085).toFixed(1)}" stroke-linecap="round"/>`,
+  ]
+  // Fronds: leaf shapes arching out from the top and drooping at the tip.
+  const fronds: [number, number, string][] = [
+    [-0.62, 0.1, LEAF.shade],
+    [0.62, 0.1, LEAF.shade],
+    [-0.42, -0.2, LEAF.lit],
+    [0.42, -0.2, LEAF.lit],
+    [0, -0.34, LEAF.lit],
+  ]
+  for (const [dx, dy, color] of fronds) {
+    const [ex, ey] = [tx + dx * h, ty + dy * h]
+    const [mx, my] = [tx + dx * h * 0.55, ty + dy * h - h * 0.26]
+    markup.push(
+      `<path d="M${tx.toFixed(1)},${ty.toFixed(1)}Q${mx.toFixed(1)},${my.toFixed(1)} ${ex.toFixed(1)},${ey.toFixed(1)}Q${mx.toFixed(1)},${(my + h * 0.2).toFixed(1)} ${tx.toFixed(1)},${ty.toFixed(1)}Z" fill="${color}"/>`
+    )
   }
+  markup.push(
+    `<circle cx="${tx.toFixed(1)}" cy="${(ty + h * 0.03).toFixed(1)}" r="${(h * 0.05).toFixed(1)}" fill="${PLANK_GAP}"/>`
+  )
+  return markup.join('')
+}
+
+/** A beach hut on short stilts: striped walls, a pitched roof, a dark door.
+ *  `size` is its width in map grid units; its foot stands at x, y. */
+export function beachHutMarkup(
+  x: number,
+  y: number,
+  size: number,
+  g: number
+): string {
+  const [cx, fy, w] = [x * g, y * g, size * g]
+  const [left, floor, eaves, ridge] = [
+    cx - w / 2,
+    fy - w * 0.14,
+    fy - w * 0.72,
+    fy - w * 1.12,
+  ]
+  const markup = [-0.36, 0.36].map(
+    dx =>
+      `<path d="M${(cx + dx * w).toFixed(1)},${floor.toFixed(1)}V${fy.toFixed(1)}" stroke="${PLANK_GAP}" stroke-width="3"/>`
+  )
+  markup.push(
+    `<rect x="${left.toFixed(1)}" y="${eaves.toFixed(1)}" width="${w.toFixed(1)}" height="${(floor - eaves).toFixed(1)}" fill="${BUILT.wall}"/>`
+  )
+  for (let n = 0; n < 5; n += 2) {
+    markup.push(
+      `<rect x="${(left + (w * n) / 5).toFixed(1)}" y="${eaves.toFixed(1)}" width="${(w / 5).toFixed(1)}" height="${(floor - eaves).toFixed(1)}" fill="${BUILT.trim}"/>`
+    )
+  }
+  markup.push(
+    `<rect x="${(cx - w * 0.11).toFixed(1)}" y="${(floor - w * 0.4).toFixed(1)}" width="${(w * 0.22).toFixed(1)}" height="${(w * 0.4).toFixed(1)}" fill="${PLANK_GAP}"/>`,
+    `<path d="M${(left - w * 0.1).toFixed(1)},${eaves.toFixed(1)}L${cx.toFixed(1)},${ridge.toFixed(1)}L${(left + w * 1.1).toFixed(1)},${eaves.toFixed(1)}Z" fill="${BUILT.roof}"/>`,
+    `<path d="M${cx.toFixed(1)},${ridge.toFixed(1)}L${(left + w * 1.1).toFixed(1)},${eaves.toFixed(1)}L${(cx + w * 0.12).toFixed(1)},${eaves.toFixed(1)}Z" fill="${PLANK}"/>`
+  )
+  return markup.join('')
+}
+
+// Puffs of steam rising from a point, the higher the smaller and fainter.
+function steamMarkup(cx: number, cy: number, reach: number, opacity: number) {
   return [
-    `<path d="${fan(1.22)}" fill="${WATER}" fill-opacity="0.35"/>`,
-    `<path d="${fan(1)}" fill="${wet}" stroke="${wet}" stroke-width="1" stroke-linejoin="round"/>`,
-    `<path d="M${xy(first, 1)}L${xy(second, 1)}" stroke="${WATER_STREAK}" stroke-width="3.5" stroke-linecap="round"/>`,
+    [0, 0.5, 0.3],
+    [0.22, 1, 0.24],
+    [-0.1, 1.5, 0.17],
+  ]
+    .map(
+      ([dx, up, r], n) =>
+        `<circle cx="${(cx + dx * reach).toFixed(1)}" cy="${(cy - up * reach).toFixed(1)}" r="${(r * reach).toFixed(1)}" fill="${WATER_STREAK}" fill-opacity="${(opacity - n * 0.15).toFixed(2)}"/>`
+    )
+    .join('')
+}
+
+/** A hot spring: a pool of bright water in a crust of sulphur, with a wisp
+ *  of steam. `size` is its width in map grid units. */
+export function sulphurPoolMarkup(
+  x: number,
+  y: number,
+  size: number,
+  squash: number,
+  g: number,
+  seed: number,
+  steam = true
+): string {
+  const [cx, cy, r] = [x * g, y * g, (size / 2) * g]
+  const ring = (scale: number, fill: string) =>
+    `<ellipse cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" rx="${(r * scale).toFixed(1)}" ry="${(r * scale * squash).toFixed(1)}" fill="${fill}"/>`
+  const markup = [
+    ring(1, SULPHUR.crust),
+    ring(0.8, SULPHUR.pale),
+    ring(0.62, WATER),
+    ring(0.3, WATER_STREAK),
+  ]
+  if (steam && roll(seed) > 0.4)
+    markup.push(steamMarkup(cx, cy - r * 0.2, r * 0.9, 0.6))
+  return markup.join('')
+}
+
+/** A geyser: a low cone of sulphur-stained rock with a column of water and
+ *  steam going up from it. `size` is its height in map grid units. */
+export function geyserMarkup(
+  x: number,
+  y: number,
+  size: number,
+  g: number,
+  rock: string
+): string {
+  const [cx, fy, h] = [x * g, y * g, size * g]
+  const w = h * 0.5
+  return [
+    `<path d="M${(cx - w / 2).toFixed(1)},${fy.toFixed(1)}L${(cx - w * 0.14).toFixed(1)},${(fy - h * 0.22).toFixed(1)}H${(cx + w * 0.14).toFixed(1)}L${(cx + w / 2).toFixed(1)},${fy.toFixed(1)}Z" fill="${rock}"/>`,
+    `<path d="M${(cx - w * 0.14).toFixed(1)},${(fy - h * 0.22).toFixed(1)}H${(cx + w * 0.14).toFixed(1)}L${(cx + w * 0.3).toFixed(1)},${(fy - h * 0.08).toFixed(1)}H${(cx - w * 0.3).toFixed(1)}Z" fill="${SULPHUR.crust}"/>`,
+    // The jet, wider toward the top, and the steam it goes up into.
+    `<path d="M${(cx - w * 0.07).toFixed(1)},${(fy - h * 0.22).toFixed(1)}L${(cx - w * 0.2).toFixed(1)},${(fy - h * 0.8).toFixed(1)}H${(cx + w * 0.2).toFixed(1)}L${(cx + w * 0.07).toFixed(1)},${(fy - h * 0.22).toFixed(1)}Z" fill="${WATER_STREAK}"/>`,
+    `<path d="M${cx.toFixed(1)},${(fy - h * 0.25).toFixed(1)}V${(fy - h * 0.78).toFixed(1)}" stroke="${WATER}" stroke-width="2"/>`,
+    steamMarkup(cx, fy - h * 0.62, h * 0.42, 0.95),
   ].join('')
+}
+
+/** The crown of a forest tree seen from above: a round of leaves, lit on one
+ *  side. `size` is its width in map grid units. */
+export function canopyMarkup(
+  x: number,
+  y: number,
+  size: number,
+  squash: number,
+  g: number,
+  lit: string,
+  shade: string
+): string {
+  const [cx, cy, r] = [x * g, y * g, (size / 2) * g]
+  return (
+    `<ellipse cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" rx="${r.toFixed(1)}" ry="${(r * (squash + 0.2)).toFixed(1)}" fill="${shade}"/>` +
+    `<ellipse cx="${(cx - r * 0.18).toFixed(1)}" cy="${(cy - r * 0.2).toFixed(1)}" rx="${(r * 0.62).toFixed(1)}" ry="${(r * 0.5).toFixed(1)}" fill="${lit}"/>`
+  )
 }

@@ -71,6 +71,8 @@ export type HexCover =
   | 'hamlet'
   | 'dunes'
   | 'meadow'
+  | 'tropical'
+  | 'thermals'
 
 export interface HexDistrictSpec {
   // The two letters its tiles carry on the tile map.
@@ -99,6 +101,11 @@ export interface HexDistrictSpec {
   // An escarpment: its cliffs toward the viewer are not sheer but lean out,
   // a steep slope of bare banded rock down onto the land in front.
   scarp?: boolean
+  // A village on stilts: every tile of it is water, with a platform of
+  // planks over it that its logos stand on.
+  stilts?: boolean
+  // A building of its own stands in the roomiest gap its logos leave.
+  building?: 'capitol' | 'school' | 'forum'
   // A beach: where it meets the sea toward the viewer its sand runs gently
   // down into the water, in place of a cliff.
   beach?: boolean
@@ -199,7 +206,15 @@ export interface HexLaidTile extends HexGridTile {
   // level, with this strip of planks over it at its district's height, which
   // is all of the tile a logo may stand on; `along` is the way the pier runs,
   // toward the land.
-  deck: { shape: Point[]; along: Point; height: number } | null
+  // A stilt village's tile has one too: a platform, not a strip.
+  deck: {
+    shape: Point[]
+    along: Point
+    height: number
+    platform: boolean
+  } | null
+  // Its district's building (see HexDistrictSpec.building).
+  building: 'capitol' | 'school' | 'forum' | null
   // What its district is covered with (see HexDistrictSpec.cover).
   cover: HexCover | null
   // Its district's own ground color, if it has one.
@@ -401,6 +416,8 @@ const CONE_RUN = 0.35
 // A pier's deck: half its width, and how far past the middle of its last tile
 // its head reaches (map grid units).
 const DECK_HALF_WIDTH = 0.3
+// A stilt village's platform, as a share of its tile.
+const STILT_PLATFORM = 0.88
 const DECK_HEAD = 1.1
 
 interface Plateau {
@@ -686,10 +703,7 @@ export function layoutHexMap(
   // strip of planks over it, running straight between the sides it shares
   // with the rest of its district; on a pier's last tile it ends a little
   // past the middle, so that open water lies beyond the pier's head.
-  const deckOn = new Map<
-    string,
-    { shape: Point[]; along: Point; height: number }
-  >()
+  const deckOn = new Map<string, NonNullable<HexLaidTile['deck']>>()
   for (const tile of planned.values()) {
     if (tile.mark !== 'deck') continue
     if (!districtByCode.has(tile.code!)) {
@@ -732,7 +746,25 @@ export function layoutHexMap(
         along
       )
     }
-    deckOn.set(tile.ref, { shape, along, height: tile.height })
+    deckOn.set(tile.ref, {
+      shape,
+      along,
+      height: tile.height,
+      platform: false,
+    })
+  }
+  // A stilt village: a platform on every tile, in from the tile's sides, so
+  // that water shows between one platform and the next.
+  for (const { code, stilts } of spec.districts) {
+    if (!stilts) continue
+    for (const tile of tilesOf.get(code) ?? []) {
+      deckOn.set(tile.ref, {
+        shape: topOf(tile, STILT_PLATFORM),
+        along: [0, 1],
+        height: tile.height,
+        platform: true,
+      })
+    }
   }
   for (const { code } of spec.districts) {
     const tiles = tilesOf.get(code) ?? []
@@ -1301,6 +1333,7 @@ export function layoutHexMap(
       state,
       sunken: district?.sunken === true && state !== 'sea',
       walled: district?.walled === true && state !== 'sea',
+      building: state === 'sea' ? null : (district?.building ?? null),
       scarp: district?.scarp === true && state !== 'sea',
       beach: district?.beach === true && state !== 'sea',
       slope: state === 'sea' || !plan ? 0 : slopeOf(plan),

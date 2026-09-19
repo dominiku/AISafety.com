@@ -62,7 +62,7 @@ const TILES = `
 # 0   1   2   3   4   5   6   7   8   9   10  11  12  13  14  15  16  17  18
   ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..
   ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..
-  ..  ..  Ne  Ne~ Ne  Fo~ Fo  Fo  Fo  Gr  cv! cv  Go  Go  Th  Th  Th  Lo  ..
+  ..  ..  Ne  Ne~ Ne  Fo~ Fo  Fo  Fr  Gr  cv! cv  Go  Go  Th  Th  Th  Lo  ..
   ..  ..  Ne  Ne~ Ne~ Fo~ Fo! Fo  Fr  Gr  cv  Pa  Pa  Go  Th  Th! Th  Lo  ..
   ..  ..  Ne~ Ne! Ne  Fo  Fo~ Fo~ Fr  Gr  cv  Pa  Ma  Ma  Ma! St  Lo  ..  ..
   ..  In! In  In  Fb  Pp  Pp  Pp  Fr~ Ca~ Ca  Ca  Ma  Ma  St  Co  Co  cr  ..
@@ -70,7 +70,7 @@ const TILES = `
   ..  In  hb  In  Fb  Tp  Tp  Tp  Tp  Hu  Ca  Al  Al  Al~ Co~ Co  Co  Cp  ..
   ..  ..  In  Tp  Tp  Tp  Tp  Hu  Hu  Gm  Gm  Al  Vc  Ev  Ev  Co! Cp  Cp! ..
   Gy! Gy  ..  ..  Op  Op  Op  Op  To  Gm  Gm  Vc  Vc  Ev  Ev  Gm  Cp  ..  ..
-  Gy  Gy  Gy  ..  ..  ..  ..  ..  To  To  Gm  Gm  Gm  Gm  Gm  ..  ..  ..  ..
+  Gy  Gy  Gy  ..  ..  ..  ..  To  To  To  Gm  Gm  Gm  Gm  Gm  ..  ..  ..  ..
   ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..
 `
 
@@ -86,29 +86,32 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
     // The delta's coast: the river's mouths, and the camp on the beach.
     { code: 'Ne', district: 'News and commentary', realm: 'Media and discourse', height: 1,
       landmark: { symbol: 'beach-camp', width: 1.9, height: 2.05 } },
-    { code: 'Fr', district: 'Forums and online communities', realm: 'Media and discourse', height: 2.5 },
+    { code: 'Fr', district: 'Forums and online communities', realm: 'Media and discourse', height: 2.5, building: 'forum' },
     { code: 'Gr', district: 'Grassroots campaigns', realm: 'Advocacy and public engagement', height: 1 },
     { code: 'Pa', district: 'Professional advocacy and communication', realm: 'Advocacy and public engagement', height: 1.5, pier: true },
     // The landing: the arms of a sheltered harbor, where the road starts.
     { code: 'In', district: 'Introductory learning', realm: 'Talent pipeline', height: 0.5,
       landmark: { symbol: 'lighthouse', width: 1, height: 1.8 } },
     { code: 'Fb', district: 'Field-building and local groups', realm: 'Talent pipeline', height: 1.5 },
-    { code: 'Pp', district: 'Policy and governance programs', realm: 'Talent pipeline', height: 2 },
+    { code: 'Pp', district: 'Policy and governance programs', realm: 'Talent pipeline', height: 2, building: 'school' },
     { code: 'Tp', district: 'Technical research programs', realm: 'Talent pipeline', height: 2.5, cover: 'fields' },
     // The castle: the six tiles round the keep, whatever its logos need.
     { code: 'Ca', district: 'Career support and placement', realm: 'Talent pipeline', height: 3, minTiles: 6, overWater: true },
-    // Support Shoreline is one long beach, west to east: the sands, the low
-    // terrace of the toolsheds, a fishing hamlet on a rise, and the dunes,
-    // which run on under the escarpment. The valley runs down to the beach from under the
-    // castle, between two arms of the Range: its walls are the Control Dam's
-    // high ground to the west and north and the escarpment to the east, and
-    // it is open to the south, where the viewer looks in.
-    { code: 'Op', district: 'Operations and services', realm: 'Field infrastructure', height: 1, beach: true },
-    { code: 'Hu', district: 'Hubs and coworking', realm: 'Field infrastructure', height: 1.5, cover: 'hamlet' },
-    { code: 'To', district: 'Tools, databases and research infrastructure', realm: 'Field infrastructure', height: 0.5, beach: true },
+    // Support Shoreline is one beach on ONE level (a shore has no steps in
+    // it), so its districts are told apart by what is on them, not by height:
+    // the tropical sands with their palms and beach huts, the fishing hamlet
+    // behind them, the toolsheds as a village on stilts out over the water,
+    // and the dunes, which run on under the escarpment. The valley runs down
+    // to the beach from under the castle, between two arms of the Range: its
+    // walls are the Control Dam's high ground to the west and north and the
+    // escarpment to the east, and it is open to the south, where the viewer
+    // looks in.
+    { code: 'Op', district: 'Operations and services', realm: 'Field infrastructure', height: 1, beach: true, cover: 'tropical' },
+    { code: 'Hu', district: 'Hubs and coworking', realm: 'Field infrastructure', height: 1, cover: 'hamlet' },
+    { code: 'To', district: 'Tools, databases and research infrastructure', realm: 'Field infrastructure', height: 1, stilts: true },
     { code: 'Gm', district: 'Grantmakers and donor advisory', realm: 'Field infrastructure', height: 1, cover: 'dunes', beach: true },
-    { code: 'Vc', district: 'Venture capital and incubators', realm: 'Field infrastructure', height: 2, cover: 'meadow', ground: '#8fae55' },
-    { code: 'Go', district: 'Governments and multi-stakeholder bodies', realm: 'Policy and strategy', height: 2 },
+    { code: 'Vc', district: 'Venture capital and incubators', realm: 'Field infrastructure', height: 2, cover: 'tropical' },
+    { code: 'Go', district: 'Governments and multi-stakeholder bodies', realm: 'Policy and strategy', height: 2, building: 'capitol' },
     { code: 'Ma', district: 'Macrostrategy and forecasting', realm: 'Policy and strategy', height: 3.5,
       landmark: { symbol: 'summit', width: 3, height: 1.9 } },
     { code: 'Th', district: 'Policy research and think tanks', realm: 'Policy and strategy', height: 2.5,
@@ -123,7 +126,7 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
     // beach, the escarpment: one long leaning slope of banded rock.
     { code: 'Al', district: 'Alignment and control', realm: 'Technical research', height: 4, dam: true },
     { code: 'Ev', district: 'Evaluations and threat research', realm: 'Technical research', height: 4.5, scarp: true },
-    { code: 'Co', district: 'Conceptual and foundations research', realm: 'Technical research', height: 5,
+    { code: 'Co', district: 'Conceptual and foundations research', realm: 'Technical research', height: 5, cover: 'thermals',
       landmark: { symbol: 'cave', width: 1.7, height: 1.63 } },
     { code: 'Ip', district: 'Interpretability and model understanding', realm: 'Technical research', height: 6.5, cone: true,
       landmark: { symbol: 'range', width: 2.8, height: 1.98 } },
@@ -223,10 +226,9 @@ export const MAP_35_HEX_NAMES: Record<string, string> = {
   // Was "Circuit Cove" (or "Interpretability Inlet"): the shoulder of the
   // volcano, round the crater and its lake.
   'Interpretability and model understanding': 'Circuit Crater',
-  // Was "Theory Thicket" (nothing grows so thick that high), then "Theory
-  // Tarn" (T and Th do not alliterate). The tarn the river rises in lies on
-  // these heights. Or "Concept Col", or the classic map's "Conceptual Cliffs".
-  'Conceptual and foundations research': 'Hypothesis Heights',
+  // Was "Theory Thicket" (nothing grows so thick that high): hot springs and
+  // geysers beside the volcano, and the river rises among them.
+  'Conceptual and foundations research': 'Theory Thermals',
   // Was "Capabilities Cove": it is a walled high plateau now.
   'Capabilities research': 'Capabilities Crag',
 }

@@ -354,6 +354,26 @@ describe('layoutHexMap', () => {
     ).toThrow(/starts from a tile of solid ground/)
   })
 
+  it('lays a stilt village as platforms over water, and passes a building on', () => {
+    const layout = layoutHexMap(
+      withTiles(SPEC.tiles, {
+        districts: [
+          { ...SPEC.districts[0], building: 'school' },
+          { ...SPEC.districts[1], stilts: true },
+        ],
+        takeAllTiles: true,
+      }),
+      [...logos('Alpha', 1), ...logos('Beta', 3)]
+    )
+    const platform = at(layout, 2, 2)
+    expect(platform.state).toBe('water')
+    expect(platform.deck?.platform).toBe(true)
+    expect(platform.deck?.height).toBe(2)
+    expect(layout.unplaced).toEqual([])
+    expect(at(layout, 2, 1).building).toBe('school')
+    expect(platform.building).toBe(null)
+  })
+
   it('marks the tiles of an escarpment, and lays a crater as land of its own', () => {
     const layout = layoutHexMap(
       withTiles(SPEC.tiles.replace('Bb  Bb  Bb  cv', 'Bb  Bb  Bb  cr'), {
