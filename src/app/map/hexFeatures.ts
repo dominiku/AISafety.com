@@ -1,6 +1,7 @@
 // PROTOTYPE Map 3.5, "Hex work" view: the pieces of the board that are drawn
 // by code and are no district's ordinary ground: a crater with its lake, the
-// banded rock of an escarpment's cliff, and the planks of a pier. Each returns
+// leaning slopes of an escarpment and a volcano, the planks of a pier, dunes
+// and meadow grass. Each returns
 // SVG markup for hexBackdrop.ts to place; sizes are in map grid units, `g` is
 // the pixels in one.
 //
@@ -85,57 +86,6 @@ export function craterMarkup(
 }
 
 /**
- * The bare rock of an escarpment, over a cliff face already drawn from `a` to
- * `b` along its lip and `drop` deep: beds of rock in bands across it, cracks
- * down it, and scree where it has a foot on land.
- */
-export function scarpFaceMarkup(
-  a: Point,
-  b: Point,
-  drop: number,
-  g: number,
-  cliff: CliffColors,
-  onLand: boolean,
-  // Any whole number that differs from face to face.
-  seed: number
-): string {
-  const at = (t: number, down: number) =>
-    `${((a[0] + (b[0] - a[0]) * t) * g).toFixed(1)},${((a[1] + (b[1] - a[1]) * t + down) * g).toFixed(1)}`
-  const out: string[] = []
-  // Beds: a pale band and a dark line under it, about every third of a level.
-  const beds = Math.max(2, Math.round(drop / 0.16))
-  for (let n = 1; n < beds; n++) {
-    const down = (drop * n) / beds
-    const thick = Math.min(0.045, drop / beds / 2.5)
-    out.push(
-      `<path d="M${at(0, down - thick)}L${at(1, down - thick)}L${at(1, down)}L${at(0, down)}Z" fill="${cliff.lip}" fill-opacity="${n % 2 ? 0.75 : 0.4}"/>`,
-      `<path d="M${at(0, down)}L${at(1, down)}" stroke="${cliff.foot}" stroke-width="1.5"/>`
-    )
-  }
-  // Cracks from the lip down, none the same length.
-  for (let n = 0; n < 4; n++) {
-    const t = (n + 0.3 + roll(seed + n) * 0.5) / 4
-    const reach = drop * (0.35 + roll(seed * 3 + n) * 0.6)
-    out.push(
-      `<path d="M${at(t, 0)}L${at(t + 0.015, reach * 0.5)}L${at(t - 0.01, reach)}" fill="none" stroke="${LINE}" stroke-opacity="0.45" stroke-width="1.6"/>`
-    )
-  }
-  if (onLand) {
-    for (let n = 0; n < 6; n++) {
-      const t = (n + roll(seed * 7 + n)) / 6
-      const r = (0.05 + roll(seed * 5 + n) * 0.06) * g
-      const [x, y] = at(t, drop + 0.03)
-        .split(',')
-        .map(Number)
-      out.push(
-        `<ellipse cx="${x}" cy="${y}" rx="${r.toFixed(1)}" ry="${(r * 0.7).toFixed(1)}" fill="${n % 2 ? cliff.face : cliff.lip}" stroke="${cliff.foot}" stroke-width="1"/>`
-      )
-    }
-  }
-  return out.join('')
-}
-
-/**
  * A pier's deck on one tile: `shape` is the strip of planks (a convex shape, at
  * the height the pier stands at), `along` the way the pier runs. Planks lie
  * across it, a beam runs down each side, and mooring posts stand along the
@@ -194,7 +144,7 @@ export function deckMarkup(
   }
   for (const t of [left, right]) {
     out.push(
-      `<path d="M${xy(point(from, t))}L${xy(point(to, t))}" stroke="${PLANK_GAP}" stroke-width="7"/>`
+      `<path d="M${xy(point(from, t))}L${xy(point(to, t))}" stroke="${PLANK_GAP}" stroke-width="4"/>`
     )
   }
   out.push('</g>')
@@ -209,4 +159,143 @@ export function deckMarkup(
     }
   }
   return out.join('')
+}
+
+/**
+ * A slope in place of a sheer cliff: from the lip of a tile's side (`a` to
+ * `b`) it leans out over the land or water in front as it drops. `out` is the
+ * way the side faces on the ground (a unit vector), `run` how far the foot
+ * stands out from under the lip on the ground, `drop` how far down the screen
+ * the foot lies. With `beds`, the bare banded rock of an escarpment; without,
+ * the smooth flank of a volcano. `shade` darkens the side turned from the
+ * light.
+ */
+export function slopeMarkup(
+  a: Point,
+  b: Point,
+  out: Point,
+  run: number,
+  drop: number,
+  squash: number,
+  g: number,
+  cliff: CliffColors,
+  beds: boolean,
+  shade: number,
+  seed: number
+): string {
+  const reach: Point = [out[0] * run, out[1] * run * squash + drop]
+  const at = (t: number, down: number) =>
+    `${((a[0] + (b[0] - a[0]) * t + reach[0] * down) * g).toFixed(1)},${((a[1] + (b[1] - a[1]) * t + reach[1] * down) * g).toFixed(1)}`
+  const face = `M${at(0, 0)}L${at(1, 0)}L${at(1, 1)}L${at(0, 1)}Z`
+  const markup = [
+    `<path d="${face}" fill="${cliff.face}" stroke="${cliff.face}" stroke-width="1" stroke-linejoin="round"/>`,
+  ]
+  if (beds) {
+    const count = Math.max(3, Math.round(drop / 0.15))
+    for (let n = 1; n < count; n++) {
+      const down = n / count
+      const thick = 0.32 / count
+      markup.push(
+        `<path d="M${at(0, down - thick)}L${at(1, down - thick)}L${at(1, down)}L${at(0, down)}Z" fill="${cliff.lip}" fill-opacity="${n % 2 ? 0.7 : 0.35}"/>`,
+        `<path d="M${at(0, down)}L${at(1, down)}" stroke="${cliff.foot}" stroke-width="1.4"/>`
+      )
+    }
+    // Gullies down the slope, none the same length.
+    for (let n = 0; n < 4; n++) {
+      const t = (n + 0.25 + roll(seed + n) * 0.5) / 4
+      const end = 0.4 + roll(seed * 3 + n) * 0.55
+      markup.push(
+        `<path d="M${at(t, 0)}L${at(t + 0.02, end * 0.5)}L${at(t - 0.01, end)}" fill="none" stroke="${LINE}" stroke-opacity="0.4" stroke-width="1.6"/>`
+      )
+    }
+  } else {
+    // Runnels of old lava, fanning a little toward the foot.
+    for (let n = 0; n < 5; n++) {
+      const t = (n + 0.5) / 5
+      const lean = (t - 0.5) * 0.08
+      markup.push(
+        `<path d="M${at(t, 0.04)}L${at(t + lean, 0.55 + roll(seed + n) * 0.4)}" fill="none" stroke="${cliff.foot}" stroke-opacity="0.55" stroke-width="2"/>`
+      )
+    }
+  }
+  markup.push(
+    `<path d="M${at(0, 0)}L${at(1, 0)}" stroke="${cliff.lip}" stroke-width="3" stroke-linecap="round"/>`
+  )
+  if (shade > 0) {
+    markup.push(`<path d="${face}" fill="${LINE}" fill-opacity="${shade}"/>`)
+  }
+  return markup.join('')
+}
+
+/** The piece of slope round a corner, between the slopes of two sides that
+ *  meet there: `first` and `second` are how far each side's foot lies from
+ *  its lip, as drawn. */
+export function slopeCornerMarkup(
+  corner: Point,
+  first: Point,
+  second: Point,
+  g: number,
+  cliff: CliffColors,
+  shade: number
+): string {
+  const xy = (p: Point, by: Point = [0, 0]) =>
+    `${((p[0] + by[0]) * g).toFixed(1)},${((p[1] + by[1]) * g).toFixed(1)}`
+  const d = `M${xy(corner)}L${xy(corner, first)}L${xy(corner, second)}Z`
+  return (
+    `<path d="${d}" fill="${cliff.face}" stroke="${cliff.face}" stroke-width="1" stroke-linejoin="round"/>` +
+    (shade > 0 ? `<path d="${d}" fill="${LINE}" fill-opacity="${shade}"/>` : '')
+  )
+}
+
+/** A dune: a low hump of sand with its lee side in shade, and marram grass on
+ *  its crest. `size` is its width in map grid units. */
+export function duneMarkup(
+  x: number,
+  y: number,
+  size: number,
+  g: number,
+  lit: string,
+  shade: string,
+  grass: string,
+  seed: number
+): string {
+  const [cx, cy, w] = [x * g, y * g, size * g]
+  const h = w * 0.3
+  const hump = `M${(cx - w / 2).toFixed(1)},${cy.toFixed(1)}Q${(cx - w * 0.15).toFixed(1)},${(cy - h * 1.9).toFixed(1)} ${(cx + w * 0.12).toFixed(1)},${(cy - h).toFixed(1)}T${(cx + w / 2).toFixed(1)},${cy.toFixed(1)}Z`
+  const lee = `M${(cx + w * 0.12).toFixed(1)},${(cy - h).toFixed(1)}Q${(cx + w * 0.34).toFixed(1)},${(cy - h * 0.55).toFixed(1)} ${(cx + w / 2).toFixed(1)},${cy.toFixed(1)}L${(cx + w * 0.05).toFixed(1)},${cy.toFixed(1)}Z`
+  const markup = [
+    `<path d="${hump}" fill="${lit}"/>`,
+    `<path d="${lee}" fill="${shade}" fill-opacity="0.55"/>`,
+  ]
+  if (roll(seed) > 0.35) {
+    const [gx, gy] = [cx - w * 0.12, cy - h * 1.05]
+    for (const lean of [-5, 0, 5]) {
+      markup.push(
+        `<path d="M${gx.toFixed(1)},${gy.toFixed(1)}l${lean},-9" stroke="${grass}" stroke-width="1.8" stroke-linecap="round"/>`
+      )
+    }
+  }
+  return markup.join('')
+}
+
+/** A tuft of meadow grass, with a flower in it now and then. */
+export function tuftMarkup(
+  x: number,
+  y: number,
+  g: number,
+  grass: string,
+  flower: string,
+  seed: number
+): string {
+  const [cx, cy] = [x * g, y * g]
+  const markup = [-6, -2, 2, 6].map(
+    (lean, n) =>
+      `<path d="M${(cx + lean * 0.6).toFixed(1)},${cy.toFixed(1)}l${lean * 0.7},${-(7 + (n % 2) * 3)}" stroke="${grass}" stroke-width="1.8" stroke-linecap="round"/>`
+  )
+  if (roll(seed) > 0.6) {
+    markup.push(
+      `<circle cx="${(cx + 7).toFixed(1)}" cy="${(cy - 4).toFixed(1)}" r="2.4" fill="${flower}"/>`
+    )
+  }
+  return markup.join('')
 }

@@ -286,7 +286,7 @@ export function hexBackdropMarkup(
     // viewer, for boats to lie along.
     const [tx, ty] = end.toward
     const turn: Point = tx > 0 ? [-ty, tx] : [ty, -tx]
-    const head = at(1.3)
+    const head = at(end.kind === 'pier' ? 1.7 : 1.3)
     const arm =
       end.kind === 'pier'
         ? `L${xy([head[0] + turn[0] * 0.75, head[1] + turn[1] * 0.75])}`

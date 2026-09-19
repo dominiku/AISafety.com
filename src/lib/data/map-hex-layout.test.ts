@@ -365,6 +365,10 @@ describe('layoutHexMap', () => {
     )
     expect(at(layout, 1, 1).scarp).toBe(true)
     expect(at(layout, 1, 2).scarp).toBe(false)
+    // An escarpment's sides lean out, a crater's too; ordinary land is sheer.
+    expect(at(layout, 1, 1).slope).toBeGreaterThan(0)
+    expect(at(layout, 4, 2).slope).toBeGreaterThan(0)
+    expect(at(layout, 1, 2).slope).toBe(0)
     expect(at(layout, 4, 2).state).toBe('crater')
     expect(at(layout, 4, 2).height).toBe(4)
   })

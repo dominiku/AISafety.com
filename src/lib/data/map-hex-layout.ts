@@ -67,6 +67,8 @@ export type HexCover =
   | 'fields'
   | 'vineyard'
   | 'hamlet'
+  | 'dunes'
+  | 'meadow'
 
 export interface HexDistrictSpec {
   // The two letters its tiles carry on the tile map.
@@ -92,8 +94,12 @@ export interface HexDistrictSpec {
   overWater?: boolean
   // Ringed by a wall of dark peaks along its edge (a forbidding country).
   walled?: boolean
-  // An escarpment: its cliffs toward the viewer are bare banded rock.
+  // An escarpment: its cliffs toward the viewer are not sheer but lean out,
+  // a steep slope of bare banded rock down onto the land in front.
   scarp?: boolean
+  // The flank of a volcano: its sides toward the viewer slope, more gently
+  // than an escarpment's, and smooth.
+  cone?: boolean
   // Not land at all: its logos lie on open water (the closed orgs, as
   // sunken ships). Its tiles are not drawn and its height is 0.
   sunken?: boolean
@@ -178,6 +184,10 @@ export interface HexLaidTile extends HexGridTile {
   walled: boolean
   // Its district is an escarpment (see HexDistrictSpec.scarp).
   scarp: boolean
+  // How far its sides toward the viewer lean out for each level they drop
+  // (map grid units on the ground): an escarpment's, a volcano's, or 0 for
+  // sheer cliffs.
+  slope: number
   // A tile of a pier (marked "+"): its state is 'water' and it lies at sea
   // level, with this strip of planks over it at its district's height, which
   // is all of the tile a logo may stand on; `along` is the way the pier runs,
@@ -376,10 +386,15 @@ function raise(points: Point[], atStart: boolean, rise: number): Point[] {
 // The sides of a tile in the order the corners of its top run.
 const SIDES: HexDirection[] = ['SE', 'S', 'SW', 'NW', 'N', 'NE']
 
+// How far a slope leans out for each level it drops (map grid units on the
+// ground): an escarpment's, and a volcano's.
+const SCARP_RUN = 0.3
+const CONE_RUN = 0.35
+
 // A pier's deck: half its width, and how far past the middle of its last tile
 // its head reaches (map grid units).
-const DECK_HALF_WIDTH = 0.52
-const DECK_HEAD = 0.85
+const DECK_HALF_WIDTH = 0.3
+const DECK_HEAD = 1.1
 
 interface Plateau {
   // The tiles logos may stand on.
@@ -606,6 +621,11 @@ export function layoutHexMap(
   const neighborOf = (tile: HexGridTile, side: HexDirection) =>
     planned.get(hexKey(hexNeighbor(tile, side)))
   const kindOf = (tile: PlannedTile) => featureByCode.get(tile.code!)?.kind
+  const slopeOf = (tile: PlannedTile) => {
+    const district = districtByCode.get(tile.code!)
+    if (district?.scarp) return SCARP_RUN
+    return district?.cone || kindOf(tile) === 'crater' ? CONE_RUN : 0
+  }
   // Sea as the tile map paints it: open sea or a cove.
   const isWater = (tile: HexGridTile, side: HexDirection) => {
     const neighbor = neighborOf(tile, side)
@@ -670,15 +690,18 @@ export function layoutHexMap(
         `Hex map: the deck at ${where(tile)} belongs to no district`
       )
     }
-    const joined = SIDES.map((side, n) => ({ side, n })).filter(
+    const touching = SIDES.map((side, n) => ({ side, n })).filter(
       ({ side }) => neighborOf(tile, side)?.code === tile.code
     )
-    const straight =
-      joined.length === 1 ||
-      (joined.length === 2 && joined[1].n - joined[0].n === 3)
-    if (!straight) {
+    // It runs between two opposite sides where it can (whatever else of its
+    // district it brushes past), and otherwise out from the one side.
+    const through = touching.filter(({ n }) =>
+      touching.some(other => other.n === (n + 3) % 6)
+    )
+    const joined = through.length === 2 ? through : touching
+    if (joined.length !== through.length && joined.length !== 1) {
       throw new Error(
-        `Hex map: the deck "${tile.ref}" at ${where(tile)} touches ${joined.length} tiles of its district; a pier runs straight, so it touches one (its head) or two on opposite sides`
+        `Hex map: the deck "${tile.ref}" at ${where(tile)} touches ${joined.length} tiles of its district, no two of them on opposite sides; a pier runs straight`
       )
     }
     const center = drawn(tile, flatCenter(tile))
@@ -1019,9 +1042,13 @@ export function layoutHexMap(
         side,
         // Of equal shores, the one farthest out: it is the least likely to
         // lie hidden behind higher ground.
+        // ...and not into water that high ground in front of it hides.
         worth:
           (neighborOf(tile, side) ? 2 : 0) +
-          (SOUTH_FACING.includes(side) ? 1 : 0) +
+          (SOUTH_FACING.includes(side) ? 1 : 0) -
+          (planned.get(hexKey(hexNeighbor(hexNeighbor(tile, side), 'S')))
+            ?.height ?? 0) /
+            2 +
           inland(tile) / 1000,
       }))
     )
@@ -1096,8 +1123,22 @@ export function layoutHexMap(
             neighbor && SOUTH_FACING.includes(side)
               ? Math.max(0, neighbor.height - tile.height) * view.lift
               : 0
+          // A slope leaning out from a higher tile behind lies on this one.
+          // (As drawn, its reach is squashed straight toward the viewer, and
+          // less so to either side.)
+          const under = side === 'N' ? view.squash : 0.8
+          const foot =
+            neighbor && ['NW', 'N', 'NE'].includes(side)
+              ? slopeOf(neighbor) *
+                Math.max(0, neighbor.height - tile.height) *
+                under
+              : 0
           return [
-            { a: top[n], b: top[(n + 1) % 6], clear: packing.margin + covered },
+            {
+              a: top[n],
+              b: top[(n + 1) % 6],
+              clear: packing.margin + covered + foot,
+            },
           ]
         })
       }),
@@ -1254,6 +1295,7 @@ export function layoutHexMap(
       sunken: district?.sunken === true && state !== 'sea',
       walled: district?.walled === true && state !== 'sea',
       scarp: district?.scarp === true && state !== 'sea',
+      slope: state === 'sea' || !plan ? 0 : slopeOf(plan),
       deck: state === 'sea' ? null : (deckOn.get(laid.ref) ?? null),
       cover: state === 'sea' ? null : (district?.cover ?? null),
       ground: state === 'sea' ? null : (district?.ground ?? null),
