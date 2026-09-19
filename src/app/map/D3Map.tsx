@@ -43,6 +43,8 @@ import {
 import { pinFootprint } from '@/lib/data/map-realm-layout'
 import { drawRealmArtBackdrop } from './realmArtBackdrop'
 import { drawRealmBackdrop, type RealmBackdrop } from './realmBackdrop'
+import { drawHexBackdrop } from './hexBackdrop'
+import type { HexLayout } from '@/lib/data/map-hex-layout'
 import styles from './page.module.css'
 
 interface MapOrg {
@@ -72,6 +74,9 @@ interface D3MapProps {
   // PROTOTYPE Map 3.5: the schematic, or the same layout in the classic art's
   // hand (realmArtBackdrop.ts).
   realmBackdropStyle?: 'schematic' | 'art'
+  // PROTOTYPE Map 3.5, "Hex work": the board of hexagonal tiles, drawn in
+  // place of the island art (hexBackdrop.ts).
+  hexBackdrop?: HexLayout
   // The explorer column beside the map (MapExplorer). When given, the map
   // follows the column: it shows the column's matches, marks its selection,
   // and a pin click selects the org's card instead of opening its site. The
@@ -133,6 +138,7 @@ export default function D3Map({
   scheme = CLASSIC_MAP_SCHEME,
   realmBackdrop,
   realmBackdropStyle = 'schematic',
+  hexBackdrop,
   explorer,
 }: D3MapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -199,7 +205,7 @@ export default function D3Map({
   // PROTOTYPE Map 3.5: 31 realm and district names do not fit the resting
   // view, so that layout starts with districts named only once zoomed in.
   const [tierConfig, setTierConfig] = useState(() =>
-    realmBackdrop
+    realmBackdrop || hexBackdrop
       ? { ...DEFAULT_ZOOM_TIER_CONFIG, subLabelZoom: REALM_SUB_LABEL_ZOOM }
       : DEFAULT_ZOOM_TIER_CONFIG
   )
@@ -348,25 +354,36 @@ export default function D3Map({
 
     // Add background image. PROTOTYPE Map 3.5: the island art was painted for
     // the classic positions, so the realm layout brings its own schematic.
-    if (realmBackdrop && realmBackdropStyle === 'art') {
+    const artPins = () =>
+      orgs.flatMap(org =>
+        org.x === null || org.y === null
+          ? []
+          : [
+              {
+                x: org.x,
+                y: org.y,
+                radius: Math.sqrt(pinFootprint(org.scale)) * 0.42,
+                furniture: org.isMagic === true,
+              },
+            ]
+      )
+    if (hexBackdrop) {
+      drawHexBackdrop(
+        svgGroup,
+        hexBackdrop,
+        GRID_SIZE,
+        MAP_WIDTH,
+        MAP_HEIGHT,
+        artPins()
+      )
+    } else if (realmBackdrop && realmBackdropStyle === 'art') {
       drawRealmArtBackdrop(
         svgGroup,
         realmBackdrop,
         GRID_SIZE,
         MAP_WIDTH,
         MAP_HEIGHT,
-        orgs.flatMap(org =>
-          org.x === null || org.y === null
-            ? []
-            : [
-                {
-                  x: org.x,
-                  y: org.y,
-                  radius: Math.sqrt(pinFootprint(org.scale)) * 0.42,
-                  furniture: org.isMagic === true,
-                },
-              ]
-        )
+        artPins()
       )
     } else if (realmBackdrop) {
       drawRealmBackdrop(
@@ -495,11 +512,12 @@ export default function D3Map({
     // where the layout has borders. A pin standing outside any district
     // (closed orgs, map furniture) is free, as on the classic map.
     const districtGround = (org: MapOrg) => {
-      if (!realmBackdrop || org.x === null || org.y === null) return undefined
-      const district = realmBackdrop.districtAt(org.x, org.y)
+      const ground = hexBackdrop ?? realmBackdrop
+      if (!ground || org.x === null || org.y === null) return undefined
+      const district = ground.districtAt(org.x, org.y)
       if (district === null) return undefined
       return (px: number, py: number) =>
-        realmBackdrop.districtAt(px / GRID_SIZE, py / GRID_SIZE) === district
+        ground.districtAt(px / GRID_SIZE, py / GRID_SIZE) === district
     }
 
     // PROTOTYPE zoom tiers: every pin's group and footprint, so a zoom can
@@ -1287,6 +1305,7 @@ export default function D3Map({
     scheme,
     realmBackdrop,
     realmBackdropStyle,
+    hexBackdrop,
     hasExplorer,
   ])
 

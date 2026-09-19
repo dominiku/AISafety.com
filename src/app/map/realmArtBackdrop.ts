@@ -39,20 +39,20 @@ import type { RealmBackdrop } from './realmBackdrop'
 // DESIGN REVIEW (Melissa): every color of this view is in this one block.
 // They are the classic map's own palette (public/images/map-1.5.1.svg), held
 // here as placeholders the way realmBackdrop.ts holds the schematic's.
-const SEA = '#112928'
-const SHELF_OUTER = '#173633'
-const SHELF_INNER = '#21463f'
-const SHALLOWS = '#2f5650'
-const LINE = '#112928'
-const ROAD = '#972f00'
-const ROAD_PEBBLE = '#571f02'
+export const SEA = '#112928'
+export const SHELF_OUTER = '#173633'
+export const SHELF_INNER = '#21463f'
+export const SHALLOWS = '#2f5650'
+export const LINE = '#112928'
+export const ROAD = '#972f00'
+export const ROAD_PEBBLE = '#571f02'
 const FOOTPATH = '#ffd1bc'
-const WATER = '#7dd5c2'
-const WATER_STREAK = '#bbe8e1'
-const PLANK = '#972f00'
-const PLANK_GAP = '#571f02'
+export const WATER = '#7dd5c2'
+export const WATER_STREAK = '#bbe8e1'
+export const PLANK = '#972f00'
+export const PLANK_GAP = '#571f02'
 const SAND = '#ffd1bc'
-const SNOW = '#f6fbff'
+export const SNOW = '#f6fbff'
 const CLIFF_ROCK = { lip: '#ff4b00', face: '#d53d00', foot: '#972f00' }
 const CLIFF_SAND = { lip: '#ffa777', face: '#ff7c25', foot: '#d53d00' }
 const CLIFF_EARTH = { lip: '#00ae85', face: '#008969', foot: '#2f5650' }
@@ -71,7 +71,7 @@ const STARFISH = '#ff4b00'
 // districts step through a few close tones of its ground, so a biome has some
 // variety inside it too. Matched on the first word of the realm's name.
 type Terrain = 'shore' | 'trail' | 'delta' | 'plains' | 'range'
-interface RealmTheme {
+export interface RealmTheme {
   // The biome's ground colors; districts take them in turn.
   tones: string[]
   cliff: { lip: string; face: string; foot: string }
@@ -131,7 +131,10 @@ const REALM_THEMES: Record<string, RealmTheme> = {
 }
 const SPARE_THEME: RealmTheme = { tones: ['#00ae85'], cliff: CLIFF_EARTH }
 // How thickly each terrain is strewn, in grid units (see scatterSpots).
-const TERRAIN_SCATTER: Record<Terrain, Parameters<typeof scatterSpots>[3]> = {
+export const TERRAIN_SCATTER: Record<
+  Terrain,
+  Parameters<typeof scatterSpots>[3]
+> = {
   shore: { spacing: 1.25, minRoom: 0.3, maxRoom: 1 },
   trail: { spacing: 1.7, minRoom: 0.45, maxRoom: 1.2 },
   delta: { spacing: 1.8, minRoom: 0.3, maxRoom: 1 },
@@ -142,7 +145,9 @@ const TERRAIN_SCATTER: Record<Terrain, Parameters<typeof scatterSpots>[3]> = {
 // mountainous throughout, so behind the peaks that fill the gaps stand larger
 // ones; the country along the road is settled, and its logos leave no gap a
 // house would fit in, so its houses and hamlets stand behind them too.
-const BACK_ROW: Partial<Record<Terrain, Parameters<typeof scatterSpots>[3]>> = {
+export const BACK_ROW: Partial<
+  Record<Terrain, Parameters<typeof scatterSpots>[3]>
+> = {
   range: { spacing: 2.7, minRoom: 0.9, maxRoom: 1.15 },
   trail: { spacing: 3.1, minRoom: 1.1, maxRoom: 1.2 },
 }
@@ -168,7 +173,7 @@ const TOWN_STREET = { across: 0.2, near: -0.08, far: 0.3 }
 // The map's frame, in grid units.
 const FRAME = { width: 60, height: 32.7 }
 // The classic art, one <symbol> per landmark (see map-art-landmarks.ts).
-const LANDMARKS_URL = '/images/map35-landmarks.svg'
+export const LANDMARKS_URL = '/images/map35-landmarks.svg'
 // Grid units: landmarks that stand at a fixed place, not in a district.
 const LIGHTHOUSE = { width: 1.2, height: 2.2 }
 const BOATS = { width: 5.1, height: 1.9 }
@@ -190,7 +195,7 @@ export interface ArtPin {
 }
 
 const realmKey = (realm: string) => realm.split(' ')[0].toLowerCase()
-const themeOf = (realm: string | undefined) =>
+export const themeOf = (realm: string | undefined) =>
   (realm && REALM_THEMES[realmKey(realm)]) || SPARE_THEME
 const middle = (points: { x: number; y: number }[]) => ({
   x: points.reduce((sum, p) => sum + p.x, 0) / points.length,
@@ -291,7 +296,7 @@ function alongLine(line: Point[]): Point[] {
 }
 
 // One detail of a realm's terrain at a spot, sized to the room it has.
-function terrainDetail(
+export function terrainDetail(
   theme: RealmTheme,
   spot: ScatterSpot,
   g: number,

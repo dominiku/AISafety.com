@@ -20,6 +20,8 @@ import { CLASSIC_MAP_SCHEME } from '@/lib/data/map-areas'
 import { buildRealmScheme, QUIET_REALM } from '@/lib/data/map-realms'
 import { layoutRealmMap, type LayoutPin } from '@/lib/data/map-realm-layout'
 import { MAP_35_GRAVEYARD_MOVE, MAP_35_SPEC } from '@/lib/data/map-realm-spec'
+import { layoutHexMap } from '@/lib/data/map-hex-layout'
+import { MAP_35_HEX_SPEC, hexLogoRadius } from '@/lib/data/map-hex-spec'
 import type { MapOrg } from '@/lib/data/map'
 import { SITE_PAGES } from '@/lib/site-pages'
 import styles from './page.module.css'
@@ -84,9 +86,10 @@ export default function MapClient({
 }: MapClientProps) {
   // 'ia' and 'art' are the same forked data and the same computed layout;
   // they differ only in how the backdrop is drawn (schematic or classic-style).
-  const [dataSource, setDataSource] = useState<'production' | 'ia' | 'art'>(
-    'production'
-  )
+  // 'hex' is the same forked data on a board of hexagonal tiles.
+  const [dataSource, setDataSource] = useState<
+    'production' | 'ia' | 'art' | 'hex'
+  >('production')
   const { orgs, suggestEntryLink, suggestCorrectionLink } =
     dataSource !== 'production' && iaWork ? iaWork : production
 
@@ -193,7 +196,7 @@ export default function MapClient({
   // unchanged.
   const isIaWork = dataSource !== 'production' && iaWork !== null
   const realmMap = useMemo(() => {
-    if (!isIaWork) return null
+    if (!isIaWork || dataSource === 'hex') return null
     const placed: LayoutPin[] = []
     const fixed: { x: number; y: number }[] = []
     // Closed orgs keep their draft arrangement but move as one, out of the
@@ -246,7 +249,56 @@ export default function MapClient({
       scheme,
       backdrop: layout,
     }
-  }, [isIaWork, mapOrgs])
+  }, [isIaWork, dataSource, mapOrgs])
+
+  // PROTOTYPE Map 3.5, "Hex work": the same orgs on a board of hexagonal
+  // tiles (map-hex-spec.ts). Each stands in a fixed spot on a tile of its
+  // District, the closed orgs on their islet; map furniture keeps its draft
+  // place, off the land.
+  const hexMap = useMemo(() => {
+    if (!isIaWork || dataSource !== 'hex') return null
+    const layout = layoutHexMap(
+      MAP_35_HEX_SPEC,
+      mapOrgs.flatMap(org =>
+        org.isMagic || !org.draft?.district
+          ? []
+          : [
+              {
+                id: org.id,
+                district: org.draft.district,
+                radius: hexLogoRadius(org.scale),
+                name: org.title,
+              },
+            ]
+      )
+    )
+    if (layout.unplaced.length > 0) {
+      console.warn(
+        `Hex map: no tile has room for ${layout.unplaced.length} orgs; they keep their draft positions. Give their districts more tiles in map-hex-spec.ts.`,
+        layout.unplaced
+      )
+    }
+    const orgs = mapOrgs.map(org => {
+      const at = layout.positions.get(org.id)
+      return {
+        ...org,
+        category: org.draft?.district ?? org.category,
+        x: at?.x ?? org.draft?.x ?? org.x,
+        y: at?.y ?? org.draft?.y ?? org.y,
+      }
+    })
+    const scheme = buildRealmScheme(
+      orgs
+        .filter(org => !org.isMagic)
+        .map(org => ({
+          realm: org.draft?.realm ?? null,
+          district: org.draft?.district ?? null,
+          x: org.x,
+          y: org.y,
+        }))
+    )
+    return { orgs, scheme, layout }
+  }, [isIaWork, dataSource, mapOrgs])
 
   const categoryCounts = useMemo(
     () =>
@@ -308,6 +360,11 @@ export default function MapClient({
             icon: '/images/icons/map.svg',
             label: 'Art work',
           },
+          {
+            value: 'hex',
+            icon: '/images/icons/map.svg',
+            label: 'Hex work',
+          },
         ]}
       />
     </div>
@@ -338,9 +395,10 @@ export default function MapClient({
             // A fresh map per data source: the view and the tuning panel
             // start over, since the two layouts share neither.
             key={dataSource}
-            orgs={realmMap?.orgs ?? mapOrgs}
-            scheme={realmMap?.scheme ?? CLASSIC_MAP_SCHEME}
+            orgs={hexMap?.orgs ?? realmMap?.orgs ?? mapOrgs}
+            scheme={hexMap?.scheme ?? realmMap?.scheme ?? CLASSIC_MAP_SCHEME}
             realmBackdrop={realmMap?.backdrop}
+            hexBackdrop={hexMap?.layout}
             realmBackdropStyle={dataSource === 'art' ? 'art' : 'schematic'}
             suggestEntryUrl={suggestEntryLink}
           />
