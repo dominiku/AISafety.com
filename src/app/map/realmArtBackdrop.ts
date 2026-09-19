@@ -133,14 +133,19 @@ const SPARE_THEME: RealmTheme = { tones: ['#00ae85'], cliff: CLIFF_EARTH }
 // How thickly each terrain is strewn, in grid units (see scatterSpots).
 const TERRAIN_SCATTER: Record<Terrain, Parameters<typeof scatterSpots>[3]> = {
   shore: { spacing: 1.25, minRoom: 0.3, maxRoom: 1 },
-  trail: { spacing: 2.1, minRoom: 0.45, maxRoom: 1 },
+  trail: { spacing: 1.7, minRoom: 0.45, maxRoom: 1.2 },
   delta: { spacing: 1.8, minRoom: 0.3, maxRoom: 1 },
   plains: { spacing: 1.5, minRoom: 0.3, maxRoom: 1 },
   range: { spacing: 1.5, minRoom: 0.35, maxRoom: 1.3 },
 }
-// A range is mountainous throughout: behind the peaks that fill the gaps
-// stands a row of larger ones, which the logos are drawn over.
-const RANGE_BACKDROP = { spacing: 2.7, minRoom: 0.9, maxRoom: 1.15 }
+// Some terrains have a back row, which the logos are drawn over: a range is
+// mountainous throughout, so behind the peaks that fill the gaps stand larger
+// ones; the country along the road is settled, and its logos leave no gap a
+// house would fit in, so its houses and hamlets stand behind them too.
+const BACK_ROW: Partial<Record<Terrain, Parameters<typeof scatterSpots>[3]>> = {
+  range: { spacing: 2.7, minRoom: 0.9, maxRoom: 1.15 },
+  trail: { spacing: 3.1, minRoom: 1.1, maxRoom: 1.2 },
+}
 // Grid units.
 const CORNER_RADIUS = 0.7
 const CLIFF_HEIGHT = 0.95
@@ -152,6 +157,9 @@ const ROAD_STRETCHES = 5
 const ROAD_WIDTH = 24
 const ROAD_BEND = 46
 const STREET_WIDTH = 17
+// The river above its delta, and the moat: a broad band, as the classic map's
+// river is. The delta's arms stay slight.
+const RIVER_WIDTH = 19
 // The training town's art: where the gap between its houses is (a share of
 // its width from its middle) and where its two rows' streets are (shares of
 // its height from its middle).
@@ -167,6 +175,7 @@ const BOATS = { width: 5.1, height: 1.9 }
 const SAILBOAT = { width: 1.6, height: 1.3 }
 const ROWBOAT = { width: 1.3, height: 0.6 }
 const TREE = { width: 0.5, height: 1 }
+const HOUSE = { width: 1, height: 1.3 }
 const GRAVESTONES = { width: 9.6, height: 4.6 }
 const COMPASS = { width: 5.2, height: 5.3 }
 
@@ -320,6 +329,12 @@ function terrainDetail(
     const h = TREE.height * scale * g
     return `<use href="#tree" x="${(x - w / 2).toFixed(1)}" y="${(y - h / 2).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}"/>`
   }
+  // A house `dx`, `dy` grid units off the spot, at `scale` of its full size.
+  const house = (symbol: string, dx: number, dy: number, scale: number) => {
+    const w = HOUSE.width * scale * g
+    const h = HOUSE.height * scale * g
+    return `<use href="#${symbol}" x="${(x + dx * g - w / 2).toFixed(1)}" y="${(y + dy * g - h / 2).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}"/>`
+  }
   const growth = theme.growth ?? SHORE_DETAIL
 
   switch (theme.terrain) {
@@ -347,8 +362,23 @@ function terrainDetail(
         )
         .join('')
     }
-    case 'trail':
-      return spot.roll < 0.55 && withSymbols ? tree() : tuft(growth)
+    case 'trail': {
+      // The settled country along the road: a house where there is room for
+      // one, a hamlet of two and a tree where there is more, trees and grass
+      // in the smaller gaps.
+      if (!withSymbols) return tuft(growth)
+      if (spot.room >= 1.05) {
+        return (
+          house('house', -0.55, 0.05, 0.85) +
+          house('cottage', 0.5, 0.2, 0.8) +
+          tree()
+        )
+      }
+      if (spot.room >= 0.62 && spot.roll < 0.7) {
+        return house(spot.roll < 0.35 ? 'house' : 'cottage', 0, 0, 0.8)
+      }
+      return spot.roll < 0.6 ? tree() : tuft(growth)
+    }
     case 'plains':
       return spot.roll > 0.88 && withSymbols && spot.room > 0.5
         ? tree()
@@ -448,9 +478,9 @@ export function artBackdropMarkup(
     river.push(
       {
         points: [source, along(0.3, 0.9), along(0.65, -0.6), entry],
-        width: 10,
+        width: RIVER_WIDTH,
       },
-      { points: moat, width: 12, closed: true }
+      { points: moat, width: RIVER_WIDTH, closed: true }
     )
 
     // Out of the moat by the corner nearest the delta realm's coast, and down
@@ -483,7 +513,7 @@ export function artBackdropMarkup(
       gate[0] + (toward[0] - gate[0]) * 0.5,
       gate[1] + (toward[1] - gate[1]) * 0.5,
     ]
-    river.push({ points: [gate, head], width: 13 })
+    river.push({ points: [gate, head], width: RIVER_WIDTH })
     for (const arm of deltaArms(head, mouths)) {
       river.push({ points: arm.points, width: arm.depth === 0 ? 12 : 9 })
     }
@@ -597,7 +627,7 @@ export function artBackdropMarkup(
   // The light streaks the classic map draws on its river.
   for (const stretch of river) {
     out.push(
-      `<path d="M${stretch.points.map(px).join('L')}${stretch.closed ? 'Z' : ''}" fill="none" stroke="${WATER_STREAK}" stroke-width="2.5" stroke-dasharray="22 46" stroke-linecap="round" stroke-linejoin="round"/>`
+      `<path d="M${stretch.points.map(px).join('L')}${stretch.closed ? 'Z' : ''}" fill="none" stroke="${WATER_STREAK}" stroke-width="${stretch.width >= RIVER_WIDTH ? 3.2 : 2.5}" stroke-dasharray="22 46" stroke-linecap="round" stroke-linejoin="round"/>`
     )
   }
   // The cove is water inside the coast, drawn over the land; its shallows
@@ -627,15 +657,10 @@ export function artBackdropMarkup(
     const theme = themeOf(realm.realm)
     if (!theme.terrain) continue
     const inRealm = (x: number, y: number) => realmAt(x, y) === realm.realm
-    const behind =
-      theme.terrain === 'range'
-        ? scatterSpots(
-            inRealm,
-            taken.slice(pins?.length ?? 0),
-            FRAME,
-            RANGE_BACKDROP
-          )
-        : []
+    const backRow = BACK_ROW[theme.terrain]
+    const behind = backRow
+      ? scatterSpots(inRealm, taken.slice(pins?.length ?? 0), FRAME, backRow)
+      : []
     const spots = [
       ...behind,
       ...scatterSpots(inRealm, taken, FRAME, TERRAIN_SCATTER[theme.terrain]),
