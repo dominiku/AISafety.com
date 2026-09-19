@@ -533,6 +533,80 @@ export function hexBackdropMarkup(
     }
   }
 
+  // Land a cliff can stand on or be hidden by: not sea, a cove or a wreck.
+  const isGround = (tile: HexLaidTile | undefined): tile is HexLaidTile =>
+    tile !== undefined &&
+    tile.state !== 'sea' &&
+    tile.state !== 'water' &&
+    !tile.sunken
+  // How far the face under each of a tile's three near sides drops: to the
+  // top of the tile across that side, or to the sea.
+  const faceDrops = (tile: HexLaidTile) =>
+    ([0, 1, 2] as const).map(k => {
+      const front = laidByCell.get(hexKey(hexNeighbor(tile, SIDE_NAMES[k])))
+      const ground = isGround(front) ? front.height : 0
+      return { k, ground, drop: (tile.height - ground) * view.lift }
+    })
+  const faceShape = (tile: HexLaidTile, k: number, drop: number): Point[] => {
+    const [a, b] = [tile.top[k], tile.top[k + 1]]
+    return [a, b, [b[0], b[1] + drop], [a[0], a[1] + drop]]
+  }
+  // A slanted face drops straight down the screen, where other tiles stand:
+  // a lower tile nearer the viewer hides the foot of it. Lower land is drawn
+  // before higher, so a face is cut to leave out the tops and faces of the
+  // lower tiles in front of it. (Higher ones are drawn later, over it.)
+  const depthOf = (tile: HexLaidTile) =>
+    tile.row + (Math.abs(tile.col) % 2 === 1 ? 0.5 : 0)
+  const faceMasks = new Map<string, string>()
+  layout.tiles.forEach((tile, n) => {
+    if (!isGround(tile) || tile.ref === null) return
+    const drops = faceDrops(tile).filter(face => face.drop > 0)
+    if (drops.length === 0) return
+    const reach = Math.max(...drops.map(face => face.drop))
+    const xs = tile.top.map(point => point[0])
+    const ys = tile.top.map(point => point[1])
+    const box = {
+      left: Math.min(...xs),
+      right: Math.max(...xs),
+      top: Math.min(...ys),
+      bottom: Math.max(...ys) + reach,
+    }
+    const hiding = layout.tiles.filter(other => {
+      if (!isGround(other) || other === tile) return false
+      if (depthOf(other) <= depthOf(tile) || other.height >= tile.height) {
+        return false
+      }
+      const oxs = other.top.map(point => point[0])
+      const oys = other.top.map(point => point[1])
+      return (
+        Math.max(...oxs) > box.left &&
+        Math.min(...oxs) < box.right &&
+        Math.max(...oys) + other.height * view.lift > box.top &&
+        Math.min(...oys) < box.bottom
+      )
+    })
+    if (hiding.length === 0) return
+    const id = `hex-face-${n}`
+    const pad = 8
+    clips.push(
+      `<mask id="${id}" maskUnits="userSpaceOnUse" x="${((box.left - 1) * g).toFixed(1)}" y="${((box.top - 1) * g).toFixed(1)}" width="${((box.right - box.left + 2) * g).toFixed(1)}" height="${((box.bottom - box.top + 2) * g + pad).toFixed(1)}"><rect x="${((box.left - 1) * g).toFixed(1)}" y="${((box.top - 1) * g).toFixed(1)}" width="${((box.right - box.left + 2) * g).toFixed(1)}" height="${((box.bottom - box.top + 2) * g + pad).toFixed(1)}" fill="#fff"/><path d="${hiding
+        .flatMap(other => [
+          outline(other.top),
+          ...faceDrops(other)
+            .filter(face => face.drop > 0)
+            .map(face => outline(faceShape(other, face.k, face.drop))),
+        ])
+        .join('')}" fill="#000" stroke="#fff" stroke-width="1.5"/></mask>`
+    )
+    faceMasks.set(tile.ref, id)
+  })
+  const maskedBy = (ref: string | null, draw: () => void) => {
+    const id = ref === null ? undefined : faceMasks.get(ref)
+    if (id) out.push(`<g mask="url(#${id})">`)
+    draw()
+    if (id) out.push('</g>')
+  }
+
   // A tile's cliff faces: under its three sides toward the viewer, each down
   // to the top of the tile in front of it.
   const drawFaces = (tile: HexLaidTile, theme: RealmTheme) => {
@@ -915,7 +989,9 @@ export function hexBackdropMarkup(
     const level = plateaus.filter(plateau => plateau.height === height)
     // Cliff faces, then the ground with its cover, rim and border.
     for (const plateau of level) {
-      for (const tile of plateau.tiles) drawFaces(tile, styleOf(tile).theme)
+      for (const tile of plateau.tiles) {
+        maskedBy(tile.ref, () => drawFaces(tile, styleOf(tile).theme))
+      }
     }
     level.forEach((plateau, n) => {
       const { tone } = styleOf(plateau.tiles[0])
