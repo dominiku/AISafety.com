@@ -758,19 +758,139 @@ export function hexBackdropMarkup(
     }
   }
 
-  // What a district is covered with, where its spec says so, in place of its
-  // realm's usual country: woodland, a pine thicket, crop fields, vines or a
-  // hamlet. What can be walked between (fields, vines) lies under the logos;
-  // trees and houses stand only in the gaps the logos leave, with a thin back
-  // row under the logos so that a crowded wood still reads as a wood.
-  const drawCover = (
-    tile: HexLaidTile,
-    cover: NonNullable<HexLaidTile['cover']>,
+  // DECORATION. A region is decorated as one canvas, not tile by tile: its
+  // fields are one patchwork, its woods one wood, laid out over the whole
+  // plateau and cut off only at the plateau's own edge. (Tile by tile, the
+  // plots of one tile did not line up with the next tile's, and nothing grew
+  // along the joins.)
+  //
+  // What lies flat (fields, vines) is drawn with the ground. What stands up
+  // (trees, houses, peaks, dunes, tufts) is gathered with everything else that
+  // stands, and drawn from the back of the board to the front.
+  const standing: { depth: number; markup: string }[] = []
+  // How far back something stands: its foot as drawn, with its tile's lift
+  // taken off again, so that height does not count as distance.
+  const stand = (y: number, level: number, markup: string) =>
+    standing.push({ depth: y + level * view.lift, markup })
+
+  // Where on a plateau decoration may go: its tiles without the ones a
+  // landmark, a crater or an escarpment takes up; in from the plateau's edge,
+  // and from ground a taller tile in front covers; clear of river and road.
+  const canvasOf = (plateau: { tiles: HexLaidTile[] }) => {
+    const open = plateau.tiles.filter(
+      tile => !tile.landmark && tile.state !== 'crater' && !tile.scarp
+    )
+    const grounds = open.map(tile =>
+      insetConvex(
+        tile.top,
+        tile.top.map((_, k) => {
+          // No edge between two tiles of the plateau: nothing to keep in from.
+          if (!tile.edges[k]) return 0
+          const front = laidByCell.get(hexKey(hexNeighbor(tile, SIDE_NAMES[k])))
+          const covered =
+            k <= 2 && front && front.state !== 'sea' && !front.sunken
+              ? Math.max(0, front.height - tile.height) * view.lift
+              : 0
+          return 0.22 + covered
+        })
+      )
+    )
+    const refs = new Set(plateau.tiles.map(tile => tile.ref))
+    const xs = plateau.tiles.flatMap(tile => tile.top.map(p => p[0]))
+    const ys = plateau.tiles.flatMap(tile => tile.top.map(p => p[1]))
+    const box = {
+      left: Math.min(...xs),
+      right: Math.max(...xs),
+      top: Math.min(...ys),
+      bottom: Math.max(...ys),
+    }
+    return {
+      box,
+      inside: (x: number, y: number) =>
+        grounds.some(ground => insideConvex([x, y], ground)),
+      logos: (pins ?? []).filter(
+        pin =>
+          pin.x > box.left - 2 &&
+          pin.x < box.right + 2 &&
+          pin.y > box.top - 2 &&
+          pin.y < box.bottom + 2
+      ),
+      fixed: layout.pieces
+        .filter(piece => piece.clip.some(ref => refs.has(ref)))
+        .flatMap(piece => alongLine(piece.points))
+        .map(([x, y]) => ({ x, y, radius: 0.75 })),
+    }
+  }
+
+  // Fields and vines: one patchwork of plots over the whole plateau, lying
+  // with the board's grain (along the rows of tiles, and up the slant of a
+  // tile's side), under the logos: furrows for a field, rows of vines for a
+  // vineyard. Here and there a plot is left as grass, and none lies on the
+  // road or the river. The plateau's rim is drawn over its edge afterward.
+  const drawPlots = (
+    plateau: { tiles: HexLaidTile[]; height: number },
     tone: string,
-    inTile: (x: number, y: number) => boolean,
-    logos: ArtPin[],
-    fixed: { x: number; y: number; radius: number }[]
+    clip: string
   ) => {
+    const cover = plateau.tiles[0].cover
+    if (!pins || (cover !== 'fields' && cover !== 'vineyard')) return
+    const { box, inside, fixed } = canvasOf(plateau)
+    const across: Point = [1, 0]
+    const up: Point = [0.5, -0.87 * view.squash]
+    const [w, h] = [1.18, 0.5]
+    // One lattice for the whole board, so plots line up from tile to tile.
+    const origin = projectPoint(view, [0, 0], plateau.height)
+    out.push(`<g clip-path="url(#${clip})">`)
+    const rows = Math.ceil((box.bottom - box.top) / (h * -up[1])) + 2
+    const first = Math.floor((origin[1] - box.bottom) / (h * -up[1])) - 1
+    for (let j = first; j <= first + rows; j++) {
+      const shift = up[0] * h * j
+      const from = Math.floor((box.left - origin[0] - shift) / w) - 1
+      const to = Math.ceil((box.right - origin[0] - shift) / w) + 1
+      for (let i = from; i <= to; i++) {
+        const at = (di: number, dj: number): Point => [
+          origin[0] + across[0] * w * (i + di) + up[0] * h * (j + dj),
+          origin[1] + across[1] * w * (i + di) + up[1] * h * (j + dj),
+        ]
+        const [cx, cy] = at(0, 0)
+        if (!inside(cx, cy)) continue
+        const roll = Math.sin((i * 7 + j * 13) * 12.9898)
+        const chance = roll * 43758.5453 - Math.floor(roll * 43758.5453)
+        if (chance < 0.2) continue
+        if (fixed.some(spot => Math.hypot(spot.x - cx, spot.y - cy) < 0.95)) {
+          continue
+        }
+        const ripe = cover === 'fields' && chance > 0.62
+        out.push(
+          `<path d="${outline([at(-0.46, -0.44), at(0.46, -0.44), at(0.46, 0.44), at(-0.46, 0.44)])}" fill="${ripe ? FIELD_RIPE : districtTone(tone, chance > 0.4 ? 1 : 2, 3)}" fill-opacity="${ripe ? 0.8 : 1}" stroke="${LINE}" stroke-opacity="0.3" stroke-width="1.5"/>`
+        )
+        for (const row of [-0.26, -0.09, 0.09, 0.26]) {
+          const d = `M${xy(at(-0.4, row))}L${xy(at(0.4, row))}`
+          out.push(
+            cover === 'vineyard'
+              ? `<path d="${d}" stroke="${VINE}" stroke-width="3.2" stroke-dasharray="4 3" stroke-linecap="round"/>`
+              : `<path d="${d}" stroke="${LINE}" stroke-opacity="0.28" stroke-width="1.5"/>`
+          )
+        }
+      }
+    }
+    out.push('</g>')
+  }
+
+  // What stands on a plateau: its district's cover where the spec gives one
+  // (woodland, a pine thicket, a hamlet, dunes, meadow), or else its realm's
+  // usual country; in the gaps the logos leave, with a thin back row under
+  // the logos where a wood or a range should still read as one when crowded.
+  const gatherStanding = (
+    plateau: { tiles: HexLaidTile[]; height: number },
+    theme: RealmTheme,
+    tone: string,
+    seed: number
+  ) => {
+    const cover = plateau.tiles[0].cover
+    if (!pins || cover === 'fields' || cover === 'vineyard') return
+    if (!(theme.terrain || cover)) return
+    const { inside, logos, fixed } = canvasOf(plateau)
     const extent = { width: width / g, height: height / g }
     const stamp = (
       symbol: string,
@@ -780,190 +900,102 @@ export function hexBackdropMarkup(
       h: number
     ) =>
       `<use href="#${symbol}" x="${((x - w / 2) * g).toFixed(1)}" y="${((y - h) * g).toFixed(1)}" width="${(w * g).toFixed(1)}" height="${(h * g).toFixed(1)}"/>`
-    if (cover === 'fields' || cover === 'vineyard') {
-      // A patchwork of plots over the whole tile, lying with the board's
-      // grain (along the rows of tiles, and up the slant of a tile's side),
-      // under the logos: furrows for a field, rows of vines for a vineyard.
-      // Here and there a plot is left as grass, and none lies on the road or
-      // the river.
-      const across: Point = [1, 0]
-      const up: Point = [0.5, -0.87 * view.squash]
-      const [w, h] = [1.18, 0.5]
-      const id = `hex-cover-${tile.col}-${tile.row}`
-      clips.push(
-        `<clipPath id="${id}"><path d="${outline(
-          insetConvex(
-            tile.top,
-            tile.top.map((_, k) => (tile.edges[k] ? 0.3 : 0))
-          )
-        )}"/></clipPath>`
-      )
-      out.push(`<g clip-path="url(#${id})">`)
-      for (let i = -3; i <= 3; i++) {
-        for (let j = -4; j <= 4; j++) {
-          const at = (di: number, dj: number): Point => [
-            tile.center[0] + across[0] * w * (i + di) + up[0] * h * (j + dj),
-            tile.center[1] + across[1] * w * (i + di) + up[1] * h * (j + dj),
-          ]
-          const [cx, cy] = at(0, 0)
-          const roll = Math.sin(
-            (tile.col * 31 + tile.row * 17 + i * 7 + j * 13) * 12.9898
-          )
-          const chance = roll * 43758.5453 - Math.floor(roll * 43758.5453)
-          if (chance < 0.2) continue
-          if (fixed.some(spot => Math.hypot(spot.x - cx, spot.y - cy) < 0.95)) {
-            continue
-          }
-          const ripe = cover === 'fields' && chance > 0.62
-          out.push(
-            `<path d="${outline([at(-0.46, -0.44), at(0.46, -0.44), at(0.46, 0.44), at(-0.46, 0.44)])}" fill="${ripe ? FIELD_RIPE : districtTone(tone, chance > 0.4 ? 1 : 2, 3)}" fill-opacity="${ripe ? 0.8 : 1}" stroke="${LINE}" stroke-opacity="0.3" stroke-width="1.5"/>`
-          )
-          for (const row of [-0.26, -0.09, 0.09, 0.26]) {
-            const d = `M${xy(at(-0.4, row))}L${xy(at(0.4, row))}`
-            out.push(
-              cover === 'vineyard'
-                ? `<path d="${d}" stroke="${VINE}" stroke-width="3.2" stroke-dasharray="4 3" stroke-linecap="round"/>`
-                : `<path d="${d}" stroke="${LINE}" stroke-opacity="0.28" stroke-width="1.5"/>`
-            )
-          }
-        }
-      }
-      out.push('</g>')
-      return
-    }
+    const level = plateau.height
+
     if (cover === 'dunes' || cover === 'meadow') {
-      // Dunes along a beach, or the grass of a valley floor: in the gaps the
-      // logos leave.
-      const spots = scatterSpots(inTile, [...logos, ...fixed], extent, {
+      // Dunes along a beach, or the grass of a valley floor.
+      scatterSpots(inside, [...logos, ...fixed], extent, {
         spacing: cover === 'dunes' ? 1.05 : 0.7,
         minRoom: cover === 'dunes' ? 0.35 : 0.15,
         maxRoom: 0.7,
-      }).sort((a, b) => a.y - b.y)
-      spots.forEach((spot, n) => {
-        const seed = tile.col * 53 + tile.row * 19 + n
-        if (cover === 'dunes') {
-          out.push(
-            duneMarkup(
-              spot.x,
-              spot.y + 0.2,
-              0.7 + spot.roll * 0.5,
-              g,
-              mixHex(tone, '#ffffff', 0.45),
-              mixHex(tone, LINE, 0.4),
-              VINE,
-              seed
-            )
-          )
-        } else if (spot.roll > 0.82 && spot.room > 0.4) {
-          out.push(stamp('tree', spot.x, spot.y + 0.3, 0.45, 0.9))
-        } else {
-          out.push(tuftMarkup(spot.x, spot.y, g, VINE, FIELD_RIPE, seed))
-        }
+      }).forEach((spot, n) => {
+        const markup =
+          cover === 'dunes'
+            ? duneMarkup(
+                spot.x,
+                spot.y + 0.2,
+                0.7 + spot.roll * 0.5,
+                g,
+                mixHex(tone, '#ffffff', 0.45),
+                mixHex(tone, LINE, 0.4),
+                VINE,
+                seed * 97 + n
+              )
+            : spot.roll > 0.82 && spot.room > 0.4
+              ? stamp('tree', spot.x, spot.y + 0.3, 0.45, 0.9)
+              : tuftMarkup(spot.x, spot.y, g, VINE, FIELD_RIPE, seed * 97 + n)
+        stand(spot.y, level, markup)
       })
       return
     }
-    const wood = cover === 'forest' || cover === 'thicket' || cover === 'grove'
-    const stand = wood
-      ? cover === 'thicket'
-        ? { spacing: 0.55, minRoom: 0.2, maxRoom: 0.5 }
-        : cover === 'grove'
-          ? { spacing: 0.95, minRoom: 0.3, maxRoom: 0.6 }
-          : { spacing: 0.72, minRoom: 0.26, maxRoom: 0.6 }
-      : { spacing: 1.25, minRoom: 0.5, maxRoom: 0.8 }
-    const spots = [
-      ...(wood
-        ? scatterSpots(inTile, fixed, extent, {
-            spacing:
-              cover === 'thicket' ? 0.95 : cover === 'grove' ? 1.7 : 1.25,
-            minRoom: 0.3,
-            maxRoom: 0.6,
-          })
-        : []),
-      ...scatterSpots(inTile, [...logos, ...fixed], extent, stand),
-    ].sort((a, b) => a.y - b.y)
-    for (const spot of spots) {
-      if (wood) {
-        const size = (cover === 'thicket' ? 0.8 : 1) * (0.8 + spot.roll * 0.35)
-        out.push(stamp('tree', spot.x, spot.y + 0.3, 0.5 * size, 1 * size))
-      } else {
-        out.push(
-          stamp(
-            spot.roll < 0.5 ? 'house' : 'cottage',
-            spot.x,
-            spot.y + 0.35,
-            0.8,
-            1.03
-          ),
-          stamp('tree', spot.x + 0.55, spot.y + 0.3, 0.4, 0.8)
-        )
+    if (cover) {
+      const wood =
+        cover === 'forest' || cover === 'thicket' || cover === 'grove'
+      const gaps = wood
+        ? cover === 'thicket'
+          ? { spacing: 0.55, minRoom: 0.2, maxRoom: 0.5 }
+          : cover === 'grove'
+            ? { spacing: 0.95, minRoom: 0.3, maxRoom: 0.6 }
+            : { spacing: 0.72, minRoom: 0.26, maxRoom: 0.6 }
+        : { spacing: 1.25, minRoom: 0.5, maxRoom: 0.8 }
+      const spots = [
+        ...(wood
+          ? scatterSpots(inside, fixed, extent, {
+              spacing:
+                cover === 'thicket' ? 0.95 : cover === 'grove' ? 1.7 : 1.25,
+              minRoom: 0.3,
+              maxRoom: 0.6,
+            })
+          : []),
+        ...scatterSpots(inside, [...logos, ...fixed], extent, gaps),
+      ]
+      for (const spot of spots) {
+        if (wood) {
+          const size =
+            (cover === 'thicket' ? 0.8 : 1) * (0.8 + spot.roll * 0.35)
+          stand(
+            spot.y,
+            level,
+            stamp('tree', spot.x, spot.y + 0.3, 0.5 * size, 1 * size)
+          )
+        } else {
+          stand(
+            spot.y,
+            level,
+            stamp(
+              spot.roll < 0.5 ? 'house' : 'cottage',
+              spot.x,
+              spot.y + 0.35,
+              0.8,
+              1.03
+            ) + stamp('tree', spot.x + 0.55, spot.y + 0.3, 0.4, 0.8)
+          )
+        }
       }
-    }
-  }
-
-  // The details of a realm's country, in the gaps the logos, the river, the
-  // road and a landmark leave on a tile.
-  const drawCountry = (
-    tile: HexLaidTile,
-    theme: RealmTheme,
-    tone: string,
-    // Fields and vines lie flat and are drawn with the ground; everything
-    // else stands up and is drawn in the pass from the back to the front.
-    flat: boolean
-  ) => {
-    if (!pins || tile.landmark || !(theme.terrain || tile.cover)) return
-    // A crater fills its tile, and the top of an escarpment is bare: what
-    // stood on it would hide its slope.
-    if (tile.state === 'crater' || tile.scarp) return
-    if (flat !== (tile.cover === 'fields' || tile.cover === 'vineyard')) return
-    const ground = insetConvex(
-      tile.top,
-      tile.top.map((_, k) => {
-        // A taller tile in front covers the ground behind it.
-        const front = laidByCell.get(hexKey(hexNeighbor(tile, SIDE_NAMES[k])))
-        const covered =
-          k <= 2 && front && front.state !== 'sea' && !front.sunken
-            ? Math.max(0, front.height - tile.height) * view.lift
-            : 0
-        return 0.22 + covered
-      })
-    )
-    const inTile = (x: number, y: number) => insideConvex([x, y], ground)
-    const xs = tile.top.map(p => p[0])
-    const ys = tile.top.map(p => p[1])
-    const near = (pin: { x: number; y: number }) =>
-      pin.x > Math.min(...xs) - 2 &&
-      pin.x < Math.max(...xs) + 2 &&
-      pin.y > Math.min(...ys) - 2 &&
-      pin.y < Math.max(...ys) + 2
-    const fixed = layout.pieces
-      .filter(piece => tile.ref !== null && piece.clip.includes(tile.ref))
-      .flatMap(piece => alongLine(piece.points))
-      .map(([x, y]) => ({ x, y, radius: 0.75 }))
-    if (tile.cover) {
-      drawCover(tile, tile.cover, tone, inTile, pins.filter(near), fixed)
       return
     }
     if (!theme.terrain) return
-    const extent = { width: width / g, height: height / g }
     const backRow = BACK_ROW[theme.terrain]
     const spots = [
       // A back row the logos are drawn over (see realmArtBackdrop.ts).
       ...(backRow
         ? scatterSpots(
-            inTile,
+            inside,
             fixed.map(spot => ({ ...spot, radius: 1.3 })),
             extent,
             backRow
           )
         : []),
       ...scatterSpots(
-        inTile,
-        [...pins.filter(near), ...fixed],
+        inside,
+        [...logos, ...fixed],
         extent,
         TERRAIN_SCATTER[theme.terrain]
       ),
-    ].sort((a, b) => a.y - b.y)
-    for (const spot of spots) out.push(terrainDetail(theme, spot, g, true))
+    ]
+    for (const spot of spots) {
+      stand(spot.y, level, terrainDetail(theme, spot, g, true))
+    }
   }
 
   // A wall of dark peaks along the landward sides of a tile that are the edge
@@ -987,9 +1019,11 @@ export function hexBackdropMarkup(
         const h = 0.95 + (1 - jitter) * 0.6
         const peak: Point = [x - w * 0.06, foot - h]
         const fold: Point = [x + w * 0.14, foot]
-        out.push(
-          poly([[x - w / 2, foot], peak, fold], WALL.lit),
-          poly([peak, [x + w / 2, foot], fold], WALL.shade)
+        stand(
+          foot,
+          tile.height,
+          poly([[x - w / 2, foot], peak, fold], WALL.lit) +
+            poly([peak, [x + w / 2, foot], fold], WALL.shade)
         )
       })
     }
@@ -1118,8 +1152,8 @@ export function hexBackdropMarkup(
         `<clipPath id="${id}"><path d="${shape}" clip-rule="evenodd"/></clipPath>`
       )
       out.push(`<path d="${shape}" fill="${tone}" fill-rule="evenodd"/>`)
+      drawPlots(plateau, tone, id)
       for (const tile of plateau.tiles) {
-        drawCountry(tile, styleOf(tile).theme, tone, true)
         if (tile.state === 'crater') {
           out.push(
             craterMarkup(
@@ -1225,41 +1259,42 @@ export function hexBackdropMarkup(
     }
   }
 
-  // WHAT STANDS ON THE LAND: trees, houses, peaks, landmarks and the wall of
-  // a walled district, tile by tile from the back of the board to the front,
-  // so that what is nearer stands in front of what is farther.
+  // WHAT STANDS ON THE LAND: each plateau's trees, houses, peaks and dunes,
+  // the landmarks and the wall of a walled district, all gathered and drawn
+  // from the back of the board to the front, so that what is nearer stands in
+  // front of what is farther whichever tile or region it belongs to.
+  plateaus.forEach((plateau, n) => {
+    const { theme, tone } = styleOf(plateau.tiles[0])
+    gatherStanding(plateau, theme, tone, n)
+  })
   for (const tile of layout.tiles) {
     if (tile.state === 'sea' || tile.ref === null) continue
-    const { theme, tone } = styleOf(tile)
-    // Corners run E, SE, SW, W, NW, NE: sides 3 to 5 are the far ones.
-    if (tile.walled) drawWall(tile, [3, 4, 5])
-    if (solid(tile)) drawCountry(tile, theme, tone, false)
-    if (pins) {
-      for (const other of layout.tiles) {
-        const mark = other.landmark
-        if (!mark || mark.after !== tile.ref) continue
-        const stamp = (
-          symbol: string,
-          dx: number,
-          dy: number,
-          scale: number,
-          tilt: number
-        ) => {
-          const [w, h] = [mark.width * scale * g, mark.height * scale * g]
-          const [cx, cy] = [(mark.x + dx) * g, (mark.y + dy) * g]
-          return `<use href="#${symbol}" x="${(cx - w / 2).toFixed(1)}" y="${(cy - h / 2).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}"${tilt ? ` transform="rotate(${tilt} ${cx.toFixed(1)} ${cy.toFixed(1)})" opacity="0.8"` : ''}/>`
-        }
-        out.push(
-          other.sunken
-            ? // Wrecks: the art heeled over, half under.
-              stamp(mark.symbol, -0.7, 0, 1, -28) +
-                stamp(mark.symbol, 0.9, 0.35, 0.7, 152)
-            : stamp(mark.symbol, 0, 0, 1, 0)
-        )
-      }
+    if (tile.walled) drawWall(tile, [0, 1, 2, 3, 4, 5])
+    const mark = tile.landmark
+    if (!mark || !pins) continue
+    const stamp = (
+      symbol: string,
+      dx: number,
+      dy: number,
+      scale: number,
+      tilt: number
+    ) => {
+      const [w, h] = [mark.width * scale * g, mark.height * scale * g]
+      const [cx, cy] = [(mark.x + dx) * g, (mark.y + dy) * g]
+      return `<use href="#${symbol}" x="${(cx - w / 2).toFixed(1)}" y="${(cy - h / 2).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}"${tilt ? ` transform="rotate(${tilt} ${cx.toFixed(1)} ${cy.toFixed(1)})" opacity="0.8"` : ''}/>`
     }
-    if (tile.walled) drawWall(tile, [0, 1, 2])
+    stand(
+      mark.y + mark.height / 2,
+      tile.height,
+      tile.sunken
+        ? // Wrecks: the art heeled over, half under.
+          stamp(mark.symbol, -0.7, 0, 1, -28) +
+            stamp(mark.symbol, 0.9, 0.35, 0.7, 152)
+        : stamp(mark.symbol, 0, 0, 1, 0)
+    )
   }
+  standing.sort((a, b) => a.depth - b.depth)
+  for (const item of standing) out.push(item.markup)
 
   return `<defs>${clips.join('')}</defs>${out.join('')}`
 }
