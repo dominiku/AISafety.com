@@ -100,6 +100,8 @@ const FACE_LIP = 0.08
 const FACE_FOOT = 0.12
 // Pixels of darker bank either side of the water.
 const BANK = 3
+// Map grid units a river piece runs on past its ends, under the next piece.
+const SEAM_OVERLAP = 0.08
 // A fall this high (map grid units) or more is a large one.
 const LARGE_FALL = 0.55
 // Map grid units the two bands of the border of shallows reach out from the
@@ -283,77 +285,151 @@ export function hexBackdropMarkup(
     })
   }
 
+  // The two banks of a river piece: its line moved half its width to either
+  // side, the width running from the piece's own to `widthEnd`. Both reach a
+  // little past the ends, so that on tiles of one height the next piece
+  // overlaps this one and no seam shows.
+  const banksOf = (piece: HexPathPiece): [Point[], Point[]] => {
+    const line = piece.points
+    const last = line.length - 1
+    const extend = (from: Point, to: Point): Point => {
+      const length = Math.hypot(to[0] - from[0], to[1] - from[1]) || 1
+      return [
+        to[0] + ((to[0] - from[0]) / length) * SEAM_OVERLAP,
+        to[1] + ((to[1] - from[1]) / length) * SEAM_OVERLAP,
+      ]
+    }
+    const path = [
+      extend(line[1], line[0]),
+      ...line,
+      extend(line[last - 1], line[last]),
+    ]
+    const sides: [Point[], Point[]] = [[], []]
+    path.forEach(([x, y], n) => {
+      const [px, py] = path[Math.max(0, n - 1)]
+      const [qx, qy] = path[Math.min(path.length - 1, n + 1)]
+      const length = Math.hypot(qx - px, qy - py) || 1
+      const share = Math.min(1, Math.max(0, (n - 1) / last))
+      const half =
+        (piece.width +
+          ((piece.widthEnd ?? piece.width) - piece.width) * share) /
+        2
+      const [nx, ny] = [-(qy - py) / length, (qx - px) / length]
+      sides[0].push([x + nx * half, y + ny * half])
+      sides[1].push([x - nx * half, y - ny * half])
+    })
+    return sides
+  }
+  const clipFor = (piece: HexPathPiece, id: string) => {
+    // A ramp rises off its tile's top, so a road with one is not clipped.
+    if (piece.ramps) return ''
+    const tops = piece.clip.flatMap(ref => {
+      const tile = tileByRef.get(ref)
+      return tile && tile.state !== 'sea' ? [outline(tile.top)] : []
+    })
+    clips.push(`<clipPath id="${id}"><path d="${tops.join('')}"/></clipPath>`)
+    return ` clip-path="url(#${id})"`
+  }
+  const waterOf = (piece: HexPathPiece, clip: string) => {
+    const [left, right] = banksOf(piece)
+    return `<path${clip} d="${outline([...left, ...[...right].reverse()])}" fill="${WATER}"/>`
+  }
+
   // The river and road pieces drawn once a tile is: every bank first, then
   // the water over them all, so that where the river parts no bank crosses
   // the water; then the road over the water.
   const drawPieces = (pieces: HexPathPiece[], id: string) => {
     if (pieces.length === 0) return
-    const path = (piece: HexPathPiece, points = piece.points) =>
-      `M${points.map(xy).join('L')}${piece.closed ? 'Z' : ''}`
-    pieces.forEach((piece, n) => {
-      const tops = piece.clip.flatMap(ref => {
-        const tile = tileByRef.get(ref)
-        return tile && tile.state !== 'sea' ? [outline(tile.top)] : []
-      })
-      clips.push(
-        `<clipPath id="${id}-${n}"><path d="${tops.join('')}"/></clipPath>`
-      )
-    })
+    const clipped = pieces.map((piece, n) => ({
+      piece,
+      clip: clipFor(piece, `${id}-${n}`),
+    }))
+    const line = (points: Point[], closed?: boolean) =>
+      `M${points.map(xy).join('L')}${closed ? 'Z' : ''}`
     const stroke = (
-      piece: HexPathPiece,
-      n: number,
+      clip: string,
+      d: string,
       color: string,
-      strokeWidth: number,
-      cap: 'butt' | 'round',
-      d = path(piece)
+      across: number,
+      extra = ''
     ) =>
       out.push(
-        `<path clip-path="url(#${id}-${n})" d="${d}" fill="none" stroke="${color}" stroke-width="${strokeWidth.toFixed(1)}" stroke-linejoin="round" stroke-linecap="${cap}"/>`
+        `<path${clip} d="${d}" fill="none" stroke="${color}" stroke-width="${across.toFixed(1)}" stroke-linejoin="round" stroke-linecap="round"${extra}/>`
       )
-    const rivers = pieces.map((piece, n) => ({ piece, n }))
-    for (const { piece, n } of rivers) {
-      if (piece.kind === 'river') {
-        stroke(piece, n, SHALLOWS, piece.width * g + BANK * 2, 'butt')
+    const rivers = clipped.filter(({ piece }) => piece.kind === 'river')
+    for (const { piece, clip } of rivers) {
+      if (piece.closed) {
+        stroke(
+          clip,
+          line(piece.points, true),
+          SHALLOWS,
+          piece.width * g + BANK * 2
+        )
+      } else {
+        for (const bank of banksOf(piece)) {
+          stroke(clip, line(bank), SHALLOWS, BANK * 2)
+        }
       }
     }
-    for (const { piece, n } of rivers) {
-      // A round end runs a little way onto the next tile of the same height,
-      // so no seam shows between the two.
-      if (piece.kind === 'river')
-        stroke(piece, n, WATER, piece.width * g, 'round')
+    for (const { piece, clip } of rivers) {
+      if (piece.closed)
+        stroke(clip, line(piece.points, true), WATER, piece.width * g)
+      else out.push(waterOf(piece, clip))
     }
-    for (const { piece, n } of rivers) {
-      if (piece.kind !== 'river') continue
+    // The moat is drawn after the pieces that run into it, and its bank would
+    // cross their mouths: their water goes over it again.
+    if (rivers.some(({ piece }) => piece.closed)) {
+      layout.pieces.forEach((piece, n) => {
+        if (piece.joinsMoat)
+          out.push(waterOf(piece, clipFor(piece, `${id}-join-${n}`)))
+      })
+    }
+    for (const { piece, clip } of rivers) {
       // The light streaks the classic map draws on its river.
       const streaks = piece.closed
-        ? [beside(piece.points, 0.1, 0.3, 0), beside(piece.points, 0.6, 0.8, 0)]
+        ? [0.04, 0.29, 0.54, 0.79].map(from =>
+            beside(piece.points, from, from + 0.12, 0)
+          )
         : [
             beside(piece.points, 0.12, 0.42, piece.width * 0.2),
-            beside(piece.points, 0.55, 0.9, -piece.width * 0.22),
+            beside(
+              piece.points,
+              0.55,
+              0.9,
+              -(piece.widthEnd ?? piece.width) * 0.22
+            ),
           ]
       for (const streak of streaks) {
-        stroke(
-          piece,
-          n,
-          WATER_STREAK,
-          piece.width >= 0.6 ? 3 : 2.2,
-          'round',
-          `M${streak.map(xy).join('L')}`
-        )
+        stroke(clip, line(streak), WATER_STREAK, piece.width >= 0.6 ? 3 : 2.2)
       }
     }
-    for (const { piece, n } of rivers) {
+    for (const { piece, clip } of clipped) {
       if (piece.kind !== 'road') continue
-      // The classic brown road: one flat brown, with dark pebbles on it.
-      stroke(piece, n, ROAD, piece.width * g, 'round')
-      out.push(`<g clip-path="url(#${id}-${n})">`)
-      alongLine(piece.points).forEach(([x, y], k) => {
-        if (k % 2 === 1) return
-        const roll = Math.sin((k + piece.points[0][0]) * 12.9898) * 43758.5453
-        const side = (roll - Math.floor(roll) - 0.5) * piece.width * g * 0.55
+      // The side of a ramp, under the road that climbs it.
+      for (const ramp of piece.ramps ?? []) {
         out.push(
-          `<circle cx="${(x * g + side).toFixed(1)}" cy="${(y * g + side * 0.6).toFixed(1)}" r="${k % 3 === 0 ? 3 : 2}" fill="${ROAD_PEBBLE}"/>`
+          `<path d="${outline(ramp)}" fill="${ROAD_PEBBLE}" stroke="${ROAD_PEBBLE}" stroke-width="${(piece.width * g * 0.9).toFixed(1)}" stroke-linejoin="round"/>`
         )
+      }
+      // The classic brown road, but a worn one: its edge comes and goes, and
+      // dark pebbles lie on it.
+      stroke(clip, line(piece.points), ROAD, piece.width * g)
+      out.push(`<g${clip}>`)
+      alongLine(piece.points).forEach(([x, y], k) => {
+        const roll =
+          Math.sin((k + piece.points[0][0] * 3.1) * 12.9898) * 43758.5453
+        const chance = roll - Math.floor(roll)
+        const side = (chance - 0.5) * piece.width * g
+        if (k % 2 === 0) {
+          out.push(
+            `<circle cx="${(x * g + side * 0.55).toFixed(1)}" cy="${(y * g + side * 0.33).toFixed(1)}" r="${k % 3 === 0 ? 3 : 2}" fill="${ROAD_PEBBLE}"/>`
+          )
+        } else if (chance < 0.3 || chance > 0.7) {
+          // A bulge of the road's own brown at its edge.
+          out.push(
+            `<ellipse cx="${(x * g + Math.sign(side) * piece.width * g * 0.42).toFixed(1)}" cy="${(y * g + Math.sign(side) * piece.width * g * 0.25).toFixed(1)}" rx="${(piece.width * g * (0.22 + chance * 0.2)).toFixed(1)}" ry="${(piece.width * g * 0.16).toFixed(1)}" fill="${ROAD}"/>`
+          )
+        }
       })
       out.push('</g>')
     }
@@ -365,26 +441,10 @@ export function hexBackdropMarkup(
     const fall = drop.fall * g
     const at = (t: number, down: number) =>
       `${(a[0] + (b[0] - a[0]) * t).toFixed(1)},${(a[1] + (b[1] - a[1]) * t + down).toFixed(1)}`
-    if (!drop.visible) {
-      // Going over the far lip: a line of foam along it.
-      if (drop.kind === 'river') {
-        out.push(
-          `<path d="M${at(0.08, 0)}L${at(0.92, 0)}" stroke="${SNOW}" stroke-width="3" stroke-dasharray="5 4" stroke-linecap="round"/>`
-        )
-      }
-      return
-    }
+    // Over a far lip the river just runs out of sight; the road climbs by
+    // ramps, not here.
+    if (!drop.visible || drop.kind !== 'river') return
     const face = `M${at(0, 0)}L${at(1, 0)}L${at(1, fall)}L${at(0, fall)}Z`
-    if (drop.kind === 'road') {
-      // The road climbs a face as steps.
-      out.push(`<path d="${face}" fill="${ROAD}"/>`)
-      for (let down = 4; down < fall; down += 6) {
-        out.push(
-          `<path d="M${at(0.06, down)}L${at(0.94, down)}" stroke="${ROAD_PEBBLE}" stroke-width="1.6"/>`
-        )
-      }
-      return
-    }
     // The falls: the river's water down the face, streaked; foam where it
     // lands, and more of it, with spray, under a large fall.
     const large = drop.fall >= LARGE_FALL
@@ -461,6 +521,30 @@ export function hexBackdropMarkup(
         )
       }
     })
+    // A walled country's sea cliffs are dark crags: jagged shadows down the
+    // faces, and rocks at their foot.
+    if (tile.walled) {
+      ;[0, 1, 2].forEach(k => {
+        if (!tile.coast[k]) return
+        const [a, b] = [top[k], top[k + 1]]
+        const at = (t: number, down: number): Point => [
+          a[0] + (b[0] - a[0]) * t,
+          a[1] + (b[1] - a[1]) * t + down,
+        ]
+        for (let n = 0; n < 7; n++) {
+          const t = (n + 0.5) / 7
+          const roll = Math.sin(
+            (tile.col * 11 + tile.row * 17 + k * 3 + n) * 12.9898
+          )
+          const jitter = roll * 43758.5453 - Math.floor(roll * 43758.5453)
+          const reach = drop * (0.45 + jitter * 0.5)
+          out.push(
+            `<path d="${outline([at(t - 0.06, 0), at(t + 0.06, 0), at(t + 0.01, reach)])}" fill="${WALL.shade}" fill-opacity="0.75"/>`,
+            `<path d="${outline([at(t - 0.05, drop), at(t + 0.07, drop), at(t + 0.02, drop - drop * (0.12 + jitter * 0.16))])}" fill="${WALL.shade}"/>`
+          )
+        }
+      })
+    }
     out.push(
       `<path d="${outline(top)}" fill="${tone}" stroke="${tone}" stroke-width="1"/>`
     )
@@ -526,14 +610,15 @@ export function hexBackdropMarkup(
     for (const spot of spots) out.push(terrainDetail(theme, spot, g, true))
   }
 
-  // A wall of dark peaks along the sides of a tile that are the edge of a
-  // walled district: the far sides' behind whatever stands on the tile, the
-  // near sides' in front of it.
+  // A wall of dark peaks along the landward sides of a tile that are the edge
+  // of a walled district: the far sides' behind whatever stands on the tile,
+  // the near sides' in front of it.
   const drawWall = (tile: HexLaidTile, sides: number[]) => {
     const poly = (points: Point[], fill: string) =>
       `<path d="M${points.map(xy).join('L')}Z" fill="${fill}"/>`
     for (const k of sides) {
-      if (!tile.edges[k]) continue
+      // The sea cliffs are wall enough.
+      if (!tile.edges[k] || tile.coast[k]) continue
       const [a, b] = [tile.top[k], tile.top[(k + 1) % 6]]
       ;[0.14, 0.38, 0.62, 0.86].forEach((t, n) => {
         const roll = Math.sin(

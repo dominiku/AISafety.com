@@ -228,7 +228,28 @@ describe('layoutHexMap', () => {
     const layout = layoutHexMap(withTiles(tiles, { features }), [])
     const moat = layout.pieces.filter(piece => piece.closed)
     expect(moat).toHaveLength(1)
-    expect(moat[0].points).toHaveLength(6)
+    // A round through the middles of the tiles about the keep.
+    for (const [col, row] of [
+      [1, 1],
+      [3, 2],
+      [2, 3],
+    ]) {
+      const { center } = at(layout, col, row)
+      expect(
+        Math.min(
+          ...moat[0].points.map(point =>
+            Math.hypot(point[0] - center[0], point[1] - center[1])
+          )
+        )
+      ).toBeLessThan(0.05)
+    }
+    // The river is no wider than the moat where it runs into it, and its
+    // pieces there are marked to be drawn over the moat's bank.
+    const joining = layout.pieces.filter(piece => piece.joinsMoat)
+    expect(joining).toHaveLength(2)
+    for (const piece of joining) {
+      expect(Math.min(piece.width, piece.widthEnd!)).toBeLessThan(moat[0].width)
+    }
     // Drawn once the tile in front of the keep is, over all seven tiles.
     expect(moat[0].tile).toBe(at(layout, 2, 3).ref)
     expect(moat[0].clip).toHaveLength(7)
@@ -241,6 +262,32 @@ describe('layoutHexMap', () => {
         []
       )
     ).toThrow(/moat needs them level/)
+  })
+
+  it('climbs a road to a higher tile by a ramp on the lower one', () => {
+    const layout = layoutHexMap(
+      withTiles(
+        SPEC.tiles
+          .replace('..  Aa  Aa', '..  Aa= Aa')
+          .replace('..  Bb  Bb  Bb  cv', '..  Bb= Bb  Bb  cv')
+      ),
+      []
+    )
+    const lower = layout.pieces.find(
+      piece => piece.tile === at(layout, 1, 2).ref
+    )!
+    const upper = layout.pieces.find(
+      piece => piece.tile === at(layout, 1, 1).ref
+    )!
+    expect(upper.ramps).toBeUndefined()
+    expect(lower.ramps).toHaveLength(1)
+    // The ramp's top meets the road on the higher tile, one level up.
+    const ends = [lower.points[0], lower.points[lower.points.length - 1]]
+    const join = upper.points.flatMap(point =>
+      ends.map(end => Math.hypot(point[0] - end[0], point[1] - end[1]))
+    )
+    expect(Math.min(...join)).toBeLessThan(1e-6)
+    expect(layout.drops).toEqual([])
   })
 
   it('takes up the tiles a district is told to, however few its logos', () => {
@@ -361,21 +408,19 @@ describe('the Map 3.5 hex map', () => {
       expect(tile.district).toBe('Career support and placement')
       expect(tile.state).toBe('used')
     }
-    // The moat runs through the middles of those six, and the castle fills
-    // what is inside it, so Career support has a little more ground outside.
+    // Those six are all it has: its logos may stand over the moat.
     expect(
       layout.tiles.filter(tile => tile.code === 'Ca' && tile.state === 'used')
-        .length
-    ).toBeGreaterThanOrEqual(6)
+    ).toHaveLength(6)
     const moat = layout.pieces.find(piece => piece.closed)!
     ring.forEach(tile => {
       expect(
-        moat.points.some(
-          point =>
-            Math.hypot(point[0] - tile.center[0], point[1] - tile.center[1]) <
-            1e-6
+        Math.min(
+          ...moat.points.map(point =>
+            Math.hypot(point[0] - tile.center[0], point[1] - tile.center[1])
+          )
         )
-      ).toBe(true)
+      ).toBeLessThan(0.05)
     })
   })
 

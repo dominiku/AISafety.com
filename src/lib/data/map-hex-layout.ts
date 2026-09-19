@@ -70,6 +70,8 @@ export interface HexDistrictSpec {
   height: number
   // Tiles it takes up however few its logos are.
   minTiles?: number
+  // Its logos may stand over the river (the castle's, over its moat).
+  overWater?: boolean
   // Ringed by a wall of dark peaks along its edge (a forbidding country).
   walled?: boolean
   // Not land at all: its logos lie on open water (the closed orgs, as
@@ -166,6 +168,8 @@ export interface HexLaidTile extends HexGridTile {
   // are the edge of its district: the other sides join tiles of the same
   // district and carry no border.
   edges: boolean[]
+  // Which of its sides face the sea.
+  coast: boolean[]
   // Drawn once the tile named `after` is (the keep's stands behind its moat,
   // which lies partly on the tile in front).
   landmark: (HexLandmarkArt & { x: number; y: number; after: string }) | null
@@ -181,6 +185,14 @@ export interface HexPathPiece {
   clip: string[]
   points: Point[]
   closed?: boolean
+  // Its width where it ends, if not the same as where it starts: the river
+  // narrows toward an arm of the delta.
+  widthEnd?: number
+  // A road climbing to a higher tile: the side of each ramp, as a shape. A
+  // ramp rises off its own tile's top, so the piece is not clipped to it.
+  ramps?: Point[][]
+  // It runs into the moat, which is drawn later and over its end.
+  joinsMoat?: boolean
 }
 
 // A road or river stepping down the side of a tile. `a` and `b` are the ends
@@ -244,19 +256,82 @@ const CENTERING_STEP = 0.4
 const WANDER = 0.22
 // The moat is this share of the river's width.
 const MOAT_WIDTH = 0.8
+const MOAT_POINTS = 48
 
-// From a, bending through the control point, to b.
-function bend(a: Point, control: Point, b: Point): Point[] {
-  const points: Point[] = []
-  for (let n = 0; n <= CURVE_STEPS; n++) {
-    const t = n / CURVE_STEPS
-    const u = 1 - t
-    points.push([
-      u * u * a[0] + 2 * u * t * control[0] + t * t * b[0],
-      u * u * a[1] + 2 * u * t * control[1] + t * t * b[1],
-    ])
+// From a to b, leaving a along `ha` and arriving at b against `hb` (both of
+// length 1), swaying by `sway` map units on the way: a smooth curve, as
+// points. Where the two ends face each other it would be a ruled line, so it
+// is led through a point pushed off to one side.
+function course(
+  a: Point,
+  ha: Point,
+  b: Point,
+  hb: Point,
+  sway: number
+): Point[] {
+  const span = Math.hypot(b[0] - a[0], b[1] - a[1])
+  const cubic = (p0: Point, p1: Point, p2: Point, p3: Point): Point[] => {
+    const points: Point[] = []
+    for (let n = 0; n <= CURVE_STEPS; n++) {
+      const t = n / CURVE_STEPS
+      const u = 1 - t
+      const weights = [u * u * u, 3 * u * u * t, 3 * u * t * t, t * t * t]
+      points.push([
+        weights[0] * p0[0] +
+          weights[1] * p1[0] +
+          weights[2] * p2[0] +
+          weights[3] * p3[0],
+        weights[0] * p0[1] +
+          weights[1] * p1[1] +
+          weights[2] * p2[1] +
+          weights[3] * p3[1],
+      ])
+    }
+    return points
   }
-  return points
+  const along = (p: Point, h: Point, k: number): Point => [
+    p[0] + h[0] * k,
+    p[1] + h[1] * k,
+  ]
+  if (ha[0] * hb[0] + ha[1] * hb[1] < -0.95) {
+    const d: Point = [(b[0] - a[0]) / (span || 1), (b[1] - a[1]) / (span || 1)]
+    const middle: Point = [
+      (a[0] + b[0]) / 2 - d[1] * sway,
+      (a[1] + b[1]) / 2 + d[0] * sway,
+    ]
+    const k = span * 0.22
+    return [
+      ...cubic(a, along(a, ha, k), along(middle, d, -k), middle),
+      ...cubic(middle, along(middle, d, k), along(b, hb, k), b).slice(1),
+    ]
+  }
+  // A bend: a longer reach out of one end than into the other.
+  const k = span * 0.45
+  const lopsided = sway / (span || 1)
+  return cubic(
+    a,
+    along(a, ha, k * (1 + lopsided)),
+    along(b, hb, k * (1 - lopsided)),
+    b
+  )
+}
+
+// The half of a drawn line toward one end lifted by `rise` at that end,
+// easing in: a ramp. Changes `points`; returns the ramp's side, the lifted
+// stretch and the ground under it, as a shape.
+function raise(points: Point[], atStart: boolean, rise: number): Point[] {
+  const span = Math.floor(points.length / 2)
+  const lifted: Point[] = []
+  const ground: Point[] = []
+  for (let n = 0; n <= span; n++) {
+    const index = atStart ? n : points.length - 1 - n
+    const t = 1 - n / span
+    const eased = t * t * (3 - 2 * t)
+    ground.push([points[index][0], points[index][1]])
+    points[index] = [points[index][0], points[index][1] - rise * eased]
+    lifted.push(points[index])
+  }
+  return [...lifted, ...ground.reverse()]
 }
 
 // The sides of a tile in the order the corners of its top run.
@@ -629,10 +704,16 @@ export function layoutHexMap(
             width: own * MOAT_WIDTH,
             tile: front && ring.includes(front) ? front.ref : tile.ref,
             clip: [tile.ref, ...ring.map(neighbor => neighbor.ref)],
-            // Round through the middles of the six tiles about the keep.
-            points: HEX_DIRECTIONS.map(side =>
-              drawn(tile, hexCenter(hexNeighbor(tile, side), view.size))
-            ),
+            // A round through the middles of the six tiles about the keep:
+            // they all lie one tile's width from its own middle.
+            points: Array.from({ length: MOAT_POINTS }, (_, n): Point => {
+              const angle = (n / MOAT_POINTS) * Math.PI * 2
+              const reach = Math.sqrt(3) * view.size
+              return drawn(tile, [
+                middle[0] + reach * Math.cos(angle),
+                middle[1] + reach * Math.sin(angle),
+              ])
+            }),
             closed: true,
           })
         }
@@ -694,44 +775,73 @@ export function layoutHexMap(
       }
       // Toward the keep it runs only as far as the moat, which passes through
       // the middle of this tile.
-      const at = (side: HexDirection | null): Point =>
+      const inland = (side: HexDirection | null) =>
         side === null || neighborOf(tile, side) === keep
-          ? middle
-          : hexSideMiddle(tile, side, view.size)
+      const at = (side: HexDirection | null): Point =>
+        inland(side) ? middle : hexSideMiddle(tile, side!, view.size)
       const clip = [
         tile.ref,
         ...[above, ...below]
           .filter((other): other is PlannedTile => !!other && level(other))
           .map(other => other.ref),
       ]
-      for (const outSide of outSides) {
+      const toward = (from: Point, to: Point): Point => {
+        const length = Math.hypot(to[0] - from[0], to[1] - from[1]) || 1
+        return [(to[0] - from[0]) / length, (to[1] - from[1]) / length]
+      }
+      outSides.forEach((outSide, n) => {
+        const child: PlannedTile | undefined = below[n]
         const [a, b] = [at(inSide), at(outSide)]
-        // Bent through the middle of the tile, pushed a little to one side
-        // where it would otherwise run dead straight.
-        const [dx, dy] = [b[0] - a[0], b[1] - a[1]]
-        const length = Math.hypot(dx, dy) || 1
-        const straight =
-          inSide !== null &&
-          outSide !== null &&
-          Math.abs(
-            HEX_DIRECTIONS.indexOf(inSide) - HEX_DIRECTIONS.indexOf(outSide)
-          ) === 3
-        const push = straight ? lean(tile) * WANDER * view.size : 0
-        const control: Point =
-          inSide === null || outSide === null
-            ? [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
-            : [
-                middle[0] - (dy / length) * push,
-                middle[1] + (dx / length) * push,
-              ]
+        // It crosses a side square to it, so it runs on into the next tile
+        // without a kink; between the two ends it wanders a little.
+        const points = course(
+          a,
+          inland(inSide) ? toward(a, b) : toward(a, middle),
+          b,
+          inland(outSide) ? toward(b, a) : toward(b, middle),
+          lean(tile) * WANDER * view.size
+        ).map(point => drawn(tile, point))
+        // A road climbs to a higher tile by a ramp on the lower one.
+        const ramps: Point[][] = []
+        if (kind === 'road') {
+          const climbs: [PlannedTile | null | undefined, boolean][] = [
+            [above, true],
+            [child, false],
+          ]
+          for (const [other, atStart] of climbs) {
+            if (!other || other === keep || other.height <= tile.height)
+              continue
+            ramps.push(
+              raise(points, atStart, (other.height - tile.height) * view.lift)
+            )
+          }
+        }
+        // Where the river runs into the moat, or out of it, it is no wider
+        // than the moat, so its end lies wholly in the moat's water.
+        const atMoat = (side: HexDirection | null) =>
+          kind === 'river' && side !== null && neighborOf(tile, side) === keep
+        const moat = own * MOAT_WIDTH * 0.9
         pieces.push({
           kind,
-          width: own,
+          width: atMoat(inSide) ? moat : own,
+          widthEnd: atMoat(outSide)
+            ? moat
+            : child && child !== keep
+              ? widthAt.get(hexKey(child))!
+              : own,
           tile: tile.ref,
           clip,
-          points: bend(a, control, b).map(point => drawn(tile, point)),
+          points,
+          ...(ramps.length > 0 ? { ramps } : {}),
+          ...(kind === 'river' &&
+          keep &&
+          [inSide, outSide].some(
+            side => side !== null && neighborOf(tile, side) === keep
+          )
+            ? { joinsMoat: true }
+            : {}),
         })
-      }
+      })
       if (kind === 'river' && inSide === null) {
         springs.push({ tile: tile.ref, at: drawn(tile, middle), width: own })
       }
@@ -764,9 +874,9 @@ export function layoutHexMap(
         })
       }
 
-      // Steps down (the river's) or up and down (the road's) to the tiles
-      // it runs on into.
-      for (const child of below) {
+      // The river's steps down to the tiles it runs on into. (The road
+      // climbs by ramps.)
+      for (const child of kind === 'river' ? below : []) {
         if (child === keep || child.height === tile.height) continue
         const [high, low] =
           tile.height > child.height ? [tile, child] : [child, tile]
@@ -802,7 +912,7 @@ export function layoutHexMap(
   for (const logo of logos) {
     if (!districtByName.has(logo.district)) unplaced.push(logo.id)
   }
-  const plateauOf = (tiles: PlannedTile[]): Plateau => {
+  const plateauOf = (tiles: PlannedTile[], overWater = false): Plateau => {
     const open = tiles.filter(tile => !landmarkOn.has(tile.ref))
     const within = new Set(open.map(tile => hexKey(tile)))
     const refs = new Set(open.map(tile => tile.ref))
@@ -827,7 +937,11 @@ export function layoutHexMap(
         })
       }),
       lines: pieces
-        .filter(piece => piece.clip.some(ref => refs.has(ref)))
+        .filter(
+          piece =>
+            piece.clip.some(ref => refs.has(ref)) &&
+            !(overWater && piece.kind === 'river')
+        )
         .map(piece => ({
           points: piece.points,
           halfWidth: piece.width / 2,
@@ -845,7 +959,7 @@ export function layoutHexMap(
           : [],
     }
   }
-  for (const { code, district, minTiles = 1 } of spec.districts) {
+  for (const { code, district, minTiles = 1, overWater } of spec.districts) {
     const tiles = tilesOf.get(code)!
     const fixed = tiles.filter(tile => tile.mark !== null)
     const own = logos
@@ -881,7 +995,10 @@ export function layoutHexMap(
       count++
     ) {
       taken = count
-      const plateau = plateauSpots(plateauOf(plateauTiles(count)), packing)
+      const plateau = plateauSpots(
+        plateauOf(plateauTiles(count), overWater),
+        packing
+      )
       const depth =
         Math.max(0, ...plateau.spots.map(spot => spot.at[1])) - plateau.back
       const fitting: (Point | null)[][] = []
@@ -981,6 +1098,7 @@ export function layoutHexMap(
       center: drawn(laid, flatCenter(tile)),
       top: topOf(laid),
       edges: [],
+      coast: [],
       landmark: state === 'sea' ? null : (landmarkOn.get(laid.ref) ?? null),
     }
   })
@@ -997,6 +1115,13 @@ export function layoutHexMap(
         tile.district !== null &&
         neighbor.district === tile.district
       )
+    })
+  }
+
+  for (const tile of tiles) {
+    tile.coast = SIDES.map(side => {
+      const neighbor = laidByCell.get(hexKey(hexNeighbor(tile, side)))
+      return !neighbor || neighbor.state === 'sea' || neighbor.sunken
     })
   }
 
