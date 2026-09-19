@@ -42,7 +42,6 @@ import {
   hexNeighbor,
   hexSide,
   hexSideMiddle,
-  insetConvex,
   insideConvex,
   parseHexGrid,
   projectPoint,
@@ -73,6 +72,7 @@ export type HexCover =
   | 'dunes'
   | 'meadow'
   | 'tropical'
+  | 'huts'
   | 'thermals'
 
 export interface HexDistrictSpec {
@@ -102,13 +102,14 @@ export interface HexDistrictSpec {
   // An escarpment: its cliffs toward the viewer are not sheer but lean out,
   // a steep slope of bare banded rock down onto the land in front.
   scarp?: boolean
-  // A village on stilts: every tile of it is water, with a platform of
-  // planks over it that its logos stand on.
+  // A village on stilts: its ground is a deck of planks, and what shows
+  // under its edges toward the viewer is not cliff but the posts it stands on.
   stilts?: boolean
   // A building of its own stands in the roomiest gap its logos leave.
   building?: 'capitol' | 'school' | 'forum'
-  // A beach: where it meets the sea toward the viewer its sand runs gently
-  // down into the water, in place of a cliff.
+  // A beach: along its sides to the sea its top has a band of damp sand in
+  // place of a rim, and its face is wet sand with foam at the waterline. It
+  // keeps to its tiles' outlines, as every district does.
   beach?: boolean
   // The flank of a volcano: its sides toward the viewer slope, more gently
   // than an escarpment's, and smooth.
@@ -197,6 +198,8 @@ export interface HexLaidTile extends HexGridTile {
   walled: boolean
   // Its district is an escarpment (see HexDistrictSpec.scarp).
   scarp: boolean
+  // Its district is a village on stilts (see HexDistrictSpec.stilts).
+  stilts: boolean
   // Its district meets the sea with a beach (see HexDistrictSpec.beach).
   beach: boolean
   // How far its sides toward the viewer lean out for each level they drop
@@ -207,13 +210,7 @@ export interface HexLaidTile extends HexGridTile {
   // level, with this strip of planks over it at its district's height, which
   // is all of the tile a logo may stand on; `along` is the way the pier runs,
   // toward the land.
-  // A stilt village's tile has one too: a platform, not a strip.
-  deck: {
-    shape: Point[]
-    along: Point
-    height: number
-    platform: boolean
-  } | null
+  deck: { shape: Point[]; along: Point; height: number } | null
   // Its district's building (see HexDistrictSpec.building).
   building: 'capitol' | 'school' | 'forum' | null
   // What its district is covered with (see HexDistrictSpec.cover).
@@ -417,8 +414,6 @@ const CONE_RUN = 0.35
 // A pier's deck: half its width, and how far past the middle of its last tile
 // its head reaches (map grid units).
 const DECK_HALF_WIDTH = 0.3
-// How far a stilt village's platform keeps in from its outer edge.
-const STILT_MARGIN = 0.16
 const DECK_HEAD = 1.1
 
 interface Plateau {
@@ -751,27 +746,7 @@ export function layoutHexMap(
       shape,
       along,
       height: tile.height,
-      platform: false,
     })
-  }
-  // A stilt village is one platform over all its tiles: each tile's part of
-  // it reaches to the sides the tile shares with the rest of the village, and
-  // keeps in from the others, so that water shows round the village's edge.
-  for (const { code, stilts } of spec.districts) {
-    if (!stilts) continue
-    for (const tile of tilesOf.get(code) ?? []) {
-      deckOn.set(tile.ref, {
-        shape: insetConvex(
-          topOf(tile),
-          SIDES.map(side =>
-            neighborOf(tile, side)?.code === code ? 0 : STILT_MARGIN
-          )
-        ),
-        along: [0, 1],
-        height: tile.height,
-        platform: true,
-      })
-    }
   }
   for (const { code } of spec.districts) {
     const tiles = tilesOf.get(code) ?? []
@@ -1340,6 +1315,7 @@ export function layoutHexMap(
       state,
       sunken: district?.sunken === true && state !== 'sea',
       walled: district?.walled === true && state !== 'sea',
+      stilts: district?.stilts === true && state !== 'sea',
       building: state === 'sea' ? null : (district?.building ?? null),
       scarp: district?.scarp === true && state !== 'sea',
       beach: district?.beach === true && state !== 'sea',

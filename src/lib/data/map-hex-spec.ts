@@ -100,7 +100,8 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
     // Support Shoreline is one beach on ONE level (a shore has no steps in
     // it), so its districts are told apart by what is on them, not by height:
     // the tropical sands with their palms and beach huts, the fishing hamlet
-    // behind them, the toolsheds as a village on stilts out over the water,
+    // behind them, the toolsheds as a village on stilts (a deck of planks on
+    // posts, tile for tile like any other ground) out in the water,
     // and the dunes, which run on under the escarpment. The valley runs down
     // to the beach from under the castle, between two arms of the Range: its
     // walls are the Control Dam's high ground to the west and north and the
@@ -108,7 +109,7 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
     // looks in.
     { code: 'Op', district: 'Operations and services', realm: 'Field infrastructure', height: 1, beach: true, cover: 'tropical' },
     { code: 'Hu', district: 'Hubs and coworking', realm: 'Field infrastructure', height: 1, cover: 'hamlet' },
-    { code: 'To', district: 'Tools, databases and research infrastructure', realm: 'Field infrastructure', height: 1, stilts: true },
+    { code: 'To', district: 'Tools, databases and research infrastructure', realm: 'Field infrastructure', height: 1.4, stilts: true, cover: 'huts', ground: '#d98a5a' },
     { code: 'Gm', district: 'Grantmakers and donor advisory', realm: 'Field infrastructure', height: 1, cover: 'dunes', beach: true },
     { code: 'Vc', district: 'Venture capital and incubators', realm: 'Field infrastructure', height: 2, cover: 'tropical' },
     { code: 'Go', district: 'Governments and multi-stakeholder bodies', realm: 'Policy and strategy', height: 2, building: 'capitol' },

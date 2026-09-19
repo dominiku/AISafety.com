@@ -58,10 +58,7 @@ import {
 } from './realmArtBackdrop'
 import { buildingMarkup } from './hexBuildings'
 import {
-  beachCornerMarkup,
-  beachMarkup,
   canopyMarkup,
-  type BeachLayer,
   craterMarkup,
   deckMarkup,
   duneMarkup,
@@ -106,8 +103,6 @@ const TURNED_SATURATION = 0.8
 // the classic map's sands, oranges and dark greens.
 const DAM = { stone: '#ffd1bc', cap: '#f6fbff', line: '#972f00' }
 const FIELD_RIPE = '#ffd1bc'
-// DESIGN REVIEW (Melissa): a stilt village's timber, lighter than a pier's.
-const PLATFORM_WOOD = '#d98a5a'
 const FOREST = { lit: '#00ae85', shade: '#008969' }
 const VINE = '#2f5650'
 // The peaks that wall a forbidding district in.
@@ -672,9 +667,51 @@ export function hexBackdropMarkup(
       // A side that slopes down onto land is drawn by drawSlopes, not as a
       // sheer face. (Down to the sea it stays a cliff.)
       if (drop <= 0 || (tile.slope > 0 && ground > 0)) return
-      // Nor a beach's side to the sea: drawBeach draws that.
-      if (tile.beach && ground === 0) return
       const [a, b] = [top[k], top[k + 1]]
+      const face = (from: number, to: number) =>
+        outline([
+          [a[0], a[1] + from],
+          [b[0], b[1] + from],
+          [b[0], b[1] + to],
+          [a[0], a[1] + to],
+        ])
+      const shade = () => {
+        if (k !== 0) return
+        out.push(
+          `<path d="${face(0, drop)}" fill="${LINE}" fill-opacity="${FACE_SHADE}"/>`
+        )
+      }
+      if (tile.stilts) {
+        // A village on stilts: no cliff under its edge but the shadow under
+        // the deck, the posts it stands on, and the deck's own edge beam.
+        out.push(
+          `<path d="${face(0, drop)}" fill="${PLANK_GAP}" fill-opacity="0.5"/>`
+        )
+        for (let n = 0; n <= 4; n++) {
+          const x = a[0] + ((b[0] - a[0]) * n) / 4
+          const y = a[1] + ((b[1] - a[1]) * n) / 4
+          out.push(
+            `<path d="M${xy([x, y])}L${xy([x, y + drop])}" stroke="${PLANK_GAP}" stroke-width="5" stroke-linecap="round"/>`
+          )
+        }
+        out.push(
+          `<path d="${face(0, Math.min(FACE_LIP * 1.5, drop))}" fill="${PLANK}"/>`
+        )
+        return
+      }
+      if (tile.beach && ground === 0) {
+        // A beach's side to the sea: wet sand, and a line of foam where the
+        // water meets it.
+        const wet = mixHex(styleOf(tile).tone, SHALLOWS, 0.4)
+        out.push(
+          `<path d="${face(0, drop)}" fill="${wet}" stroke="${wet}" stroke-width="1" stroke-linejoin="bevel"/>`
+        )
+        shade()
+        out.push(
+          `<path d="M${xy([a[0], a[1] + drop])}L${xy([b[0], b[1] + drop])}" stroke="${WATER_STREAK}" stroke-width="4" stroke-linecap="round"/>`
+        )
+        return
+      }
       const band = (from: number, to: number, color: string) =>
         out.push(
           `<path d="${outline([
@@ -781,77 +818,25 @@ export function hexBackdropMarkup(
     }
   }
 
-  // A beach district's sides to the sea, toward the viewer: sand running
-  // gently down and out into the water, not a cliff.
-  const BEACH_RUN = 1.1
-  const beachSides = (tile: HexLaidTile) =>
-    tile.beach
-      ? faceDrops(tile).filter(face => face.drop > 0 && face.ground === 0)
-      : []
-  // How many beach sides of a district end at each corner: two where its
-  // beach runs on.
-  const beachCorners = new Map<string, number>()
-  for (const tile of layout.tiles) {
-    for (const { k } of beachSides(tile)) {
-      for (const corner of [tile.top[k], tile.top[k + 1]]) {
-        const key = `${tile.district}|${xy(corner)}`
-        beachCorners.set(key, (beachCorners.get(key) ?? 0) + 1)
-      }
-    }
-  }
-  const BEACH_SHALLOWS = mixHex(SEA, WATER, 0.3)
-  const drawBeach = (tile: HexLaidTile, layer: BeachLayer) => {
-    if (!tile.beach) return
-    // The dry sand is the district's own ground, running on down the beach.
-    const { tone: sand } = styleOf(tile)
-    const wet = mixHex(sand, SHALLOWS, 0.45)
-    const sides = beachSides(tile).map(face => {
-      // Higher ground (a terrace) comes down to a beach no longer than
-      // low ground does.
-      const run = BEACH_RUN * Math.min(1, tile.height)
-      const reach: Point = [
-        SLOPE_OUT[face.k][0] * run,
-        SLOPE_OUT[face.k][1] * run * view.squash + face.drop,
-      ]
-      return { ...face, reach }
-    })
-    sides.forEach(side => {
-      const next = sides.find(other => other.k === side.k + 1)
-      if (!next) return
-      out.push(
-        beachCornerMarkup(
-          tile.top[next.k],
-          side.reach,
-          next.reach,
-          g,
-          sand,
-          wet,
-          BEACH_SHALLOWS,
-          layer
-        )
+  // A beach district's top, along its sides to the sea: in place of the dark
+  // rim, a band of damp sand. It keeps to the tile's own outline, as a rim
+  // does.
+  const STRAND_WIDTH = 0.42
+  const drawStrand = (tile: HexLaidTile) => {
+    if (!tile.beach || !tile.coast.some(Boolean)) return
+    const damp = mixHex(styleOf(tile).tone, SHALLOWS, 0.14)
+    const id = `hex-strand-${tile.col}-${tile.row}`
+    clips.push(
+      `<clipPath id="${id}"><path d="${outline(tile.top)}"/></clipPath>`
+    )
+    const sides = tile.coast
+      .map((coast, k) =>
+        coast ? `M${xy(tile.top[k])}L${xy(tile.top[(k + 1) % 6])}` : ''
       )
-    })
-    for (const side of sides) {
-      const [a, b] = [tile.top[side.k], tile.top[side.k + 1]]
-      out.push(
-        beachMarkup(a, b, side.reach, g, sand, wet, BEACH_SHALLOWS, layer)
-      )
-      // No rim along the top of a beach: the ground runs straight on, and
-      // round a corner where the beach does.
-      if (layer === 'dry') {
-        const cover = RIM_WIDTH * 2 * g + BORDER_LINE.width * 2
-        out.push(
-          `<path d="M${xy(a)}L${xy(b)}" stroke="${sand}" stroke-width="${cover.toFixed(1)}"/>`
-        )
-        for (const corner of [a, b]) {
-          const key = `${tile.district}|${xy(corner)}`
-          if ((beachCorners.get(key) ?? 0) < 2) continue
-          out.push(
-            `<circle cx="${(corner[0] * g).toFixed(1)}" cy="${(corner[1] * g).toFixed(1)}" r="${(cover / 2).toFixed(1)}" fill="${sand}"/>`
-          )
-        }
-      }
-    }
+      .join('')
+    out.push(
+      `<path clip-path="url(#${id})" d="${sides}" fill="none" stroke="${damp}" stroke-width="${(STRAND_WIDTH * 2 * g).toFixed(1)}" stroke-linecap="round"/>`
+    )
   }
 
   // DECORATION. A region is decorated as one canvas, not tile by tile: its
@@ -863,8 +848,6 @@ export function hexBackdropMarkup(
   // What lies flat (fields, vines) is drawn with the ground. What stands up
   // (trees, houses, peaks, dunes, tufts) is gathered with everything else that
   // stands, and drawn from the back of the board to the front.
-  // The whole picture, in map grid units: where things may be scattered.
-  const board = { width: width / g, height: height / g }
   const standing: { depth: number; markup: string }[] = []
   // How far back something stands: its foot as drawn, with its tile's lift
   // taken off again, so that height does not count as distance.
@@ -989,6 +972,29 @@ export function hexBackdropMarkup(
     clip: string
   ) => {
     const cover = plateau.tiles[0].cover
+    if (plateau.tiles[0].stilts) {
+      // Boards across the whole deck, on one grid for the whole board, their
+      // ends staggered from one board to the next.
+      const xs = plateau.tiles.flatMap(tile => tile.top.map(point => point[0]))
+      const ys = plateau.tiles.flatMap(tile => tile.top.map(point => point[1]))
+      const [left, right] = [Math.min(...xs), Math.max(...xs)]
+      const [top, bottom] = [Math.min(...ys), Math.max(...ys)]
+      const width = 0.22
+      out.push(`<g clip-path="url(#${clip})">`)
+      for (let row = Math.floor(top / width); row * width < bottom; row++) {
+        const y = row * width
+        out.push(
+          `<path d="M${xy([left, y])}L${xy([right, y])}" stroke="${PLANK_GAP}" stroke-opacity="0.75" stroke-width="1.5"/>`
+        )
+        const first = Math.floor(left / 1.7) * 1.7 + ((row * 0.77) % 1.7)
+        for (let x = first; x < right; x += 1.7) {
+          out.push(
+            `<path d="M${xy([x, y])}L${xy([x, y + width])}" stroke="${PLANK_GAP}" stroke-opacity="0.75" stroke-width="1.5"/>`
+          )
+        }
+      }
+      out.push('</g>')
+    }
     if ((cover === 'forest' || cover === 'thermals') && pins) {
       // A forest's canopy, seen from above, over all its ground; or hot
       // springs wherever the river and the road leave room.
@@ -1104,6 +1110,24 @@ export function hexBackdropMarkup(
 
     // (Dunes and terraces lie under the logos: see drawRelief.)
     if (cover === 'dunes') return
+    if (cover === 'huts') {
+      // A stilt village's huts, and now and then one of the classic cottages.
+      scatterSpots(inside, [...logos, ...fixed], extent, {
+        spacing: 0.75,
+        minRoom: 0.26,
+        maxRoom: 0.8,
+      }).forEach(spot => {
+        const foot = spot.y + 0.3
+        stand(
+          foot,
+          level,
+          spot.roll > 0.7
+            ? stamp('cottage', spot.x, foot, 0.72, 0.93)
+            : beachHutMarkup(spot.x, foot, 0.72, g)
+        )
+      })
+      return
+    }
     if (cover === 'tropical') {
       // A tropical beach: palms, and a beach hut or two where there is room.
       let huts = 0
@@ -1378,11 +1402,6 @@ export function hexBackdropMarkup(
     for (const plateau of level) {
       for (const tile of plateau.tiles) drawSlopes(tile)
     }
-    for (const layer of ['shallows', 'foam', 'wet'] as const) {
-      for (const plateau of level) {
-        for (const tile of plateau.tiles) drawBeach(tile, layer)
-      }
-    }
     level.forEach((plateau, n) => {
       const { tone } = styleOf(plateau.tiles[0])
       const shape = plateau.loops.map(outline).join('')
@@ -1463,79 +1482,13 @@ export function hexBackdropMarkup(
     // climbs by a ramp is drawn with the level it climbs to, so that level's
     // cliff does not cover the ramp.
     for (const plateau of level) {
-      for (const tile of plateau.tiles) drawBeach(tile, 'dry')
+      for (const tile of plateau.tiles) drawStrand(tile)
     }
     // The piers that stand at this height, over the water of their tiles.
     for (const tile of layout.tiles) {
       if (tile.deck?.height !== height) continue
-      const { shape, along, platform } = tile.deck
-      // The sides a platform shares with the next tile's part of it, as drawn
-      // (the platform stands above its tile, which lies at sea level).
-      const joins: [Point, Point][] = []
-      if (platform) {
-        const rise = height * view.lift
-        SIDE_NAMES.forEach((side, k) => {
-          const next = laidByCell.get(hexKey(hexNeighbor(tile, side)))
-          if (!next) return
-          const [a, b] = [tile.top[k], tile.top[(k + 1) % 6]]
-          if (next.deck && next.district === tile.district) {
-            joins.push([
-              [a[0], a[1] - rise],
-              [b[0], b[1] - rise],
-            ])
-          } else if (isGround(next) && next.height === height) {
-            // A gangway ashore, wherever land of this height lies alongside.
-            const from: Point = [
-              shape.reduce((sum, point) => sum + point[0], 0) / shape.length,
-              shape.reduce((sum, point) => sum + point[1], 0) / shape.length,
-            ]
-            const to: Point = [
-              (a[0] + b[0]) / 2 + ((a[0] + b[0]) / 2 - from[0]) * 0.15,
-              (a[1] + b[1]) / 2 -
-                rise +
-                ((a[1] + b[1]) / 2 - rise - from[1]) * 0.15,
-            ]
-            const d = `M${xy(from)}L${xy(to)}`
-            out.push(
-              `<path d="${d}" fill="none" stroke="${PLANK_GAP}" stroke-width="${(0.42 * g).toFixed(1)}"/>`,
-              `<path d="${d}" fill="none" stroke="${PLANK}" stroke-width="${(0.42 * g).toFixed(1)}" stroke-dasharray="7 3"/>`
-            )
-          }
-        })
-      }
-      out.push(
-        deckMarkup(
-          shape,
-          along,
-          height * view.lift,
-          g,
-          !platform,
-          platform ? PLATFORM_WOOD : undefined,
-          joins
-        )
-      )
-      if (platform && pins) {
-        // Huts on the platform, where the logos leave room: a stilt hut, or
-        // now and then one of the classic cottages.
-        const deck = insetConvex(
-          shape,
-          shape.map(() => 0.12)
-        )
-        scatterSpots((x, y) => insideConvex([x, y], deck), pins, board, {
-          spacing: 0.7,
-          minRoom: 0.24,
-          maxRoom: 0.8,
-        }).forEach(spot => {
-          const foot = spot.y + 0.3
-          stand(
-            foot,
-            height,
-            spot.roll > 0.7
-              ? `<use href="#cottage" x="${((spot.x - 0.36) * g).toFixed(1)}" y="${((foot - 0.93) * g).toFixed(1)}" width="${(0.72 * g).toFixed(1)}" height="${(0.93 * g).toFixed(1)}"/>`
-              : beachHutMarkup(spot.x, foot, 0.72, g)
-          )
-        })
-      }
+      const { shape, along } = tile.deck
+      out.push(deckMarkup(shape, along, height * view.lift, g))
     }
     const refs = new Set(
       level.flatMap(plateau => plateau.tiles.map(t => t.ref))
