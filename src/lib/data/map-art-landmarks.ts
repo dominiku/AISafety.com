@@ -59,10 +59,11 @@ export const MAP_35_ART_LANDMARKS: ArtLandmark[] = [
     district: 'Macrostrategy and forecasting',
   },
   {
+    // The mountain lake the river rises at, in the far south-east.
     symbol: 'range',
     width: 4,
     height: 2.8,
-    district: 'Evaluations and threat research',
+    district: 'Interpretability and model understanding',
   },
   {
     symbol: 'cave',

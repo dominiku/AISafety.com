@@ -8,11 +8,13 @@
 // south, so every south-facing shore drops a cliff face to the water; green
 // land whose regions differ in tone and are parted by thin dark lines, not by
 // colored fills; a brown dirt road. Each realm is a country of its own kind,
-// after its proposed name: the Support Shoreline is sand and beach with boats
-// off it, the Training Trail green country along the road, the Discourse
-// Delta wet lowland with a river fanning out to the sea, the Policy Plains
-// open grass, the Research Range rock with mountains throughout, in whatever
-// gaps the org logos leave. Over that stand the classic map's own landmarks (the
+// of what it holds: Field infrastructure, the ground the rest stands on, is
+// sand along the south shore; the Talent pipeline is green country along the
+// road; Media and discourse is delta country, with a beach, reeds and boats
+// off it; Policy and strategy is open grass; Technical research is rock with
+// mountains throughout, in whatever gaps the org logos leave. A river comes
+// down from the mountains and over the dam, circles the castle town as its
+// moat, and runs out through the delta to the sea in the north-west. Over that stand the classic map's own landmarks (the
 // castle, the town, the forests and the rest), each in its new district: see
 // map-art-landmarks.ts.
 //
@@ -61,7 +63,7 @@ const STARFISH = '#ff4b00'
 
 // DESIGN DECISION, for review: each realm is a country of its own kind, told
 // apart by its ground, its shore and what grows or stands on it, after the
-// proposed realm names. Matched on the first word of the realm's name.
+// realm's part in the journey. Matched on the first word of the realm's name.
 type Terrain = 'shore' | 'trail' | 'delta' | 'plains' | 'range'
 interface RealmTheme {
   ground: string
@@ -71,40 +73,43 @@ interface RealmTheme {
   terrain?: Terrain
   // Grass and reeds, where the terrain has them.
   growth?: string
+  // Sailboats and rowboats off its shore.
+  boats?: boolean
 }
 const REALM_THEMES: Record<string, RealmTheme> = {
-  // Support Shoreline
+  // Field infrastructure: the sandy ground along the south
   field: {
     ground: '#ffa777',
     cliff: CLIFF_SAND,
     beach: true,
     terrain: 'shore',
   },
-  // Training Trail
+  // Talent pipeline
   talent: {
     ground: '#00ae85',
     cliff: CLIFF_EARTH,
     terrain: 'trail',
     growth: '#008969',
   },
-  // Discourse Delta
+  // Media and discourse: the delta country in the north-west
   media: {
     ground: '#008969',
     cliff: CLIFF_EARTH,
     beach: true,
     terrain: 'delta',
     growth: '#2dc2a4',
+    boats: true,
   },
-  // Advocacy Anchorage
+  // Advocacy and public engagement: the harbour
   advocacy: { ground: '#ffd1bc', cliff: CLIFF_SAND },
-  // Policy Plains
+  // Policy and strategy
   policy: {
     ground: '#2dc2a4',
     cliff: CLIFF_EARTH,
     terrain: 'plains',
     growth: '#008969',
   },
-  // Research Range
+  // Technical research
   technical: { ground: '#ff7c25', cliff: CLIFF_ROCK, terrain: 'range' },
 }
 const SPARE_THEME: RealmTheme = { ground: '#00ae85', cliff: CLIFF_EARTH }
@@ -338,49 +343,76 @@ export function artBackdropMarkup(
   }
   let landmarks = pins ? landmarksFor(layout, pins) : []
   // The river: it rises at the mountain lake in the range, comes down through
-  // the range and over the dam, passes under the castle town and enters the
-  // delta realm, where it splits again and again on its way to the sea. With
-  // no range or no delta on the map there is no river.
+  // the mountains and over the dam, and runs into the moat round the castle
+  // town, the hub of the island. It leaves the moat by the shoulder nearest
+  // the delta realm, and there splits again and again on its way to the sea.
+  // With no range, no castle town or no delta realm there is no river.
+  const hub = layout.districts.find(d => d.block && d.pieces[0]?.length === 8)
   const deltaRealm = layout.realms.find(
     realm => themeOf(realm.realm).terrain === 'delta'
   )?.realm
   const riverFrom = (spring: PlacedLandmark | undefined) => {
-    const river: { points: Point[]; width: number }[] = []
-    if (!deltaRealm || !spring) return river
-    const shore = coastStretches(coast)
-      .filter(
-        ({ middle, outward }) =>
-          realmAt(middle[0] - outward[0], middle[1] - outward[1]) === deltaRealm
+    const river: { points: Point[]; width: number; closed?: boolean }[] = []
+    if (!spring || !hub || !deltaRealm) return river
+    const moat = hub.pieces[0]
+    const nearest = (points: Point[], to: Point) =>
+      points.reduce((best, point) =>
+        Math.hypot(point[0] - to[0], point[1] - to[1]) <
+        Math.hypot(best[0] - to[0], best[1] - to[1])
+          ? point
+          : best
       )
-      .sort((a, b) => a.middle[0] - b.middle[0])
-    // The mouths keep to the stretch of coast the river comes down to.
-    const mouths = [0.4, 0.58, 0.76, 0.93].flatMap(share => {
-      const stretch = shore[Math.floor(share * shore.length)]
+    const sides = moat.map((from, n): Point => {
+      const to = moat[(n + 1) % moat.length]
+      return [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2]
+    })
+
+    // Down through the range in two easy bends, over the dam, and into the
+    // side of the moat that faces it.
+    const dam = layout.landmarks.controlDam
+    const source: Point = [spring.x, spring.y + spring.height * 0.2]
+    const along = (share: number, swing: number): Point => [
+      source[0] + (dam[0] - source[0]) * share,
+      source[1] + (dam[1] - source[1]) * share + swing,
+    ]
+    river.push(
+      { points: [source, along(0.35, 0.9), along(0.7, -0.5), dam], width: 9 },
+      { points: [dam, nearest(sides, dam)], width: 12 },
+      { points: moat, width: 12, closed: true }
+    )
+
+    // Out of the moat by the corner nearest the delta realm's coast, and down
+    // to a head most of the way there, where the delta begins.
+    const shore = coastStretches(coast).filter(
+      ({ middle, outward }) =>
+        realmAt(middle[0] - outward[0], middle[1] - outward[1]) === deltaRealm
+    )
+    if (shore.length === 0) return river
+    const seaward: Point = [
+      shore.reduce((sum, stretch) => sum + stretch.middle[0], 0) / shore.length,
+      shore.reduce((sum, stretch) => sum + stretch.middle[1], 0) / shore.length,
+    ]
+    const gate = nearest(moat, seaward)
+    // The mouths, in order along the coast as seen from the gate.
+    const bearing = (p: Point) => Math.atan2(p[1] - gate[1], p[0] - gate[0])
+    const inOrder = [...shore].sort(
+      (a, b) => bearing(a.middle) - bearing(b.middle)
+    )
+    const mouths = [0.2, 0.42, 0.64, 0.86].flatMap(share => {
+      const stretch = inOrder[Math.floor(share * inOrder.length)]
       return stretch ? [stretch.middle] : []
     })
-    if (mouths.length > 0) {
-      const dam = layout.landmarks.controlDam
-      const source: Point = [spring.x, spring.y + spring.height * 0.2]
-      const toward: Point = [
-        mouths.reduce((sum, m) => sum + m[0], 0) / mouths.length,
-        mouths.reduce((sum, m) => sum + m[1], 0) / mouths.length,
-      ]
-      const head: Point = [
-        dam[0] + (toward[0] - dam[0]) * 0.45,
-        dam[1] + (toward[1] - dam[1]) * 0.45,
-      ]
-      // Down through the range in two easy bends.
-      const along = (share: number, swing: number): Point => [
-        source[0] + (dam[0] - source[0]) * share,
-        source[1] + (dam[1] - source[1]) * share + swing,
-      ]
-      river.push(
-        { points: [source, along(0.35, 0.9), along(0.7, -0.5), dam], width: 9 },
-        { points: [dam, head], width: 14 }
-      )
-      for (const arm of deltaArms(head, mouths)) {
-        river.push({ points: arm.points, width: arm.depth === 0 ? 11 : 8 })
-      }
+    const toward: Point = [
+      mouths.reduce((sum, m) => sum + m[0], 0) / mouths.length,
+      mouths.reduce((sum, m) => sum + m[1], 0) / mouths.length,
+    ]
+    const head: Point = [
+      gate[0] + (toward[0] - gate[0]) * 0.5,
+      gate[1] + (toward[1] - gate[1]) * 0.5,
+    ]
+    river.push({ points: [gate, head], width: 13 })
+    for (const arm of deltaArms(head, mouths)) {
+      river.push({ points: arm.points, width: arm.depth === 0 ? 11 : 8 })
     }
     return river
   }
@@ -479,7 +511,7 @@ export function artBackdropMarkup(
   })
 
   // Realm borders, a little heavier than the district ones, and the river
-  // over them and over the beach, so its mouths cut through the sand.
+  // over them.
   out.push('<g clip-path="url(#art-coast)">')
   for (const realm of layout.realms) {
     out.push(
@@ -488,7 +520,7 @@ export function artBackdropMarkup(
   }
   for (const stretch of river) {
     out.push(
-      `<path d="M${stretch.points.map(px).join('L')}" fill="none" stroke="${WATER}" stroke-width="${stretch.width}" stroke-linecap="round" stroke-linejoin="round"/>`
+      `<path d="M${stretch.points.map(px).join('L')}${stretch.closed ? 'Z' : ''}" fill="none" stroke="${WATER}" stroke-width="${stretch.width}" stroke-linecap="round" stroke-linejoin="round"/>`
     )
   }
   // The cove is water inside the coast, drawn over the land; its shallows
@@ -559,6 +591,19 @@ export function artBackdropMarkup(
     )
   }
   if (layout.boardwalk.length > 1) planks(layout.boardwalk)
+  // Bridges over the moat where the road comes in from the west and the
+  // footpaths set out to the east (the boardwalk is its own, to the north).
+  if (river.length > 0 && hub) {
+    const xs = hub.pieces[0].map(p => p[0])
+    const ys = hub.pieces[0].map(p => p[1])
+    const y = (Math.min(...ys) + Math.max(...ys)) / 2
+    for (const x of [Math.min(...xs), Math.max(...xs)]) {
+      planks([
+        [x - 0.45, y],
+        [x + 0.45, y],
+      ])
+    }
+  }
   const [hx, hy] = layout.landmarks.arrivalHarbour
   planks([
     [hx + 0.3, hy],
@@ -566,14 +611,14 @@ export function artBackdropMarkup(
   ])
 
   if (pins) {
-    // Boats off the shoreline realm's coast: sailboats standing off, rowboats
-    // close in.
+    // Boats off a coast realm's shore: sailboats standing off, rowboats close
+    // in.
     const shore = coastStretches(coast)
       .filter(({ middle, outward }) => {
         const behind = realmAt(middle[0] - outward[0], middle[1] - outward[1])
         return (
           behind !== undefined &&
-          themeOf(behind).terrain === 'shore' &&
+          themeOf(behind).boats === true &&
           // Not under a cliff face.
           outward[1] < 0.3
         )
