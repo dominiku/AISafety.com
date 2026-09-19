@@ -56,6 +56,7 @@ import {
   type ArtPin,
   type RealmTheme,
 } from './realmArtBackdrop'
+import { craterMarkup, deckMarkup, scarpFaceMarkup } from './hexFeatures'
 
 // DESIGN REVIEW (Melissa): the closed orgs' islet, in the classic map's dark
 // greens. Every other color of this view is the Art work view's, or a tone
@@ -645,6 +646,19 @@ export function hexBackdropMarkup(
       if (ground === 0) {
         band(Math.max(0, drop - FACE_FOOT), drop, theme.cliff.foot)
       }
+      if (tile.scarp) {
+        out.push(
+          scarpFaceMarkup(
+            a,
+            b,
+            drop,
+            g,
+            theme.cliff,
+            ground > 0,
+            tile.col * 31 + tile.row * 7 + k
+          )
+        )
+      }
       if (k === 0) {
         out.push(
           `<path d="${outline([a, b, [b[0], b[1] + drop], [a[0], a[1] + drop]])}" fill="${LINE}" fill-opacity="${FACE_SHADE}"/>`
@@ -800,6 +814,8 @@ export function hexBackdropMarkup(
     flat: boolean
   ) => {
     if (!pins || tile.landmark || !(theme.terrain || tile.cover)) return
+    // A crater fills its tile.
+    if (tile.state === 'crater') return
     if (flat !== (tile.cover === 'fields' || tile.cover === 'vineyard')) return
     const ground = insetConvex(
       tile.top,
@@ -1003,6 +1019,17 @@ export function hexBackdropMarkup(
       out.push(`<path d="${shape}" fill="${tone}" fill-rule="evenodd"/>`)
       for (const tile of plateau.tiles) {
         drawCountry(tile, styleOf(tile).theme, tone, true)
+        if (tile.state === 'crater') {
+          out.push(
+            craterMarkup(
+              tile.center,
+              view.size * 0.62,
+              view.squash,
+              g,
+              styleOf(tile).theme.cliff
+            )
+          )
+        }
       }
       // The rim: a darker band just inside the plateau's edge. The outline
       // is drawn as a wide line and the outer half clipped away.
@@ -1060,6 +1087,12 @@ export function hexBackdropMarkup(
     // The river and the road on this level, over all its ground. A road that
     // climbs by a ramp is drawn with the level it climbs to, so that level's
     // cliff does not cover the ramp.
+    // The piers that stand at this height, over the water of their tiles.
+    for (const tile of layout.tiles) {
+      if (tile.deck?.height !== height) continue
+      const { shape, along } = tile.deck
+      out.push(deckMarkup(shape, along, height * view.lift, g))
+    }
     const refs = new Set(
       level.flatMap(plateau => plateau.tiles.map(t => t.ref))
     )

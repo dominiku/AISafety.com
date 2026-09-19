@@ -171,12 +171,15 @@ export type HexMark =
   | 'road'
   // "!": its district's landmark stands on it.
   | 'landmark'
+  // "+": a deck of planks on posts over the water: a tile of a pier.
+  | 'deck'
   | null
 
 const MARKS: Record<string, HexMark> = {
   '~': 'river',
   '=': 'road',
   '!': 'landmark',
+  '+': 'deck',
 }
 
 export interface HexGridTile extends HexCell {
@@ -191,7 +194,7 @@ const SEA_TOKEN = '..'
 /**
  * Reads the tile map: one token per tile, in rows of the same length. A token
  * is ".." for open sea, or two letters (the district or feature), with one of
- * the signs ~ = ! after them where the tile is marked. Lines starting with
+ * the signs ~ = ! + after them where the tile is marked. Lines starting with
  * # are notes. Anything malformed throws, so a slip of the hand is caught
  * when the map is built.
  */
@@ -214,10 +217,10 @@ export function parseHexGrid(tiles: string): HexGridTile[] {
         grid.push({ col, row, code: null, mark: null })
         return
       }
-      const match = /^([A-Za-z]{2})([~=!]?)$/.exec(token)
+      const match = /^([A-Za-z]{2})([~=!+]?)$/.exec(token)
       if (!match) {
         throw new Error(
-          `Hex map: "${token}" at column ${col}, row ${row} is neither ".." nor two letters with an optional ~ = or !`
+          `Hex map: "${token}" at column ${col}, row ${row} is neither ".." nor two letters with an optional ~ = ! or +`
         )
       }
       grid.push({ col, row, code: match[1], mark: MARKS[match[2]] ?? null })
@@ -228,6 +231,31 @@ export function parseHexGrid(tiles: string): HexGridTile[] {
 
 // ---------------------------------------------------------------------------
 // Shapes on the screen: the top of a tile as a logo sees it.
+
+/** The part of a convex polygon on the side of the line through `on` that
+ *  `toward` points to. */
+export function clipConvex(
+  polygon: Point[],
+  on: Point,
+  toward: Point
+): Point[] {
+  const side = ([x, y]: Point) =>
+    (x - on[0]) * toward[0] + (y - on[1]) * toward[1]
+  const kept: Point[] = []
+  polygon.forEach((from, n) => {
+    const to = polygon[(n + 1) % polygon.length]
+    const [a, b] = [side(from), side(to)]
+    if (a >= 0) kept.push(from)
+    if (a >= 0 !== b >= 0) {
+      const t = a / (a - b)
+      kept.push([
+        from[0] + (to[0] - from[0]) * t,
+        from[1] + (to[1] - from[1]) * t,
+      ])
+    }
+  })
+  return kept
+}
 
 /** Whether the point is inside the convex polygon (or on its edge). */
 export function insideConvex(point: Point, polygon: Point[]): boolean {

@@ -316,6 +316,59 @@ describe('layoutHexMap', () => {
     expect(at(layout, 1, 2).cover).toBe('fields')
   })
 
+  it('lays a pier as a strip of planks over water, out from its district', () => {
+    // Beta's pier stands on the tile east of its land, where the cove was.
+    const tiles = SPEC.tiles.replace('Bb  Bb  Bb  cv', 'Bb  Bb  Bb  Bb+')
+    const layout = layoutHexMap(withTiles(tiles), logos('Beta', 4))
+    const pier = at(layout, 4, 2)
+    // Water at sea level, still Beta's, with the deck at Beta's height.
+    expect(pier.state).toBe('water')
+    expect(pier.height).toBe(0)
+    expect(pier.district).toBe('Beta')
+    expect(pier.deck?.height).toBe(2)
+    // The strip is narrower than the tile, and stops short of its far side.
+    const xs = (points: [number, number][]) => points.map(point => point[0])
+    const deck = pier.deck!.shape
+    expect(Math.max(...xs(deck))).toBeLessThan(Math.max(...xs(pier.top)) - 0.5)
+    // It counts as Beta's under the pointer, and the water beside it does not.
+    const [x, y] = deck.reduce(
+      (sum, point) => [
+        sum[0] + point[0] / deck.length,
+        sum[1] + point[1] / deck.length,
+      ],
+      [0, 0]
+    )
+    expect(layout.districtAt(x, y)).toBe('Beta')
+    // A pier runs straight, and starts from solid ground.
+    expect(() =>
+      layoutHexMap(
+        withTiles(SPEC.tiles.replace('Bb  Bb  Bb  ..', 'Bb  Bb  Bb+ ..')),
+        []
+      )
+    ).toThrow(/a pier runs straight/)
+    expect(() =>
+      layoutHexMap(
+        withTiles('..  ..  ..  ..\n..  Aa+ Aa+ ..\n..  ..  ..  ..'),
+        []
+      )
+    ).toThrow(/starts from a tile of solid ground/)
+  })
+
+  it('marks the tiles of an escarpment, and lays a crater as land of its own', () => {
+    const layout = layoutHexMap(
+      withTiles(SPEC.tiles.replace('Bb  Bb  Bb  cv', 'Bb  Bb  Bb  cr'), {
+        districts: [{ ...SPEC.districts[0], scarp: true }, SPEC.districts[1]],
+        features: [{ code: 'cr', kind: 'crater', realm: 'South', height: 4 }],
+        takeAllTiles: true,
+      }),
+      [...logos('Alpha', 1), ...logos('Beta', 1)]
+    )
+    expect(at(layout, 1, 1).scarp).toBe(true)
+    expect(at(layout, 1, 2).scarp).toBe(false)
+    expect(at(layout, 4, 2).state).toBe('crater')
+    expect(at(layout, 4, 2).height).toBe(4)
+  })
+
   it('takes up the tiles a district is told to, however few its logos', () => {
     const layout = layoutHexMap(
       {

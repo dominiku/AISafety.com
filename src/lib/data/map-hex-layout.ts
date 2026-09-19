@@ -34,6 +34,7 @@ import {
   SOUTH_FACING,
   backToFront,
   directionBetween,
+  clipConvex,
   distanceToStretch,
   hexCenter,
   hexCorners,
@@ -91,6 +92,8 @@ export interface HexDistrictSpec {
   overWater?: boolean
   // Ringed by a wall of dark peaks along its edge (a forbidding country).
   walled?: boolean
+  // An escarpment: its cliffs toward the viewer are bare banded rock.
+  scarp?: boolean
   // Not land at all: its logos lie on open water (the closed orgs, as
   // sunken ships). Its tiles are not drawn and its height is 0.
   sunken?: boolean
@@ -99,11 +102,12 @@ export interface HexDistrictSpec {
 }
 
 // A tile that is no district's: water inside the coast (a cove), scenery in
-// the look of a realm (a peak), or the keep: the one tile the river circles
-// as a moat and the road ends at.
+// the look of a realm (a peak), a crater (the top of a volcano, with a lake
+// in it), or the keep: the one tile the river circles as a moat and the road
+// ends at.
 export interface HexFeatureSpec {
   code: string
-  kind: 'water' | 'scenery' | 'keep'
+  kind: 'water' | 'scenery' | 'crater' | 'keep'
   realm?: string
   // Levels above the sea; 0 for water.
   height: number
@@ -159,6 +163,7 @@ export type HexTileState =
   | 'sea'
   | 'water'
   | 'scenery'
+  | 'crater'
   | 'keep'
 
 export interface HexLaidTile extends HexGridTile {
@@ -171,6 +176,13 @@ export interface HexLaidTile extends HexGridTile {
   sunken: boolean
   // Its district is ringed by peaks (see HexDistrictSpec.walled).
   walled: boolean
+  // Its district is an escarpment (see HexDistrictSpec.scarp).
+  scarp: boolean
+  // A tile of a pier (marked "+"): its state is 'water' and it lies at sea
+  // level, with this strip of planks over it at its district's height, which
+  // is all of the tile a logo may stand on; `along` is the way the pier runs,
+  // toward the land.
+  deck: { shape: Point[]; along: Point; height: number } | null
   // What its district is covered with (see HexDistrictSpec.cover).
   cover: HexCover | null
   // Its district's own ground color, if it has one.
@@ -363,6 +375,11 @@ function raise(points: Point[], atStart: boolean, rise: number): Point[] {
 
 // The sides of a tile in the order the corners of its top run.
 const SIDES: HexDirection[] = ['SE', 'S', 'SW', 'NW', 'N', 'NE']
+
+// A pier's deck: half its width, and how far past the middle of its last tile
+// its head reaches (map grid units).
+const DECK_HALF_WIDTH = 0.52
+const DECK_HEAD = 0.85
 
 interface Plateau {
   // The tiles logos may stand on.
@@ -636,6 +653,64 @@ export function layoutHexMap(
       y: cy + depth * 0.62 - art.height / 2,
       after: front && kindOf(front) !== 'water' ? front.ref : tile.ref,
     })
+  }
+
+  // Decks: a district's tiles marked "+" are a pier. Each is water with a
+  // strip of planks over it, running straight between the sides it shares
+  // with the rest of its district; on a pier's last tile it ends a little
+  // past the middle, so that open water lies beyond the pier's head.
+  const deckOn = new Map<
+    string,
+    { shape: Point[]; along: Point; height: number }
+  >()
+  for (const tile of planned.values()) {
+    if (tile.mark !== 'deck') continue
+    if (!districtByCode.has(tile.code!)) {
+      throw new Error(
+        `Hex map: the deck at ${where(tile)} belongs to no district`
+      )
+    }
+    const joined = SIDES.map((side, n) => ({ side, n })).filter(
+      ({ side }) => neighborOf(tile, side)?.code === tile.code
+    )
+    const straight =
+      joined.length === 1 ||
+      (joined.length === 2 && joined[1].n - joined[0].n === 3)
+    if (!straight) {
+      throw new Error(
+        `Hex map: the deck "${tile.ref}" at ${where(tile)} touches ${joined.length} tiles of its district; a pier runs straight, so it touches one (its head) or two on opposite sides`
+      )
+    }
+    const center = drawn(tile, flatCenter(tile))
+    const middle = drawn(tile, hexSideMiddle(tile, joined[0].side, view.size))
+    const reach = Math.hypot(middle[0] - center[0], middle[1] - center[1])
+    const along: Point = [
+      (middle[0] - center[0]) / reach,
+      (middle[1] - center[1]) / reach,
+    ]
+    const across: Point = [-along[1], along[0]]
+    const aside = (sign: number): Point => [
+      center[0] + across[0] * DECK_HALF_WIDTH * sign,
+      center[1] + across[1] * DECK_HALF_WIDTH * sign,
+    ]
+    let shape = clipConvex(topOf(tile), aside(1), [-across[0], -across[1]])
+    shape = clipConvex(shape, aside(-1), across)
+    if (joined.length === 1) {
+      shape = clipConvex(
+        shape,
+        [center[0] - along[0] * DECK_HEAD, center[1] - along[1] * DECK_HEAD],
+        along
+      )
+    }
+    deckOn.set(tile.ref, { shape, along, height: tile.height })
+  }
+  for (const { code } of spec.districts) {
+    const tiles = tilesOf.get(code) ?? []
+    if (tiles.length > 0 && tiles.every(tile => tile.mark === 'deck')) {
+      throw new Error(
+        `Hex map: district "${code}" is all deck; a pier starts from a tile of solid ground`
+      )
+    }
   }
 
   // The river and the road, joined up tile by tile.
@@ -987,11 +1062,32 @@ export function layoutHexMap(
     const refs = new Set(open.map(tile => tile.ref))
     return {
       tiles: open.map(tile => ({
-        top: topOf(tile),
+        top: deckOn.get(tile.ref)?.shape ?? topOf(tile),
         center: drawn(tile, flatCenter(tile)),
       })),
       edge: open.flatMap(tile => {
         const top = topOf(tile)
+        const deck = deckOn.get(tile.ref)?.shape
+        if (deck) {
+          // A logo keeps to the planks: clear of every side of the strip but
+          // where it runs on onto the next tile of the district.
+          const runsOn = (a: Point, b: Point) =>
+            SIDES.some((side, n) => {
+              const neighbor = neighborOf(tile, side)
+              return (
+                !!neighbor &&
+                within.has(hexKey(neighbor)) &&
+                [a, b].every(
+                  point =>
+                    distanceToStretch(point, top[n], top[(n + 1) % 6]) < 1e-6
+                )
+              )
+            })
+          return deck.flatMap((a, n) => {
+            const b = deck[(n + 1) % deck.length]
+            return runsOn(a, b) ? [] : [{ a, b, clear: packing.margin }]
+          })
+        }
         return SIDES.flatMap((side, n) => {
           const neighbor = neighborOf(tile, side)
           if (neighbor && within.has(hexKey(neighbor))) return []
@@ -1134,18 +1230,21 @@ export function layoutHexMap(
     const feature = plan ? featureByCode.get(plan.code!) : undefined
     const state: HexTileState = feature
       ? feature.kind
-      : flooded.has(hexKey(tile)) || !district
-        ? 'sea'
-        : used.has(plan!.ref)
-          ? 'used'
-          : 'spare'
+      : plan && deckOn.has(plan.ref)
+        ? 'water'
+        : flooded.has(hexKey(tile)) || !district
+          ? 'sea'
+          : used.has(plan!.ref)
+            ? 'used'
+            : 'spare'
     // Sea lies flat at the level of the water, whatever height the land
     // planned there has.
     const laid: PlannedTile = {
       ...tile,
       ref: plan?.ref ?? '',
       order: plan?.order ?? 0,
-      height: state === 'sea' || !plan ? 0 : plan.height,
+      height:
+        state === 'sea' || !plan || deckOn.has(plan.ref) ? 0 : plan.height,
     }
     const realm = district?.realm ?? feature?.realm ?? null
     return {
@@ -1154,6 +1253,8 @@ export function layoutHexMap(
       state,
       sunken: district?.sunken === true && state !== 'sea',
       walled: district?.walled === true && state !== 'sea',
+      scarp: district?.scarp === true && state !== 'sea',
+      deck: state === 'sea' ? null : (deckOn.get(laid.ref) ?? null),
       cover: state === 'sea' ? null : (district?.cover ?? null),
       ground: state === 'sea' ? null : (district?.ground ?? null),
       district: state === 'sea' ? null : (district?.district ?? null),
@@ -1201,7 +1302,9 @@ export function layoutHexMap(
   const districtAt = (x: number, y: number) => {
     for (const tile of frontToBack) {
       if (tile.state === 'sea') continue
-      if (insideConvex([x, y], tile.top)) return tile.district
+      if (insideConvex([x, y], tile.deck?.shape ?? tile.top)) {
+        return tile.district
+      }
     }
     return null
   }

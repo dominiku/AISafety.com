@@ -9,7 +9,7 @@
 //   ..    open sea
 //   Gm    a tile of the district with the letters Gm (see the districts
 //         below). Lower-case letters are features, not districts: cv the
-//         cove, hb the harbor, mt the peak, kp the castle's keep.
+//         cove, hb the harbor, cr the crater, kp the castle's keep.
 // Every painted tile is land (takeAllTiles below), so the coast is exactly
 // what is painted here: keep it smooth, with no single tile sticking out, and
 // paint each district about as many tiles as its logos need (a tile holds
@@ -26,6 +26,8 @@
 //         the river runs out to sea. It may never run uphill.
 //   Gm=   the ROAD runs through the tile, joined up the same way.
 //   Gm!   the district's LANDMARK stands here, and no logos.
+//   Gm+   a DECK: the tile is water with a pier's planks over it. A pier runs
+//         straight out from a tile of its district's solid ground.
 // River, road and landmark tiles are always land.
 //
 // HEIGHTS belong to districts, not to tiles: a district is one plateau, all
@@ -33,7 +35,10 @@
 // told apart by the step between them, their rim and their tone. Give
 // neighboring districts different heights. In levels: 1 is low ground (the
 // delta, the beaches), 2 to 3 ordinary land, 4 and up the mountains; halves
-// are fine.
+// are fine. The board is seen from the south, so high ground hides some of
+// the tile behind it (to the north), and a logo cannot stand there: keep the
+// north edge of high country modest, and let cliffs that are to be seen (the
+// escarpment, a valley's walls) face south, with low ground in front of them.
 //
 // THE SCALE comes from the castle: Career support is the keep and the six
 // tiles round it, which between them hold its 13 logos. That sets the size of
@@ -57,15 +62,15 @@ const TILES = `
 # 0   1   2   3   4   5   6   7   8   9   10  11  12  13  14  15  16  17  18
   ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..
   ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..
-  ..  ..  Ne  Ne~ Ne  Fo~ Fo  Fo  Fo  Gr  ..  Pa  Go  Go  Th  Th  Th  Lo  ..
-  ..  ..  Ne  Ne~ Ne~ Fo~ Fo! Fo  Fr  Gr  cv! Pa  Pa  Go  Th  Th! Th  Lo  ..
-  ..  ..  Ne~ Ne! Ne  Fo  Fo~ Fo~ Fr  Gr  cv  Pa  Ma  Ma  Ma! St  Lo  ..  ..
-  ..  In! In  In  Fb  Pp  Pp  Pp  Fr~ Ca~ Ca  Ca  Ma  Ma  St  Ev  Ev  mt~ ..
-  ..  hb  hb  In= Fb= Pp= Pp= Tp= Tp= Ca= kp  Ca~ Al~ Al~ Al  Ev~ Ev~ Ip  ..
-  ..  In  hb  In  Fb  Tp  Tp  Tp  Tp  Hu  Ca  Vc  Al  Al  Al~ Co  Ip  Ip! ..
-  ..  ..  In  Tp  Tp  Tp  Tp  Op  Hu  Gm  Gm  Vc  Gm  Co  Co  Co! Cp  Cp! ..
-  Gy! Gy  ..  ..  ..  Op  Op  To  Hu  Gm  Gm! Gm  Gm  Co  Co  Cp  Cp  ..  ..
-  Gy  Gy  Gy  ..  ..  ..  ..  ..  To  To  Gm  Gm  Gm  Gm  ..  ..  ..  ..  ..
+  ..  ..  Ne  Ne~ Ne  Fo~ Fo  Fo  Fo  Gr  ..  ..  Go  Go  Th  Th  Th  Lo  ..
+  ..  ..  Ne  Ne~ Ne~ Fo~ Fo! Fo  Fr  Gr  Pa+ Pa  Pa  Go  Th  Th! Th  Lo  ..
+  ..  ..  Ne~ Ne! Ne  Fo  Fo~ Fo~ Fr  Gr  cv! Pa  Ma  Ma  Ma! St  Lo  ..  ..
+  ..  In! In  In  Fb  Pp  Pp  Pp  Fr~ Ca~ Ca  Ca  Ma  Ma  St  Co  Co  cr~ ..
+  ..  hb  hb  In= Fb= Pp= Pp= Tp= Tp= Ca= kp  Ca~ Al~ Al~ Al~ Co~ Ip~ Ip  ..
+  ..  In  hb  In  Fb  Tp  Tp  Tp  Tp  Hu  Ca  Al  Al  Al  Co  Co  Co  Ip  ..
+  ..  ..  In  Tp  Tp  Tp  Tp  Op  Hu  Gm  Gm  Al  Vc  Ev  Ev  Co! Cp  Cp! ..
+  Gy! Gy  ..  ..  ..  Op  Op  To  Hu  Gm  Gm! Vc  Vc  Ev  Ev  Cp  Cp  ..  ..
+  Gy  Gy  Gy  ..  ..  ..  ..  ..  To  Gm  Gm  Gm  Gm  Gm  Gm  ..  ..  ..  ..
   ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..
 `
 
@@ -83,7 +88,7 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
       landmark: { symbol: 'beach-camp', width: 1.9, height: 2.05 } },
     { code: 'Fr', district: 'Forums and online communities', realm: 'Media and discourse', height: 2.5 },
     { code: 'Gr', district: 'Grassroots campaigns', realm: 'Advocacy and public engagement', height: 1 },
-    { code: 'Pa', district: 'Professional advocacy and communication', realm: 'Advocacy and public engagement', height: 1.5, pier: true },
+    { code: 'Pa', district: 'Professional advocacy and communication', realm: 'Advocacy and public engagement', height: 1.5 },
     // The landing: the arms of a sheltered harbor, where the road starts.
     { code: 'In', district: 'Introductory learning', realm: 'Talent pipeline', height: 0.5,
       landmark: { symbol: 'lighthouse', width: 1, height: 1.8 } },
@@ -94,7 +99,10 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
     { code: 'Ca', district: 'Career support and placement', realm: 'Talent pipeline', height: 3, minTiles: 6, overWater: true },
     // Support Shoreline, west to east along the beach: a boat service station
     // with its jetty, the low terrace of the toolsheds, a fishing hamlet and a
-    // grove by the shore; the vineyard on the sheltered slope behind them.
+    // grove by the shore. The valley runs down to the beach from under the
+    // castle, between two arms of the Range: its walls are the Control Dam's
+    // high ground to the west and north and the escarpment to the east, and
+    // it is open to the south, where the viewer looks in.
     { code: 'Op', district: 'Operations and services', realm: 'Field infrastructure', height: 1.5, pier: true },
     { code: 'Hu', district: 'Hubs and coworking', realm: 'Field infrastructure', height: 1, cover: 'hamlet' },
     { code: 'To', district: 'Tools, databases and research infrastructure', realm: 'Field infrastructure', height: 0.5 },
@@ -108,12 +116,16 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
       landmark: { symbol: 'training-town', width: 3, height: 2.54 } },
     { code: 'St', district: 'Standards, assurance and verification', realm: 'Policy and strategy', height: 3 },
     { code: 'Lo', district: 'Policy advocacy and lobbying', realm: 'Policy and strategy', height: 2, pier: true },
-    // The Control Dam: the river leaves it for the castle over a dam.
+    // The Range, from its back corner to its front: the crater on top of the
+    // volcano, where the river rises; Circuit Crater on its shoulder; the
+    // thicket the river runs down through; the Control Dam's basin, which the
+    // river leaves for the castle over a dam; and along the front, over the
+    // beach, the escarpment: one long cliff of banded rock.
     { code: 'Al', district: 'Alignment and control', realm: 'Technical research', height: 4, dam: true },
-    { code: 'Ev', district: 'Evaluations and threat research', realm: 'Technical research', height: 5 },
-    { code: 'Co', district: 'Conceptual and foundations research', realm: 'Technical research', height: 4.5, cover: 'thicket',
+    { code: 'Ev', district: 'Evaluations and threat research', realm: 'Technical research', height: 4.5, scarp: true },
+    { code: 'Co', district: 'Conceptual and foundations research', realm: 'Technical research', height: 5, cover: 'thicket',
       landmark: { symbol: 'cave', width: 1.7, height: 1.63 } },
-    { code: 'Ip', district: 'Interpretability and model understanding', realm: 'Technical research', height: 5.5,
+    { code: 'Ip', district: 'Interpretability and model understanding', realm: 'Technical research', height: 6.5,
       landmark: { symbol: 'range', width: 2.8, height: 1.98 } },
     { code: 'Cp', district: 'Capabilities research', realm: 'Technical research', height: 6, walled: true,
       landmark: { symbol: 'skull-mountain', width: 2.6, height: 2.25 } },
@@ -128,8 +140,9 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
       landmark: { symbol: 'boats', width: 3.4, height: 1.26 } },
     // The harbor the road starts from: a bay between the arms of the landing.
     { code: 'hb', kind: 'water', height: 0 },
-    // The high peak the river rises on.
-    { code: 'mt', kind: 'scenery', realm: 'Technical research', height: 7 },
+    // The top of the volcano, in the Range's back corner, with only sea
+    // behind it to hide: the river rises in its lake.
+    { code: 'cr', kind: 'crater', realm: 'Technical research', height: 7.5 },
     // The castle's keep, level with the six tiles of Career support round it.
     // The castle is larger than the keep's tile; the river circles it as a
     // moat through the middles of those six tiles, and the road ends at its
@@ -183,9 +196,9 @@ export const MAP_35_HEX_NAMES: Record<string, string> = {
   'Operations and services': 'Service Station',
   'Hubs and coworking': 'Hub Hamlet',
   'Grantmakers and donor advisory': 'Grant Grove',
-  // Was "Venture Valley": a valley under the Range would be hidden behind it.
-  // Vines suit an incubator, on the sheltered slope above the shore.
-  'Venture capital and incubators': 'Venture Vineyard',
+  // A valley between two arms of the Range, open to the south so that the
+  // viewer looks up it; vines grow on its floor.
+  'Venture capital and incubators': 'Venture Valley',
 
   'Foundational and explanatory': 'Foundation Forest',
   'News and commentary': 'Commentary Coast',
@@ -204,8 +217,8 @@ export const MAP_35_HEX_NAMES: Record<string, string> = {
 
   'Alignment and control': 'Control Dam',
   'Evaluations and threat research': 'Evaluation Escarpment',
-  // Was "Circuit Cove" (or "Interpretability Inlet"): it lies high beside the
-  // peak, and its art has a mountain lake.
+  // Was "Circuit Cove" (or "Interpretability Inlet"): the shoulder of the
+  // volcano, round the crater and its lake.
   'Interpretability and model understanding': 'Circuit Crater',
   'Conceptual and foundations research': 'Theory Thicket',
   // Was "Capabilities Cove": it is a walled high plateau now.

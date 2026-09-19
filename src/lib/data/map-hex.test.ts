@@ -9,6 +9,7 @@ import {
   hexNeighbor,
   hexSideMiddle,
   insetConvex,
+  clipConvex,
   insideConvex,
   oppositeDirection,
   parseHexGrid,
@@ -116,6 +117,23 @@ describe('shapes', () => {
   it('knows what is inside a convex shape', () => {
     expect(insideConvex([2, 2], square)).toBe(true)
     expect(insideConvex([5, 2], square)).toBe(false)
+  })
+
+  it('cuts a convex shape along a line, keeping the side pointed to', () => {
+    const square: [number, number][] = [
+      [0, 0],
+      [4, 0],
+      [4, 4],
+      [0, 4],
+    ]
+    // The half to the right of x = 1.
+    expect(clipConvex(square, [1, 0], [1, 0])).toEqual([
+      [1, 0],
+      [4, 0],
+      [4, 4],
+      [1, 4],
+    ])
+    expect(clipConvex(square, [9, 0], [1, 0])).toEqual([])
   })
 
   it('moves each side in by its own amount', () => {
