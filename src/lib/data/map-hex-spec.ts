@@ -105,8 +105,8 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
     // it is open to the south, where the viewer looks in.
     { code: 'Op', district: 'Operations and services', realm: 'Field infrastructure', height: 1, beach: true },
     { code: 'Hu', district: 'Hubs and coworking', realm: 'Field infrastructure', height: 1.5, cover: 'hamlet' },
-    { code: 'To', district: 'Tools, databases and research infrastructure', realm: 'Field infrastructure', height: 0.5 },
-    { code: 'Gm', district: 'Grantmakers and donor advisory', realm: 'Field infrastructure', height: 1, cover: 'dunes' },
+    { code: 'To', district: 'Tools, databases and research infrastructure', realm: 'Field infrastructure', height: 0.5, beach: true },
+    { code: 'Gm', district: 'Grantmakers and donor advisory', realm: 'Field infrastructure', height: 1, cover: 'dunes', beach: true },
     { code: 'Vc', district: 'Venture capital and incubators', realm: 'Field infrastructure', height: 2, cover: 'meadow', ground: '#8fae55' },
     { code: 'Go', district: 'Governments and multi-stakeholder bodies', realm: 'Policy and strategy', height: 2 },
     { code: 'Ma', district: 'Macrostrategy and forecasting', realm: 'Policy and strategy', height: 3.5,
@@ -117,7 +117,7 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
     { code: 'Lo', district: 'Policy advocacy and lobbying', realm: 'Policy and strategy', height: 2, pier: true },
     // The Range, from its back corner to its front: the crater on top of the
     // volcano, its lake shut in by the rim; Circuit Crater on the volcano's
-    // sloping shoulder; the high ground of the tarn, the mountain lake the
+    // sloping shoulder; the heights, with the tarn (a mountain lake) the
     // river rises in; the Control Dam's basin, which the river falls into and
     // leaves for the castle over a dam; and along the front, over the
     // beach, the escarpment: one long leaning slope of banded rock.
@@ -223,9 +223,10 @@ export const MAP_35_HEX_NAMES: Record<string, string> = {
   // Was "Circuit Cove" (or "Interpretability Inlet"): the shoulder of the
   // volcano, round the crater and its lake.
   'Interpretability and model understanding': 'Circuit Crater',
-  // Was "Theory Thicket": nothing grows so thick that high. A tarn is a
-  // mountain lake, and the river rises in it.
-  'Conceptual and foundations research': 'Theory Tarn',
+  // Was "Theory Thicket" (nothing grows so thick that high), then "Theory
+  // Tarn" (T and Th do not alliterate). The tarn the river rises in lies on
+  // these heights. Or "Concept Col", or the classic map's "Conceptual Cliffs".
+  'Conceptual and foundations research': 'Hypothesis Heights',
   // Was "Capabilities Cove": it is a walled high plateau now.
   'Capabilities research': 'Capabilities Crag',
 }

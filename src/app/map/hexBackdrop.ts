@@ -774,21 +774,32 @@ export function hexBackdropMarkup(
   // A beach district's sides to the sea, toward the viewer: sand running
   // gently down and out into the water, not a cliff.
   const BEACH_RUN = 1.1
+  const beachSides = (tile: HexLaidTile) =>
+    tile.beach
+      ? faceDrops(tile).filter(face => face.drop > 0 && face.ground === 0)
+      : []
+  // How many beach sides end at each corner: two where the beach runs on.
+  const beachCorners = new Map<string, number>()
+  for (const tile of layout.tiles) {
+    for (const { k } of beachSides(tile)) {
+      for (const corner of [tile.top[k], tile.top[k + 1]]) {
+        beachCorners.set(xy(corner), (beachCorners.get(xy(corner)) ?? 0) + 1)
+      }
+    }
+  }
   const drawBeach = (tile: HexLaidTile, layer: 'under' | 'over') => {
     if (!tile.beach) return
     // The dry sand is the district's own ground, running on down the beach.
     const { tone: sand } = styleOf(tile)
     const wet = mixHex(sand, SHALLOWS, 0.45)
-    const sides = faceDrops(tile)
-      .filter(face => face.drop > 0 && face.ground === 0)
-      .map(face => {
-        const run = BEACH_RUN * tile.height
-        const reach: Point = [
-          SLOPE_OUT[face.k][0] * run,
-          SLOPE_OUT[face.k][1] * run * view.squash + face.drop,
-        ]
-        return { ...face, reach }
-      })
+    const sides = beachSides(tile).map(face => {
+      const run = BEACH_RUN * tile.height
+      const reach: Point = [
+        SLOPE_OUT[face.k][0] * run,
+        SLOPE_OUT[face.k][1] * run * view.squash + face.drop,
+      ]
+      return { ...face, reach }
+    })
     sides.forEach(side => {
       const next = sides.find(other => other.k === side.k + 1)
       if (!next) return
@@ -807,11 +818,19 @@ export function hexBackdropMarkup(
     for (const side of sides) {
       const [a, b] = [tile.top[side.k], tile.top[side.k + 1]]
       out.push(beachMarkup(a, b, side.reach, g, sand, wet, layer))
-      // No rim along the top of a beach: the ground runs straight on.
+      // No rim along the top of a beach: the ground runs straight on, and
+      // round a corner where the beach does.
       if (layer === 'over') {
+        const cover = RIM_WIDTH * 2 * g + BORDER_LINE.width * 2
         out.push(
-          `<path d="M${xy(a)}L${xy(b)}" stroke="${sand}" stroke-width="${(RIM_WIDTH * 2 * g + BORDER_LINE.width * 2).toFixed(1)}"/>`
+          `<path d="M${xy(a)}L${xy(b)}" stroke="${sand}" stroke-width="${cover.toFixed(1)}"/>`
         )
+        for (const corner of [a, b]) {
+          if ((beachCorners.get(xy(corner)) ?? 0) < 2) continue
+          out.push(
+            `<circle cx="${(corner[0] * g).toFixed(1)}" cy="${(corner[1] * g).toFixed(1)}" r="${(cover / 2).toFixed(1)}" fill="${sand}"/>`
+          )
+        }
       }
     }
   }
