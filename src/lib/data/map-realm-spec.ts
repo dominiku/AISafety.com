@@ -220,9 +220,9 @@ export const MAP_35_SPEC: RealmMapSpec = {
     // leans on first, then what careers and research lean on. The narrow
     // western tip goes to a district big enough to fill it (Operations), with
     // Hubs and Tools one above the other east of it.
-    'Tools, databases and research infrastructure': [23.5, 28.3],
+    'Tools, databases and research infrastructure': [24.5, 28.4],
     'Operations and services': [18, 25],
-    'Hubs and coworking': [25.5, 23.6],
+    'Hubs and coworking': [24.5, 23.4],
     'Grantmakers and donor advisory': [34, 26.5],
     'Venture capital and incubators': [41.5, 26],
     'Macrostrategy and forecasting': [40.5, 15.3],

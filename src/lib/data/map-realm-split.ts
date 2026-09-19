@@ -29,6 +29,11 @@ const MISPLACED = 1.5
 // And for the two sides' shares being uneven: a little, so that of two cuts
 // that are much alike the more even one is taken.
 const UNEVEN = 0.3
+// And for a side that is one district's whole piece not filling the box it
+// lies in (see `fillOf`): a triangle fills half of its box, and has the sharp
+// corners the classic map's regions never do. Nothing below FULL_ENOUGH costs.
+const FULL_ENOUGH = 0.72
+const HOLLOW = 4
 
 /** The part of a convex polygon where a·x + b·y <= c. */
 function clipTo(polygon: Point[], a: number, b: number, c: number): Point[] {
@@ -76,16 +81,57 @@ function stretchOf(points: Point[]): number {
   return Math.sqrt((middle + swing) / Math.max(middle - swing, 1e-9))
 }
 
+// The share the points fill of the box they lie in, the box laid along their
+// long direction: about 1 for a rectangle, a half for a triangle. `pointArea`
+// is the land each point stands for.
+function fillOf(points: Point[], pointArea: number): number {
+  if (points.length < 3) return 1
+  const n = points.length
+  let meanX = 0
+  let meanY = 0
+  for (const [x, y] of points) {
+    meanX += x / n
+    meanY += y / n
+  }
+  let xx = 0
+  let xy = 0
+  let yy = 0
+  for (const [x, y] of points) {
+    xx += (x - meanX) ** 2
+    xy += (x - meanX) * (y - meanY)
+    yy += (y - meanY) ** 2
+  }
+  const angle = 0.5 * Math.atan2(2 * xy, xx - yy)
+  const ux = Math.cos(angle)
+  const uy = Math.sin(angle)
+  let lowU = Infinity
+  let highU = -Infinity
+  let lowV = Infinity
+  let highV = -Infinity
+  for (const [x, y] of points) {
+    const u = x * ux + y * uy
+    const v = -x * uy + y * ux
+    lowU = Math.min(lowU, u)
+    highU = Math.max(highU, u)
+    lowV = Math.min(lowV, v)
+    highV = Math.max(highV, v)
+  }
+  const side = Math.sqrt(pointArea)
+  const box = (highU - lowU + side) * (highV - lowV + side)
+  return Math.min(1, (n * pointArea) / box)
+}
+
 /**
  * A convex piece of `within` for each part, in the parts' order. `land` is the
  * land to share out, as points spread evenly over it (it need not be convex:
- * the pieces are cut to it when drawn); each piece holds its part's share of
- * those points.
+ * the pieces are cut to it when drawn), each standing for `pointArea` of it;
+ * each piece holds its part's share of those points.
  */
 export function splitByHalves(
   land: Point[],
   parts: SplitPart[],
-  within: Point[]
+  within: Point[],
+  pointArea = 0.0625
 ): Point[][] {
   if (parts.length === 0) return []
   if (parts.length === 1 || land.length < 2) return parts.map(() => within)
@@ -123,11 +169,14 @@ export function splitByHalves(
       // that many pieces in a row; only beyond that is it too long.
       const nearSide = land.filter(([x, y]) => x * nx + y * ny <= cut)
       const farSide = land.filter(([x, y]) => x * nx + y * ny > cut)
+      const hollow = (side: Point[], holds: number) =>
+        holds > 1 ? 0 : Math.max(0, FULL_ENOUGH - fillOf(side, pointArea))
       const cost =
         Math.max(
           Math.max(1, stretchOf(nearSide) / k),
           Math.max(1, stretchOf(farSide) / (order.length - k))
         ) +
+        HOLLOW * (hollow(nearSide, k) + hollow(farSide, order.length - k)) +
         MISPLACED * misplaced +
         UNEVEN * Math.abs(share - 0.5)
       if (!best || cost < best.cost - 1e-9) {
@@ -148,12 +197,14 @@ export function splitByHalves(
   const nearPieces = splitByHalves(
     land.filter(([x, y]) => x * nx + y * ny <= cut),
     near.map(index => parts[index]),
-    clipTo(within, nx, ny, cut)
+    clipTo(within, nx, ny, cut),
+    pointArea
   )
   const farPieces = splitByHalves(
     land.filter(([x, y]) => x * nx + y * ny > cut),
     far.map(index => parts[index]),
-    clipTo(within, -nx, -ny, -cut)
+    clipTo(within, -nx, -ny, -cut),
+    pointArea
   )
   const pieces: Point[][] = []
   near.forEach((index, n) => (pieces[index] = nearPieces[n]))

@@ -41,6 +41,7 @@
 // Everything is deterministic: the same records give the same map. Pure
 // module with no dependencies, so it can be unit tested.
 
+import { jogSharedBorders } from './map-realm-borders'
 import { splitByHalves } from './map-realm-split'
 
 export interface LayoutPin {
@@ -1160,22 +1161,60 @@ export function layoutRealmMap(
               share: site.share,
               anchor: [site.homeX, site.homeY],
             })),
-            frame
+            frame,
+            STEP * STEP
           )
+    const cells = shared.map((_, index) =>
+      halved
+        ? [halved[index]]
+        : road
+          ? ([-1, 1] as const)
+              .filter(side => [0, side].includes(sideOfSite[index]))
+              .map(side => pieceOn(index, side))
+              .filter(piece => piece.length > 0)
+          : [cellOf(sites, index, frame)]
+    )
+    // A border that is the road stays with the road.
+    const alongRoad = (x: number, y: number) =>
+      road !== null &&
+      roadLine.some((from, n) => {
+        const to = roadLine[n + 1]
+        if (!to) return false
+        const dx = to[0] - from[0]
+        const dy = to[1] - from[1]
+        const t = Math.max(
+          0,
+          Math.min(
+            1,
+            ((x - from[0]) * dx + (y - from[1]) * dy) / (dx * dx + dy * dy || 1)
+          )
+        )
+        return Math.hypot(x - from[0] - dx * t, y - from[1] - dy * t) < 0.5
+      })
+    // The long straight borders between them get a jog (map-realm-borders.ts)
+    // where they can be seen: on this realm's land, and not under a town. On
+    // land only: the line between the harbour realm's halves runs mostly under
+    // the cove, and stays straight for the causeway along it.
+    const seen = (x: number, y: number) => {
+      const col = Math.floor(x / STEP)
+      const row = Math.floor(y / STEP)
+      if (col < 0 || col >= cols || row < 0 || row >= rows) return false
+      return (
+        isLand[row * cols + col] === 1 &&
+        insidePolygon(x, y, polygon) &&
+        !towns.some(town => insidePolygon(x, y, town.pieces[0])) &&
+        !alongRoad(x, y)
+      )
+    }
+    const jogged = jogSharedBorders(cells.flat(), seen)
+    let next = 0
     shared.forEach(([district, inDistrict], index) => {
       planned.push({
         district,
         realm,
         pins: inDistrict,
         block: false,
-        pieces: halved
-          ? [halved[index]]
-          : road
-            ? ([-1, 1] as const)
-                .filter(side => [0, side].includes(sideOfSite[index]))
-                .map(side => pieceOn(index, side))
-                .filter(piece => piece.length > 0)
-            : [cellOf(sites, index, frame)],
+        pieces: cells[index].map(() => jogged[next++]),
       })
     })
     planned.push(...towns)
