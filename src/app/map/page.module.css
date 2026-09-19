@@ -617,12 +617,6 @@ select.explorer-sort {
   max-width: min(520px, calc(100vw - 160px));
 }
 
-/* Starts a new line in the row of pills. */
-.explorer-pills-break {
-  flex-basis: 100%;
-  height: 0;
-}
-
 .explorer-pill:hover {
   border-color: var(--teal-bright-750);
 }
@@ -655,8 +649,7 @@ select.explorer-sort {
   display: none;
 }
 
-.explorer-drawer-head,
-.explorer-drawer-others {
+.explorer-drawer-head {
   display: flex;
   flex: none;
   align-items: center;
@@ -927,6 +920,11 @@ select.explorer-sort {
   gap: 8px;
 }
 
+/* Room between a button's icon and its words. */
+.details-actions > button {
+  gap: 8px;
+}
+
 .details-nearby {
   align-self: stretch;
   padding-top: 16px;
@@ -1072,6 +1070,36 @@ select.explorer-sort {
   .explorer-overlay[data-selected] .explorer-controls {
     display: none;
   }
+
+  /* On a desktop and a tablet the map runs to the window's edges, left,
+     right and bottom: no frame, and none of the page's side gutter (the
+     title row above keeps its own). What floats over it stands 24px in, like
+     the zoom buttons. A phone keeps its framed pane. */
+  .explorer {
+    width: 100%;
+    height: calc(100vh - 88px - 64px);
+    border: none;
+    border-radius: 0;
+  }
+
+  .explorer-overlay {
+    top: 24px;
+    bottom: 24px;
+    left: 24px;
+  }
+
+  .explorer-fitted {
+    bottom: 24px;
+    left: 24px;
+  }
+
+  .explorer-fitted[data-overlay] {
+    left: 416px;
+  }
+
+  .explorer-legend {
+    right: 24px;
+  }
 }
 
 /* Where there is the height for it, the search stays above the card, so a
@@ -1207,10 +1235,6 @@ select.explorer-sort {
     padding: 4px 4px 12px;
   }
 
-  .explorer-drawer-others {
-    padding: 8px 4px;
-  }
-
   .explorer-drawer-list {
     padding: 12px 0;
   }
@@ -1239,8 +1263,10 @@ select.explorer-sort {
     content: '';
   }
 
+  /* The sheet is short: the place line under the name carries the category,
+     so of the chips only "No longer active" is kept. */
   .details-place,
-  .details-chips,
+  .details-chip-category,
   .details-nearby {
     display: none;
   }

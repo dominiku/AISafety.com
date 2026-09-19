@@ -16,7 +16,6 @@ import type { ReactNode } from 'react'
 import Icon from '@/components/Icon'
 import ContributeButtons from '@/components/ContributeButtons'
 import FilterDropdown from '@/components/FilterDropdown'
-import ModeToggle from '@/components/ModeToggle'
 import RelativeDate from '@/components/RelativeDate'
 import SearchBar from '@/components/SearchBar'
 import CardsViewTracker from '@/components/CardsViewTracker'
@@ -86,6 +85,8 @@ const SORT_LABELS: Record<ExplorerSort, string> = {
 // ticked, so its URL form differs from its state: nothing for the default,
 // 'any' for no ticks at all.
 const FILTER_KEYS = ['category', 'status']
+// Category is one choice at a time, so the address carries at most one.
+const SINGLE_FILTER_KEYS = ['category']
 const NO_STATUS = 'any'
 
 // Marks the history entry made by opening a details card.
@@ -109,8 +110,10 @@ const CARD_ROW_HEIGHT = 196
 // sheet at the bottom (.details-card).
 const PHONE_TOP_INSET = 72
 const SHEET_HEIGHT = 372
-// The overlay on the map's left side: a 376px column, 16px in from the edge.
-const OVERLAY_WIDTH = 408
+// The overlay on the map's left side: a 376px column, 24px in from the pane's
+// edge (which on a desktop is the window's) and 16px clear of what is fitted
+// beside it. (.explorer-overlay in page.module.css.)
+const OVERLAY_WIDTH = 416
 
 const sameValues = (a: string[], b: string[]) =>
   a.length === b.length && a.every(value => b.includes(value))
@@ -179,9 +182,6 @@ export default function MapExplorer({
   )
   // A phone's map keeps the filter pills behind a button in the search field.
   const [filtersOpen, setFiltersOpen] = useState(false)
-  // PROTOTYPE: which treatment of non-matching pins reads better is an open
-  // question in the handover, so both can be tried.
-  const [nonMatching, setNonMatching] = useState<'hide' | 'dim'>('dim')
   // The drawer's list is one Tab stop: the arrow keys move this row about.
   const [activeRowId, setActiveRowId] = useState<string | null>(null)
   // A phone's "Drag to explore", until the map has been moved once.
@@ -259,16 +259,16 @@ export default function MapExplorer({
     [listed, basePass, groups]
   )
 
-  // One way to change the category filter, for the Category pill, the chips,
-  // the place names on the map and "See all": the first category picked
-  // a category picked opens the results drawer, where its matches are listed.
+  // One way to change the category filter, for the Category pill and the
+  // place names on the map. It is one category at a time: picking another
+  // takes the place of the last, and picking the current one again clears it.
+  // (`categories` stays a list, of one at most, for the filter counts.) A
+  // category picked opens the results drawer, where its matches are listed.
   const toggleCategory = useCallback(
     (value: string) => {
-      const adding = !categories.includes(value)
-      setCategories(
-        adding ? [...categories, value] : categories.filter(c => c !== value)
-      )
-      if (adding) {
+      const picking = categories[0] !== value
+      setCategories(picking ? [value] : [])
+      if (picking) {
         setDrawerOpen(true)
         setLegendOpen(false)
       }
@@ -376,7 +376,8 @@ export default function MapExplorer({
         // link: it is kept in their browser, never in the address.
         collapsed: false,
       },
-      FILTER_KEYS
+      FILTER_KEYS,
+      SINGLE_FILTER_KEYS
     ).toString()
     if (next === url.searchParams.toString()) return
     const action = historyActionFor(
@@ -407,7 +408,11 @@ export default function MapExplorer({
       // Our own write coming back round — the state already holds it, and
       // re-reading it would trim a space the visitor is still typing after.
       if (params === lastWrittenRef.current) return
-      const state = parseExplorerState(new URLSearchParams(params), FILTER_KEYS)
+      const state = parseExplorerState(
+        new URLSearchParams(params),
+        FILTER_KEYS,
+        SINGLE_FILTER_KEYS
+      )
       setQuery(state.query)
       setSettledQuery(state.query)
       if (state.query.trim() !== '') {
@@ -657,8 +662,9 @@ export default function MapExplorer({
   const overlayRects = useCallback(
     () =>
       [
+        // The zoom buttons are the map's own, so they are found by class.
         ...(explorerRootRef.current?.querySelectorAll<HTMLElement>(
-          '[data-map-cover]'
+          `[data-map-cover], .${styles['map-controls']}`
         ) ?? []),
       ]
         .filter(element => element.offsetParent !== null)
@@ -677,12 +683,15 @@ export default function MapExplorer({
   )
   const firstCategory = (org: MapOrg) => org.category.split(',')[0].trim()
   const selectedPlace = selected ? mapAreaFor(selected.category) : null
+  // The orgs standing in the same place: on the map, by their first category.
+  // The same rule as the count in the place name's tooltip (areaCount in
+  // D3Map), so "See all 10" and "Blog Beach, 10 organizations" agree.
   const inSelectedPlace = useMemo(
     () =>
       selected
         ? listed.filter(
             org =>
-              org.status === 'Active' &&
+              isPlacedOnMap(org) &&
               firstCategory(org) === firstCategory(selected)
           )
         : [],
@@ -733,7 +742,6 @@ export default function MapExplorer({
   const explorerLink = useMemo(
     (): MapExplorerLink => ({
       matchingIds,
-      nonMatching,
       hiddenIds,
       activeCategories: categories,
       onToggleCategory: toggleCategory,
@@ -759,7 +767,6 @@ export default function MapExplorer({
     }),
     [
       matchingIds,
-      nonMatching,
       hiddenIds,
       categories,
       toggleCategory,
@@ -889,25 +896,14 @@ export default function MapExplorer({
             data-map-cover
             className={`flex flex-wrap items-center gap-8px ${styles['explorer-controls']} ${styles['explorer-pills']}`}
           >
-            {categories.map(category => (
-              <button
-                key={category}
-                type="button"
-                className={`border-plus-fill paragraph-small ${styles['explorer-pill']} ${styles['explorer-pill-active']}`}
-                aria-label={`Remove filter: ${category}`}
-                onClick={() => toggleCategory(category)}
-              >
-                {category}
-                <Icon src="/images/icons/x.svg" size={16} />
-              </button>
-            ))}
+            {/* One pill says which category is picked ("Category: Blog"). */}
             <FilterDropdown
               trackingPage="Map"
               title="Category"
               options={CATEGORIES}
               selected={categories}
               counts={categoryCounts}
-              countLabel
+              single
               onToggle={toggleCategory}
               optionNote={mapAreaFor}
               onClear={() => setCategories([])}
@@ -936,20 +932,14 @@ export default function MapExplorer({
               </button>
             )}
             {isFiltered && (
-              <>
-                {/* With chips in the row, "Clear all" starts the next line. */}
-                {categories.length > 0 && (
-                  <span className={styles['explorer-pills-break']} />
-                )}
-                <button
-                  type="button"
-                  className={`border-plus-fill paragraph-small ${styles['explorer-pill']}`}
-                  onClick={clearAll}
-                >
-                  <Icon src="/images/icons/x.svg" size={16} />
-                  Clear all
-                </button>
-              </>
+              <button
+                type="button"
+                className={`border-plus-fill paragraph-small ${styles['explorer-pill']}`}
+                onClick={clearAll}
+              >
+                <Icon src="/images/icons/x.svg" size={16} />
+                Clear all
+              </button>
             )}
           </div>
           {/* Announced apart from the visible count, so a screen reader hears
@@ -1011,29 +1001,6 @@ export default function MapExplorer({
                 </select>
               </label>
             </div>
-            {isFiltered && (
-              <div className={styles['explorer-drawer-others']}>
-                <span className="paragraph-xs color-teal-300">Other pins</span>
-                <ModeToggle
-                  mode={nonMatching}
-                  onChange={setNonMatching}
-                  ariaLabel="Pins that don't match"
-                  tabs={[
-                    {
-                      value: 'dim',
-                      icon: '/images/icons/eye.svg',
-                      label: 'Dim',
-                    },
-                    {
-                      value: 'hide',
-                      icon: '/images/icons/x.svg',
-                      label: 'Hide',
-                    },
-                  ]}
-                />
-              </div>
-            )}
-
             <div
               ref={listRef}
               className={styles['explorer-drawer-list']}
@@ -1174,8 +1141,7 @@ export default function MapExplorer({
             <ul className="paragraph-xs color-teal-300">
               <li>Place names are categories: select one to filter the map.</li>
               <li>
-                Bigger logos are larger organizations; +12 after a place name
-                means 12 more appear when zooming in.
+                Bigger logos are larger organizations; zooming in shows more.
               </li>
               <li>
                 Keyboard: Tab to the map, arrow keys between organizations,

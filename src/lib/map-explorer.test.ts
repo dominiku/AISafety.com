@@ -154,6 +154,26 @@ describe('query string', () => {
     expect(parseExplorerState(written, keys)).toEqual(state)
   })
 
+  it('reads and writes one value for a single-choice chip', () => {
+    // An older shared link with two categories degrades to the first.
+    const state = parseExplorerState(
+      new URLSearchParams(
+        'category=blog&category=funding&status=Active&status=No+longer+active'
+      ),
+      keys,
+      ['category']
+    )
+    expect(state.filters.category).toEqual(['blog'])
+    expect(state.filters.status).toEqual(['Active', 'No longer active'])
+    const written = writeExplorerState(
+      new URLSearchParams(''),
+      { ...DEFAULT_EXPLORER_STATE, filters: { category: ['blog', 'funding'] } },
+      keys,
+      ['category']
+    )
+    expect(written.getAll('category')).toEqual(['blog'])
+  })
+
   it('leaves params that are not its own alone, and replaces its own', () => {
     const written = writeExplorerState(
       new URLSearchParams('utm_source=newsletter&q=old&category=Blog'),

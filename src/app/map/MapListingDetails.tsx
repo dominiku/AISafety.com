@@ -136,19 +136,24 @@ export default function MapListingDetails({
         </div>
         <p className={styles['details-description']}>{org.description}</p>
 
-        <ul className={styles['details-chips']}>
-          {categories.map(category => (
-            <li
-              key={category}
-              className={`${styles['details-chip']} ${styles['details-chip-category']}`}
-            >
-              {category}
-            </li>
-          ))}
-          <li className={styles['details-chip']}>
-            {org.status === 'Active' ? 'Active' : 'No longer active'}
-          </li>
-        </ul>
+        {/* The first category is in the place line above, so only the others
+            are chips; and only an org that has closed is labelled as such.
+            With neither there is no list at all. */}
+        {(categories.length > 1 || org.status !== 'Active') && (
+          <ul className={styles['details-chips']}>
+            {categories.slice(1).map(category => (
+              <li
+                key={category}
+                className={`${styles['details-chip']} ${styles['details-chip-category']}`}
+              >
+                {category}
+              </li>
+            ))}
+            {org.status !== 'Active' && (
+              <li className={styles['details-chip']}>No longer active</li>
+            )}
+          </ul>
+        )}
 
         <div className={styles['details-actions']}>
           {org.link && org.link !== '#' && (
@@ -195,7 +200,7 @@ export default function MapListingDetails({
         {place && nearby.length > 0 && (
           <div className={styles['details-nearby']}>
             <h3 className="paragraph-xs-bold color-teal-400 padding-bottom-8px">
-              Nearby in {place}
+              Nearby
             </h3>
             <ul>
               {nearby.map(other => (
@@ -213,7 +218,7 @@ export default function MapListingDetails({
               className={`paragraph-small-bold color-teal-bright-300 underline cursor-pointer ${styles['explorer-clear']}`}
               onClick={onSeeAllInPlace}
             >
-              See all {placeCount} in {place} →
+              See all {placeCount} →
             </button>
           </div>
         )}

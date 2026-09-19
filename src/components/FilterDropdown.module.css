@@ -75,3 +75,8 @@
 .option {
   white-space: nowrap;
 }
+
+/* A single-choice popover: the shared checkbox, round. */
+.radio {
+  border-radius: 50%;
+}

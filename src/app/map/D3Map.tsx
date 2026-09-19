@@ -80,10 +80,8 @@ interface D3MapProps {
 export interface MapExplorerLink {
   // Ids of the orgs the column's search and filters match; null = all.
   matchingIds: Set<string> | null
-  // What becomes of the pins that don't match (both are being tested).
-  nonMatching: 'hide' | 'dim'
-  // Orgs taken off the map altogether, whatever `nonMatching` says: closed
-  // orgs while "Show inactive" is off. null = none.
+  // Pins that don't match are dimmed. Orgs in `hiddenIds` are off the map
+  // altogether: closed orgs while "Show inactive" is off. null = none.
   hiddenIds: Set<string> | null
   // The place names are buttons: each toggles its category in the column's
   // filter, and the Gone Graveyard's toggles "Show inactive".
@@ -290,7 +288,6 @@ export default function D3Map({
       ? { ...DEFAULT_ZOOM_TIER_CONFIG, subLabelZoom: REALM_SUB_LABEL_ZOOM }
       : DEFAULT_ZOOM_TIER_CONFIG
   )
-  const [showAreaCounts, setShowAreaCounts] = useState(true)
   const tierConfigRef = useRef(tierConfig)
   const applyTiersRef = useRef(() => {})
   const tierReadoutRef = useRef<HTMLParagraphElement>(null)
@@ -370,8 +367,16 @@ export default function D3Map({
     }
     const tooltipShowing = () =>
       tooltipRef.current?.style.visibility === 'visible'
-    const showExplorerTooltip = (
-      org: MapOrg,
+    // What a click on the tooltip does is what a click on its pin or place
+    // name does: it carries the org's id, or the place's name.
+    const showTooltip = (
+      content: {
+        title: string
+        note: string
+        hint: string
+        orgId?: string
+        areaLabel?: string
+      },
       pointerX: number,
       pointerY: number
     ) => {
@@ -379,13 +384,14 @@ export default function D3Map({
       const container = containerRef.current
       if (!tt || !container) return
       cancelTooltipHide()
-      const category = primaryCategory(org.category)
-      const place = mapAreaPath(category ?? '', scheme).at(-1)
-      tt.querySelector('strong')!.textContent = org.tooltipTitle
-      tt.querySelector('span')!.textContent = [category, place]
-        .filter(Boolean)
-        .join(' · ')
-      tt.setAttribute('data-listing-id', org.id)
+      tt.querySelector('strong')!.textContent = content.title
+      tt.querySelector('span')!.textContent = content.note
+      tt.querySelector('small')!.textContent = content.hint
+      if (content.orgId) tt.setAttribute('data-listing-id', content.orgId)
+      else tt.removeAttribute('data-listing-id')
+      if (content.areaLabel)
+        tt.setAttribute('data-area-label', content.areaLabel)
+      else tt.removeAttribute('data-area-label')
       // Measured with its new text in: to the right of the pointer, to its
       // left where the pane ends, and inside the pane top to bottom. It is
       // placed once and stays, so the pointer can move onto it.
@@ -638,14 +644,6 @@ export default function D3Map({
         // What the name reads at rest, and how many pins stand there.
         restingText: string
         count: number
-        // Explorer: the "+N" badge after the name, for the pins of this place
-        // that only show closer in. null where the name is no button.
-        badge: {
-          group: d3.Selection<SVGGElement, unknown, null, undefined>
-          rect: d3.Selection<SVGRectElement, unknown, null, undefined>
-          text: d3.Selection<SVGTextElement, unknown, null, undefined>
-          count: number
-        } | null
         // Explorer: the category the name toggles (null: it is no button).
         category: string | null
         anchorX: number
@@ -670,40 +668,23 @@ export default function D3Map({
       }).length
     }
 
-    // Explorer: the pill behind a place's name is as wide as the name and its
-    // "+N" badge, so it is laid out again whenever either changes.
+    // Explorer: the pill behind a place's name is as wide as the name, which
+    // changes (the Gone Graveyard's reads "hidden" while it is).
     const layoutAreaPill = (label: string) => {
       const pill = areaPills.get(label)
       const box = pill?.text.node()?.getBBox()
       if (!pill || !box) return
-      let width = box.width + finalPadX * 2
-      const badge = pill.badge
-      if (badge) {
-        badge.group.style('display', badge.count > 0 ? 'inline' : 'none')
-        // No stale figure left in a hidden badge for a screen reader to find.
-        badge.text.text(badge.count > 0 ? `+${badge.count}` : '')
-        if (badge.count > 0) {
-          const textBox = badge.text.node()?.getBBox()
-          const badgeWidth = (textBox?.width ?? 0) + finalPadX
-          const badgeHeight = box.height + finalPadY * 0.5
-          const left = box.x + box.width + finalPadX * 0.6
-          const middle = box.y + box.height / 2
-          badge.rect
-            .attr('x', left)
-            .attr('y', middle - badgeHeight / 2)
-            .attr('width', badgeWidth)
-            .attr('height', badgeHeight)
-            .attr('rx', badgeHeight / 2)
-          badge.text.attr('x', left + badgeWidth / 2).attr('y', middle)
-          width = left + badgeWidth + finalPadX * 0.5 - (box.x - finalPadX)
-        }
-      }
-      pill.rect.attr('x', box.x - finalPadX).attr('width', width)
+      pill.rect
+        .attr('x', box.x - finalPadX)
+        .attr('width', box.width + finalPadX * 2)
     }
 
     scheme.areas.forEach(({ label, x, y }) => {
       const pinCount = areaCount(label)
-      const count = showAreaCounts ? pinCount : 0
+      // In the explorer a place's name is the name alone: how many stand
+      // there is in its tooltip and its accessible name. Elsewhere the count
+      // follows the name.
+      const count = hasExplorer ? 0 : pinCount
       const xPos = x * GRID_SIZE
       const yPos = y * GRID_SIZE
       // Explorer: an umbrella area (Research Range) is a caption over its
@@ -750,12 +731,33 @@ export default function D3Map({
           .style('pointer-events', 'auto')
           .style('cursor', 'pointer')
           .on('click', activate)
+          // The pins' tooltip, for a place: its name and how many stand there.
+          .on('mouseenter', (event: MouseEvent) => {
+            if (isMobile() || isZooming) return
+            showTooltip(
+              {
+                title: label,
+                note: `${pinCount} ${pinCount === 1 ? 'organization' : 'organizations'}`,
+                hint:
+                  category === INACTIVE_CATEGORY
+                    ? 'Click to show or hide'
+                    : 'Click to filter',
+                areaLabel: label,
+              },
+              event.clientX,
+              event.clientY
+            )
+          })
+          .on('mouseleave', () => {
+            if (!isMobile()) scheduleTooltipHide()
+          })
+          .attr(
+            'aria-label',
+            category === INACTIVE_CATEGORY
+              ? `Show inactive organizations (${label}, ${pinCount} organizations)`
+              : `Filter by ${category} (${label}, ${pinCount} organizations)`
+          )
       }
-
-      const badgeGroup =
-        category !== null && !isCaption
-          ? labelGroup.append('g').style('display', 'none')
-          : null
 
       const bbox = textEl.node()?.getBBox()
       if (bbox) {
@@ -774,21 +776,6 @@ export default function D3Map({
           rect: rectEl,
           restingText: textEl.text(),
           count: pinCount,
-          badge: badgeGroup
-            ? {
-                group: badgeGroup,
-                rect: badgeGroup.append('rect').attr('fill', 'var(--teal-900)'),
-                text: badgeGroup
-                  .append('text')
-                  .attr('text-anchor', 'middle')
-                  .attr('dominant-baseline', 'central')
-                  .attr('font-family', 'Inter, sans-serif')
-                  .attr('font-weight', 700)
-                  .attr('font-size', finalFontSize * 0.8)
-                  .attr('fill', '#fff'),
-                count: 0,
-              }
-            : null,
           category: isCaption ? null : category,
           anchorX: xPos,
           anchorY: yPos,
@@ -799,16 +786,6 @@ export default function D3Map({
           width: bbox.width + finalPadX * 2,
           height: bbox.height + finalPadY * 2,
         })
-        // Pins slide off the name's box: it is measured with a two-figure
-        // badge in place, so a badge is not drawn under a pin.
-        const pill = areaPills.get(label)
-        if (pill?.badge) {
-          pill.badge.count = 88
-          layoutAreaPill(label)
-          pill.width = Number(pill.rect.attr('width'))
-          pill.badge.count = 0
-          layoutAreaPill(label)
-        }
       }
     })
 
@@ -1123,7 +1100,19 @@ export default function D3Map({
           const container = containerRef.current
           if (!tt || !container) return
           if (explorerRef.current) {
-            showExplorerTooltip(org, event.clientX, event.clientY)
+            const category = primaryCategory(org.category)
+            showTooltip(
+              {
+                title: org.tooltipTitle,
+                note: [category, mapAreaPath(category ?? '', scheme).at(-1)]
+                  .filter(Boolean)
+                  .join(' · '),
+                hint: 'Click for details',
+                orgId: org.id,
+              },
+              event.clientX,
+              event.clientY
+            )
             return
           }
           // QA: Use tooltipTitle ('Long name') not title ('Long name for cards')
@@ -1322,8 +1311,6 @@ export default function D3Map({
       const phone = isMobile()
       const floorPx = phoneFloor() ? MOBILE_MIN_PIN_PX : 0
       const namesOnPhone = k >= fitTransform().k * MOBILE_LABEL_ZOOM
-      // Pins held back at this zoom, by the place they stand in.
-      const heldBack = new Map<string, number>()
       const labelScale = labelMapScale(z, config, labelCap)
       appliedLabelScale = labelScale
       for (const pill of areaPills.values()) {
@@ -1338,11 +1325,8 @@ export default function D3Map({
         !!link?.matchingIds && link.matchingIds.size <= EXPLORER_SHOW_ALL_MAX
       for (const { tier, group, label, hit } of pins) {
         const matches = matchesExplorer(tier.id)
-        // A hidden non-match has no place in the layout (see applyTiers).
-        if (
-          goneFromMap(tier.id) ||
-          (!matches && link?.nonMatching === 'hide')
-        ) {
+        // A pin that is off the map has no place in the layout (applyTiers).
+        if (goneFromMap(tier.id)) {
           group.classed('mapFadeHidden', true).classed('mapDimmed', false)
           continue
         }
@@ -1360,11 +1344,6 @@ export default function D3Map({
         const size = isSelected ? floored * SELECTED_PIN_SCALE : floored
         const pinUnitPx = screenScaleAtRest * k * size
         if (link) {
-          const showing = revealed || isSelected || tier.id === forcedPinId
-          const place = tier.regions.at(-1)
-          if (!showing && matches && place) {
-            heldBack.set(place, (heldBack.get(place) ?? 0) + 1)
-          }
           // Names: on a desktop the Large and Medium pins carry theirs (the
           // layout has kept room for them) and the Small ones join in once
           // the map is close enough for them all to show; on a phone none do
@@ -1398,25 +1377,6 @@ export default function D3Map({
           )
           .classed('mapDimmed', !matches)
       }
-      if (link) {
-        for (const [place, pill] of areaPills) {
-          if (!pill.badge || pill.category === null) continue
-          const count = heldBack.get(place) ?? 0
-          if (count !== pill.badge.count) {
-            pill.badge.count = count
-            layoutAreaPill(place)
-          }
-          const about = `${place}, ${pill.count} organizations`
-          const more =
-            count > 0 ? `, ${count} more pins appear when you zoom in` : ''
-          pill.group.attr(
-            'aria-label',
-            pill.category === INACTIVE_CATEGORY
-              ? `Show inactive organizations (${about})`
-              : `Filter by ${pill.category} (${about}${more})`
-          )
-        }
-      }
       if (tierReadoutRef.current) {
         const { pairs, onObstacles } = countOverlaps(
           showing,
@@ -1437,17 +1397,11 @@ export default function D3Map({
       if (tierTimer !== null) clearTimeout(tierTimer)
       tierTimer = null
       measureScreenScale()
-      // Pins the explorer column has filtered out and hidden leave the
-      // layout, so the ones that remain get the room: eight matches all show
-      // at rest, where eight among 369 would mostly be held back.
-      const hiding = explorerRef.current?.nonMatching === 'hide'
+      // Pins that are off the map (closed orgs, until they are asked for)
+      // leave the layout, so the ones that remain get the room.
       layout = layoutPins(
         pins
-          .filter(
-            pin =>
-              !goneFromMap(pin.tier.id) &&
-              (!hiding || matchesExplorer(pin.tier.id))
-          )
+          .filter(pin => !goneFromMap(pin.tier.id))
           .map(pin => tierForLayout(pin.tier)),
         obstacles,
         tierConfigHere(),
@@ -1815,7 +1769,6 @@ export default function D3Map({
       group.raise()
     }
     let appliedMatching: Set<string> | null | undefined
-    let appliedMode: string | undefined
     let appliedSelected: string | null | undefined
     let appliedCategories: string[] | undefined
     let appliedShowInactive: boolean | undefined
@@ -1921,21 +1874,15 @@ export default function D3Map({
             .attr('vector-effect', 'non-scaling-stroke')
         }
       }
-      const filterChanged =
-        link.matchingIds !== appliedMatching ||
-        link.nonMatching !== appliedMode ||
-        link.hiddenIds !== appliedHidden
-      if (
-        filterChanged &&
-        (link.nonMatching === 'hide' ||
-          appliedMode === 'hide' ||
-          link.hiddenIds !== appliedHidden)
-      ) {
-        // Hidden pins leave the layout, so it has to be worked out again:
-        // at once, because a pin coming back cannot be drawn without its
-        // place in it. (This also redraws the pins.)
+      if (link.hiddenIds !== appliedHidden) {
+        // Pins that are off the map leave the layout, so it has to be worked
+        // out again: at once, because a pin coming back cannot be drawn
+        // without its place in it. (This also redraws the pins.)
         applyTiers()
-      } else if (filterChanged || link.selectedId !== appliedSelected) {
+      } else if (
+        link.matchingIds !== appliedMatching ||
+        link.selectedId !== appliedSelected
+      ) {
         applyPins(appliedK)
       }
       // A search's few hits come before a category's place; the drawer
@@ -1956,7 +1903,6 @@ export default function D3Map({
         else if (appliedFit) resetView()
       }
       appliedMatching = link.matchingIds
-      appliedMode = link.nonMatching
       appliedSelected = link.selectedId
       appliedCategories = link.activeCategories
       appliedShowInactive = link.showInactive
@@ -2203,8 +2149,16 @@ export default function D3Map({
       if (!tt) return
       if (explorerRef.current) {
         const id = tt.getAttribute('data-listing-id')
+        const areaLabel = tt.getAttribute('data-area-label')
         hideTooltip()
         if (id) explorerRef.current.onSelect(id)
+        else if (areaLabel) {
+          // The place's own click, so the two cannot come apart.
+          areaPills
+            .get(areaLabel)
+            ?.group.node()
+            ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+        }
         e.stopPropagation()
         return
       }
@@ -2274,7 +2228,7 @@ export default function D3Map({
         d3.select(container).select('svg').remove()
       }
     }
-  }, [orgs, showAreaCounts, scheme, realmBackdrop, hasExplorer])
+  }, [orgs, scheme, realmBackdrop, hasExplorer])
 
   return (
     <>
@@ -2312,8 +2266,6 @@ export default function D3Map({
           className={styles['map-tuning']}
           config={tierConfig}
           onChange={setTierConfig}
-          showAreaCounts={showAreaCounts}
-          onShowAreaCounts={setShowAreaCounts}
           readoutRef={tierReadoutRef}
         />
       )}
@@ -2341,7 +2293,7 @@ export default function D3Map({
       >
         <strong></strong>
         <span></span>
-        {hasExplorer && <small>Click for details</small>}
+        {hasExplorer && <small></small>}
       </div>
     </>
   )

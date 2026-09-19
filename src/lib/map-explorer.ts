@@ -165,13 +165,18 @@ const RESERVED_PARAMS = ['q', 'sort', 'org', 'list']
  */
 export function parseExplorerState(
   params: URLSearchParams,
-  filterKeys: string[]
+  filterKeys: string[],
+  // Chips that hold one choice at a time (Category). Only the first value in
+  // the address counts, so an older link with two degrades to the first.
+  singleKeys: string[] = []
 ): ExplorerState {
   const sort = params.get('sort')
   const filters: Record<string, string[]> = {}
   for (const key of filterKeys) {
     const values = params.getAll(key).filter(Boolean)
-    if (values.length > 0) filters[key] = values
+    if (values.length > 0) {
+      filters[key] = singleKeys.includes(key) ? values.slice(0, 1) : values
+    }
   }
   return {
     query: params.get('q') ?? '',
@@ -192,14 +197,18 @@ export function parseExplorerState(
 export function writeExplorerState(
   params: URLSearchParams,
   state: ExplorerState,
-  filterKeys: string[]
+  filterKeys: string[],
+  // As for parseExplorerState: at most one value is written for these.
+  singleKeys: string[] = []
 ): URLSearchParams {
   const next = new URLSearchParams(params)
   for (const key of [...RESERVED_PARAMS, ...filterKeys]) next.delete(key)
   const query = state.query.trim()
   if (query) next.set('q', query)
   for (const key of filterKeys) {
-    for (const value of state.filters[key] ?? []) next.append(key, value)
+    const values = state.filters[key] ?? []
+    for (const value of singleKeys.includes(key) ? values.slice(0, 1) : values)
+      next.append(key, value)
   }
   if (state.sort !== DEFAULT_EXPLORER_STATE.sort) next.set('sort', state.sort)
   if (state.selected) next.set('org', state.selected)

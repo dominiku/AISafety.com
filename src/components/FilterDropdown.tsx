@@ -22,6 +22,10 @@ interface FilterDropdownProps {
   /** Label an active pill "Category · 2" (how many are ticked) instead of
    *  naming the first tick. For a narrow row where the pill must stay short. */
   countLabel?: boolean
+  /** One choice at a time: the options are radio buttons, picking one takes
+   *  the place of the last (the parent's onToggle decides that), picking the
+   *  chosen one again clears it, and the pill reads "Category: Blog". */
+  single?: boolean
   /** A second name for an option, shown between it and its count
    *  ("Advocacy · Advocacy Anchorage · 26"): the map's place for a category. */
   optionNote?: (option: string) => string | null
@@ -41,6 +45,7 @@ export default function FilterDropdown({
   icon,
   trackingPage,
   countLabel = false,
+  single = false,
   optionNote,
   onClear,
 }: FilterDropdownProps) {
@@ -133,7 +138,7 @@ export default function FilterDropdown({
         <div
           ref={popoverRef}
           id={popoverId}
-          role="group"
+          role={single ? 'radiogroup' : 'group'}
           aria-label={title}
           className={`${styles.popover} border-plus-fill drop-shadow-extra-dark`}
           // Never taller than the room under the pill: a long list scrolls
@@ -153,8 +158,16 @@ export default function FilterDropdown({
                 className={`flex items-center cursor-pointer ${styles.option}`}
               >
                 <input
-                  type="checkbox"
+                  type={single ? 'radio' : 'checkbox'}
+                  name={single ? popoverId : undefined}
                   checked={selected.includes(option)}
+                  // A radio button that is already on gets no change event:
+                  // its click is what clears a single choice.
+                  onClick={
+                    single && selected.includes(option)
+                      ? () => onToggle(option)
+                      : undefined
+                  }
                   onChange={() => {
                     if (trackingPage && !selected.includes(option)) {
                       const group = trackedFilterGroup(trackingPage, title)
@@ -166,7 +179,7 @@ export default function FilterDropdown({
                     }
                     onToggle(option)
                   }}
-                  className="checkbox"
+                  className={`checkbox${single ? ` ${styles.radio}` : ''}`}
                 />
                 <span className="paragraph-small color-white">
                   {option}
