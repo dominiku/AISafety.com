@@ -97,6 +97,15 @@ export interface MapExplorerLink {
   // While something is typed in the search, every match shows, even one the
   // zoom tiers would hold back.
   showEveryMatch: boolean
+  // A search with only a few hits: the view is fitted to them. null = not.
+  fitIds: string[] | null
+  // What floats over the map (search, pills, drawer or card, legend), as
+  // screen rectangles: place names are nudged clear of them. `overlayKey`
+  // changes whenever they may have.
+  overlayRects: () => DOMRect[]
+  overlayKey: string
+  // The visitor has panned or zoomed the map by hand.
+  onUserMove: () => void
   selectedId: string | null
   // The result row being hovered or focused.
   highlightedId: string | null
@@ -180,6 +189,26 @@ const MOBILE_LABEL_ZOOM = 1.6
 // neighbors can be told apart.
 const PHONE_FIT_TOP_PX = 76
 const PHONE_PIN_ZOOM = 3.5
+// A phone with nothing asked for in the address opens on the island's middle,
+// around the road junction between Training Town and Strategy Summit: fitted
+// to the width, nothing on the island can be read. `x` is a share of the
+// illustration's width; top to bottom the island hangs under the search, as
+// it does fitted. The zoom is a little short of PHONE_PIN_ZOOM, which is what
+// lets both of those place names into a 375px screen whole.
+// `seaTop` is the share of the illustration above the island's north shore,
+// which is what hangs under the search.
+const PHONE_START = { x: 0.48, k: 3.2, seaTop: 0.07 }
+// On a phone the Medium and Small pins join in at this share of the zoom they
+// do on a desktop (see tierConfigHere).
+const PHONE_TIER_ZOOM = 0.35
+// A search with this many hits or fewer fits the view to them, no closer than
+// SEARCH_FIT_MAX_ZOOM and with this much screen room around them.
+const SEARCH_FIT_MAX_ZOOM = 3.5
+const SEARCH_FIT_ROOM = 80
+// Place names are nudged clear of what floats over the map, by this many
+// screen pixels at most: further, and a name would leave its place.
+const LABEL_NUDGE_GAP = 8
+const LABEL_NUDGE_MAX = 140
 const FIT_SIDE_ROOM = 48
 const FIT_BOTTOM_ROOM = 112
 
@@ -341,11 +370,14 @@ export default function D3Map({
     }
     const tooltipShowing = () =>
       tooltipRef.current?.style.visibility === 'visible'
-    const showExplorerTooltip = (org: MapOrg, pin: SVGElement) => {
+    const showExplorerTooltip = (
+      org: MapOrg,
+      pointerX: number,
+      pointerY: number
+    ) => {
       const tt = tooltipRef.current
       const container = containerRef.current
-      const disc = pin.querySelector('circle')
-      if (!tt || !container || !disc) return
+      if (!tt || !container) return
       cancelTooltipHide()
       const category = primaryCategory(org.category)
       const place = mapAreaPath(category ?? '', scheme).at(-1)
@@ -354,19 +386,22 @@ export default function D3Map({
         .filter(Boolean)
         .join(' · ')
       tt.setAttribute('data-listing-id', org.id)
-      // Above the pin's disc, or below its name where there is no room.
+      // Measured with its new text in: to the right of the pointer, to its
+      // left where the pane ends, and inside the pane top to bottom. It is
+      // placed once and stays, so the pointer can move onto it.
       const bounds = container.getBoundingClientRect()
-      const discRect = disc.getBoundingClientRect()
-      const pinRect = pin.getBoundingClientRect()
-      const gap = 6
-      const above = discRect.top - gap - tt.offsetHeight
-      const top = above >= bounds.top + 2 ? above : pinRect.bottom + gap
-      const center = discRect.left + discRect.width / 2
-      const left = Math.min(
-        Math.max(center - tt.offsetWidth / 2, bounds.left + 2),
-        bounds.right - tt.offsetWidth - 2
+      const width = tt.offsetWidth
+      const height = tt.offsetHeight
+      const gap = 14
+      const left =
+        pointerX + gap + width > bounds.right - 8
+          ? pointerX - gap - width
+          : pointerX + gap
+      const top = Math.min(
+        Math.max(pointerY + gap, bounds.top + 8),
+        bounds.bottom - height - 8
       )
-      tt.style.left = `${left}px`
+      tt.style.left = `${Math.max(left, bounds.left + 8)}px`
       tt.style.top = `${top}px`
       tt.style.visibility = 'visible'
       tt.style.opacity = '1'
@@ -412,6 +447,9 @@ export default function D3Map({
         savedTransformRef.current = event.transform
         // A pan leaves pin sizes and visibility alone; only a zoom changes them.
         if (event.transform.k !== appliedK) applyPins(event.transform.k)
+        // Place names keep clear of the overlay wherever the map is moved.
+        else placeLabels()
+        if (event.sourceEvent) explorerRef.current?.onUserMove()
       })
       .on('end', () => {
         isZooming = false
@@ -455,7 +493,61 @@ export default function D3Map({
         )
         .scale(k)
     }
-    svg.call(zoom.transform, savedTransformRef.current ?? fitTransform())
+    // The transform that puts map point (px, py) in the middle of what the
+    // overlay leaves free, at zoom k: the group transform places map point p
+    // at viewBox coordinate t + offset + k*p, and the free middle lies half
+    // the covered width to the right (and likewise top to bottom).
+    const transformFor = (
+      px: number,
+      py: number,
+      k: number,
+      leftInset = 0,
+      topInset = 0,
+      bottomInset = 0
+    ) => {
+      const node = svg.node()
+      const { width, height } = node
+        ? node.getBoundingClientRect()
+        : { width: 0, height: 0 }
+      const unit = Math.min(width / PADDED_WIDTH, height / PADDED_HEIGHT) || 1
+      const shift = Math.min(leftInset, width / 2) / 2 / unit
+      const covered = Math.min(topInset + bottomInset, height * 0.8)
+      const shiftY =
+        topInset + bottomInset > 0
+          ? ((covered / (topInset + bottomInset)) * (topInset - bottomInset)) /
+            2 /
+            unit
+          : 0
+      return d3.zoomIdentity
+        .translate(
+          PADDED_WIDTH / 2 + shift - offsetX - k * px,
+          PADDED_HEIGHT / 2 + shiftY - offsetY - k * py
+        )
+        .scale(k)
+    }
+    // A phone that was asked for nothing in particular opens on the island's
+    // middle, close enough to read (Zoom to fit is the way out).
+    const startLink = explorerRef.current
+    const startsOnMiddle =
+      !!startLink &&
+      isMobile() &&
+      !startLink.selectedId &&
+      !startLink.fitArea &&
+      !startLink.fitIds &&
+      !startLink.showEveryMatch
+    svg.call(
+      zoom.transform,
+      savedTransformRef.current ??
+        (startsOnMiddle
+          ? d3.zoomIdentity
+              .translate(
+                transformFor(PHONE_START.x * MAP_WIDTH, 0, PHONE_START.k).x,
+                fitTransform().y -
+                  PHONE_START.k * PHONE_START.seaTop * MAP_HEIGHT
+              )
+              .scale(PHONE_START.k)
+          : fitTransform())
+    )
 
     // A click on bare map lets go of the explorer's selection. Pins and their
     // labels live inside <a>; a pan does not reach here because the drag
@@ -882,6 +974,7 @@ export default function D3Map({
       // White circle background
       linkEl
         .append('circle')
+        .attr('class', 'mapDisc')
         .attr('r', iconSize / 2)
         .attr('cx', 0)
         .attr('cy', 0)
@@ -1030,7 +1123,7 @@ export default function D3Map({
           const container = containerRef.current
           if (!tt || !container) return
           if (explorerRef.current) {
-            showExplorerTooltip(org, event.currentTarget as SVGElement)
+            showExplorerTooltip(org, event.clientX, event.clientY)
             return
           }
           // QA: Use tooltipTitle ('Long name') not title ('Long name for cards')
@@ -1083,14 +1176,29 @@ export default function D3Map({
     const zoomOf = (k: number) =>
       (k * screenScaleAtRest) / REFERENCE_SCREEN_SCALE
     // Explorer, on a phone: no pin is drawn under MOBILE_MIN_PIN_PX across,
-    // so the Small and Medium ones are drawn up to it (see applyPins). For
-    // the layout to keep them apart all the same, every pin there takes up
-    // the room of a Large one.
+    // so the Small ones are drawn up to it (see applyPins). For the layout to
+    // keep them apart all the same, a Small pin there takes up the room of a
+    // Medium one, which is about what the floor makes of it at the zoom a
+    // phone opens at. (Fitted to the whole island every pin is on the floor
+    // and some touch; that view is an overview, not where a phone starts.)
     const phoneFloor = () => hasExplorer && isMobile()
-    const largeDisc = BASE_LOGO_SIZE * SIZE_TO_SCALE.Large
+    // The zooms at which Medium and Small pins join in were set for a
+    // desktop, where the resting view is z = 1. A phone opens at about
+    // z = 0.9 with a third of the island across its screen, and has the room
+    // for them sooner.
+    const tierConfigHere = (): typeof tierConfigRef.current => {
+      const config = tierConfigRef.current
+      if (!phoneFloor()) return config
+      return {
+        ...config,
+        mediumZoom: config.mediumZoom * PHONE_TIER_ZOOM,
+        smallZoom: config.smallZoom * PHONE_TIER_ZOOM,
+      }
+    }
+    const mediumDisc = BASE_LOGO_SIZE * SIZE_TO_SCALE.Medium
     const tierForLayout = (tier: TierPin): TierPin => {
       if (!phoneFloor()) return tier
-      const grow = largeDisc / (-tier.top * 2)
+      const grow = Math.max(1, mediumDisc / (-tier.top * 2))
       return {
         ...tier,
         halfWidth: tier.halfWidth * grow,
@@ -1128,10 +1236,85 @@ export default function D3Map({
       const matching = explorerRef.current?.matchingIds
       return !matching || matching.has(id) || furnitureIds.has(id)
     }
+    // Explorer: place names are drawn from their own spot, nudged clear of
+    // whatever floats over the map (never hidden, and never far: a name that
+    // would have to leave its place stays where it is). Without the explorer
+    // this only puts each name on its spot.
+    // The pin a hovered result row is showing off (see setPeek).
+    let peek: {
+      id: string
+      wasHidden: boolean
+      rings: d3.Selection<SVGCircleElement, unknown, null, undefined>[]
+    } | null = null
+    let appliedLabelScale = 1
+    let overlayBoxes: DOMRect[] = []
+    const readOverlay = () => {
+      overlayBoxes = explorerRef.current?.overlayRects() ?? []
+    }
+    const placeLabels = () => {
+      const t = d3.zoomTransform(svgNode)
+      const pane =
+        overlayBoxes.length > 0 ? svgNode.getBoundingClientRect() : null
+      const unit = screenScaleAtRest
+      for (const pill of areaPills.values()) {
+        let dx = 0
+        let dy = 0
+        if (pane && unit > 0) {
+          const perMapPx = t.k * unit
+          const spotX =
+            pane.left +
+            pane.width / 2 +
+            (t.x + offsetX + t.k * pill.anchorX - PADDED_WIDTH / 2) * unit
+          const spotY =
+            pane.top +
+            pane.height / 2 +
+            (t.y + offsetY + t.k * pill.anchorY - PADDED_HEIGHT / 2) * unit
+          const size = appliedLabelScale * perMapPx
+          let left = spotX + Number(pill.rect.attr('x')) * size
+          let top = spotY + pill.y * size
+          const width = Number(pill.rect.attr('width')) * size
+          const height = pill.height * size
+          for (const box of overlayBoxes) {
+            const apart =
+              left >= box.right + LABEL_NUDGE_GAP ||
+              left + width <= box.left - LABEL_NUDGE_GAP ||
+              top >= box.bottom + LABEL_NUDGE_GAP ||
+              top + height <= box.top - LABEL_NUDGE_GAP
+            if (apart) continue
+            // The shortest way out that stays in the pane and in reach.
+            const ways = [
+              { x: box.right + LABEL_NUDGE_GAP - left, y: 0 },
+              { x: box.left - LABEL_NUDGE_GAP - (left + width), y: 0 },
+              { x: 0, y: box.bottom + LABEL_NUDGE_GAP - top },
+              { x: 0, y: box.top - LABEL_NUDGE_GAP - (top + height) },
+            ].filter(
+              way =>
+                Math.abs(way.x + way.y) <= LABEL_NUDGE_MAX &&
+                left + way.x >= pane.left &&
+                left + width + way.x <= pane.right &&
+                top + way.y >= pane.top &&
+                top + height + way.y <= pane.bottom
+            )
+            if (ways.length === 0) continue
+            const way = ways.reduce((a, b) =>
+              Math.abs(a.x + a.y) <= Math.abs(b.x + b.y) ? a : b
+            )
+            left += way.x
+            top += way.y
+            dx += way.x / perMapPx
+            dy += way.y / perMapPx
+          }
+        }
+        pill.group.attr(
+          'transform',
+          `translate(${pill.anchorX + dx}, ${pill.anchorY + dy}) scale(${appliedLabelScale})`
+        )
+      }
+    }
     applyPins = (k: number) => {
       appliedK = k
       if (!layout) return
-      const config = tierConfigRef.current
+      const config = tierConfigHere()
       const z = zoomOf(k)
       const s = pinMapScale(z, config)
       // Explorer: screen pixels per unit of a pin's own drawing, for the
@@ -1142,14 +1325,11 @@ export default function D3Map({
       // Pins held back at this zoom, by the place they stand in.
       const heldBack = new Map<string, number>()
       const labelScale = labelMapScale(z, config, labelCap)
+      appliedLabelScale = labelScale
       for (const pill of areaPills.values()) {
-        pill.group
-          .attr(
-            'transform',
-            `translate(${pill.anchorX}, ${pill.anchorY}) scale(${labelScale})`
-          )
-          .classed('mapFadeHidden', !labelShowsAt(pill, z, config))
+        pill.group.classed('mapFadeHidden', !labelShowsAt(pill, z, config))
       }
+      placeLabels()
       // The pins on screen, where they are drawn, for the panel's readout.
       const showing: TierPin[] = []
       let largeHeldBack = 0
@@ -1192,6 +1372,8 @@ export default function D3Map({
           // always does.
           const named =
             isSelected ||
+            // A search's hits are there to be found: they say who they are.
+            (link.showEveryMatch && !!link.matchingIds?.has(tier.id)) ||
             (phone
               ? namesOnPhone
               : tier.scale !== 'Small' || z >= config.smallZoom)
@@ -1209,7 +1391,10 @@ export default function D3Map({
           .attr('transform', `translate(${at.x}, ${at.y}) scale(${size})`)
           .classed(
             'mapFadeHidden',
-            !revealed && tier.id !== forcedPinId && tier.id !== link?.selectedId
+            !revealed &&
+              tier.id !== forcedPinId &&
+              tier.id !== link?.selectedId &&
+              tier.id !== peek?.id
           )
           .classed('mapDimmed', !matches)
       }
@@ -1265,7 +1450,7 @@ export default function D3Map({
           )
           .map(pin => tierForLayout(pin.tier)),
         obstacles,
-        tierConfigRef.current,
+        tierConfigHere(),
         zoomOf(1),
         focus
       )
@@ -1348,19 +1533,6 @@ export default function D3Map({
       topInset = 0,
       bottomInset = 0
     ) => {
-      // The overlay covers the map's left side: the middle of what is left
-      // lies half its width to the right, in viewBox units. The same goes
-      // for what a phone's search and details sheet cover, top and bottom.
-      const { width, height } = svgNode.getBoundingClientRect()
-      const unit = Math.min(width / PADDED_WIDTH, height / PADDED_HEIGHT) || 1
-      const shift = Math.min(leftInset, width / 2) / 2 / unit
-      const covered = Math.min(topInset + bottomInset, height * 0.8)
-      const shiftY =
-        topInset + bottomInset > 0
-          ? ((covered / (topInset + bottomInset)) * (topInset - bottomInset)) /
-            2 /
-            unit
-          : 0
       svg
         .transition()
         // Someone who asked for less motion gets the new view at once.
@@ -1371,13 +1543,43 @@ export default function D3Map({
         )
         .call(
           zoom.transform,
-          d3.zoomIdentity
-            .translate(
-              PADDED_WIDTH / 2 + shift - offsetX - k * px,
-              PADDED_HEIGHT / 2 + shiftY - offsetY - k * py
-            )
-            .scale(k)
+          transformFor(px, py, k, leftInset, topInset, bottomInset)
         )
+    }
+    // Explorer: fit the view to a search's few hits, in what the overlay
+    // leaves free. They are all showing already (showEveryMatch).
+    const fitToIds = (ids: string[], leftInset: number) => {
+      const spots = ids
+        .map(id => orgById.get(id))
+        .filter(
+          (org): org is MapOrg & { x: number; y: number } =>
+            !!org && org.x !== null && org.y !== null
+        )
+      if (spots.length === 0) return
+      const xs = spots.map(org => org.x * GRID_SIZE)
+      const ys = spots.map(org => org.y * GRID_SIZE)
+      const { width, height } = svgNode.getBoundingClientRect()
+      const unit = Math.min(width / PADDED_WIDTH, height / PADDED_HEIGHT) || 1
+      const topInset = explorerRef.current?.topInset ?? 0
+      const freeWidth = Math.max(width - leftInset - SEARCH_FIT_ROOM * 2, 120)
+      const freeHeight = Math.max(height - topInset - SEARCH_FIT_ROOM * 2, 120)
+      const spanX = Math.max(Math.max(...xs) - Math.min(...xs), 1)
+      const spanY = Math.max(Math.max(...ys) - Math.min(...ys), 1)
+      const k = Math.max(
+        fitTransform().k,
+        Math.min(
+          freeWidth / (spanX * unit),
+          freeHeight / (spanY * unit),
+          SEARCH_FIT_MAX_ZOOM
+        )
+      )
+      flyToPoint(
+        (Math.min(...xs) + Math.max(...xs)) / 2,
+        (Math.min(...ys) + Math.max(...ys)) / 2,
+        k,
+        leftInset,
+        topInset
+      )
     }
     // Explorer: fit the view to one place, in what the overlay leaves free.
     // Its pins all show once framed, as for an area picked from the search.
@@ -1619,15 +1821,57 @@ export default function D3Map({
     let appliedShowInactive: boolean | undefined
     let appliedHidden: Set<string> | null | undefined
     let appliedFit: string | null | undefined
+    let appliedOverlayKey: string | undefined
+    // A hovered or focused result row makes its pin "breathe": a little
+    // bigger, a teal ring, one soft pulse (page.module.css .mapPeek). A pin
+    // the zoom holds back is shown for the while, and only that pin: nothing
+    // else on the map is worked out again because a row was hovered.
+    const setPeek = (id: string | null) => {
+      if ((peek?.id ?? null) === id) return
+      if (peek) {
+        const old = pins.find(pin => pin.tier.id === peek?.id)
+        peek.rings.forEach(ring => ring.remove())
+        if (old) {
+          d3.select(old.link).classed('mapPeek', false)
+          if (peek.wasHidden && old.tier.id !== explorerRef.current?.selectedId)
+            old.group.classed('mapFadeHidden', true)
+        }
+        peek = null
+      }
+      const pin = id ? pins.find(p => p.tier.id === id) : undefined
+      if (!id || !pin?.link || goneFromMap(id)) return
+      const wasHidden = pin.group.classed('mapFadeHidden')
+      pin.group.classed('mapFadeHidden', false).raise()
+      const target = d3.select(pin.link).classed('mapPeek', true)
+      const r = -pin.tier.top + 6
+      const ring = (name: string, radius: number) =>
+        target
+          .append('circle')
+          .attr('class', name)
+          .attr('r', radius)
+          .attr('fill', 'none')
+          .attr('vector-effect', 'non-scaling-stroke')
+          .style('pointer-events', 'none')
+      peek = {
+        id,
+        wasHidden,
+        rings: [ring('mapPeekPulse', r - 4), ring('mapPeekRing', r)],
+      }
+    }
+
     const applyExplorer = () => {
       const link = explorerRef.current
       if (!link) return
       explorerRings.forEach(ring => ring.remove())
       explorerRings = []
-      if (link.highlightedId && link.highlightedId !== link.selectedId) {
-        drawExplorerRing(link.highlightedId, 2, 0.6)
-      }
+      setPeek(
+        link.highlightedId !== link.selectedId ? link.highlightedId : null
+      )
       if (link.selectedId) drawExplorerRing(link.selectedId, 3.5, 1, true)
+      if (link.overlayKey !== appliedOverlayKey) {
+        readOverlay()
+        placeLabels()
+      }
       if (
         link.selectedId !== appliedSelected ||
         link.activeCategories !== appliedCategories ||
@@ -1694,14 +1938,22 @@ export default function D3Map({
       } else if (filterChanged || link.selectedId !== appliedSelected) {
         applyPins(appliedK)
       }
-      if (link.fitArea !== appliedFit) {
-        if (link.fitArea) fitToArea(link.fitArea, link.leftInset)
-        else if (appliedFit) {
-          // The filter has gone: back to the whole island.
+      // A search's few hits come before a category's place; the drawer
+      // opening beside either is a reason to fit again.
+      const fit = link.fitIds
+        ? `ids:${link.fitIds.join()}|${link.leftInset}`
+        : link.fitArea
+          ? `area:${link.fitArea}`
+          : null
+      if (fit !== appliedFit) {
+        if (appliedFit?.startsWith('area:') && !link.fitArea) {
           focus = null
           scheduleTiers()
-          resetView()
         }
+        if (link.fitIds) fitToIds(link.fitIds, link.leftInset)
+        else if (link.fitArea) fitToArea(link.fitArea, link.leftInset)
+        // The search or the filter has gone: back to the whole island.
+        else if (appliedFit) resetView()
       }
       appliedMatching = link.matchingIds
       appliedMode = link.nonMatching
@@ -1709,7 +1961,8 @@ export default function D3Map({
       appliedCategories = link.activeCategories
       appliedShowInactive = link.showInactive
       appliedHidden = link.hiddenIds
-      appliedFit = link.fitArea
+      appliedFit = fit
+      appliedOverlayKey = link.overlayKey
     }
     applyExplorerRef.current = applyExplorer
     applyExplorer()

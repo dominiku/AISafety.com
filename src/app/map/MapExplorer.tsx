@@ -90,7 +90,14 @@ const NO_STATUS = 'any'
 
 // Marks the history entry made by opening a details card.
 const CARD_ENTRY_KEY = 'mapCard'
-const COLLAPSED_STORAGE_KEY = 'map-list-collapsed'
+// Whether this visitor left the results drawer open ('1') or closed ('0').
+// (Not the earlier explorer's 'map-list-collapsed': its column started open,
+// and a value left over from it would open the drawer over the map.)
+const DRAWER_STORAGE_KEY = 'map-drawer-open'
+// Set once a phone's visitor has moved the map: the hint has done its work.
+const DRAG_HINT_STORAGE_KEY = 'map-drag-hint-seen'
+// A search with this many hits on the map, or fewer, fits the view to them.
+const SEARCH_FIT_MAX_HITS = 12
 const LIST_ID = 'map-explorer-list'
 const LEGEND_ID = 'map-explorer-legend'
 // Every row of the results drawer is this tall, which is what lets only the
@@ -175,7 +182,14 @@ export default function MapExplorer({
   // PROTOTYPE: which treatment of non-matching pins reads better is an open
   // question in the handover, so both can be tried.
   const [nonMatching, setNonMatching] = useState<'hide' | 'dim'>('dim')
+  // The drawer's list is one Tab stop: the arrow keys move this row about.
+  const [activeRowId, setActiveRowId] = useState<string | null>(null)
+  // A phone's "Drag to explore", until the map has been moved once.
+  const [dragHint, setDragHint] = useState(false)
 
+  const explorerRootRef = useRef<HTMLDivElement>(null)
+  const rowsRef = useRef<HTMLUListElement>(null)
+  const legendToggleRef = useRef<HTMLButtonElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const listPillRef = useRef<HTMLButtonElement>(null)
@@ -244,15 +258,6 @@ export default function MapExplorer({
       ),
     [listed, basePass, groups]
   )
-  const statusCounts = useMemo(
-    () =>
-      optionCounts(
-        filterItems(listed, basePass, groups, 'status'),
-        STATUSES,
-        groups.status.matches
-      ),
-    [listed, basePass, groups]
-  )
 
   // One way to change the category filter, for the Category pill, the chips,
   // the place names on the map and "See all": the first category picked
@@ -275,6 +280,22 @@ export default function MapExplorer({
       current.includes('No longer active') ? DEFAULT_STATUSES : STATUSES
     )
   }, [])
+
+  // "Show inactive" is one switch for the whole map, so its count is every
+  // closed org, whatever else is filtered by.
+  const inactiveTotal = useMemo(
+    () => listed.filter(org => org.status !== 'Active').length,
+    [listed]
+  )
+  // Typing a search opens the drawer, where its hits are listed, and lets go
+  // of a selected org, whose card would be standing in the drawer's place.
+  const typeQuery = (value: string) => {
+    setQuery(value)
+    if (value.trim() === '') return
+    setDrawerOpen(true)
+    setLegendOpen(false)
+    setSelectedId(null)
+  }
 
   const showInactive = statuses.includes('No longer active')
   const isFiltered =
@@ -389,6 +410,10 @@ export default function MapExplorer({
       const state = parseExplorerState(new URLSearchParams(params), FILTER_KEYS)
       setQuery(state.query)
       setSettledQuery(state.query)
+      if (state.query.trim() !== '') {
+        setDrawerOpen(true)
+        setLegendOpen(false)
+      }
       const linkedCategories = (state.filters.category ?? [])
         .map(value => categoryFromSlug(value, CATEGORIES))
         .filter((c): c is string => c !== null)
@@ -424,10 +449,11 @@ export default function MapExplorer({
         // What this visitor chose last time. Storage can be blocked; the
         // drawer then simply starts closed.
         try {
-          if (localStorage.getItem(COLLAPSED_STORAGE_KEY) === '0') {
+          if (localStorage.getItem(DRAWER_STORAGE_KEY) === '1') {
             setDrawerOpen(true)
             setLegendOpen(false)
           }
+          setDragHint(localStorage.getItem(DRAG_HINT_STORAGE_KEY) !== '1')
         } catch {
           // Storage blocked: the drawer keeps to what the link asked for.
         }
@@ -446,7 +472,7 @@ export default function MapExplorer({
     setDrawerOpen(next)
     setLegendOpen(false)
     try {
-      localStorage.setItem(COLLAPSED_STORAGE_KEY, next ? '0' : '1')
+      localStorage.setItem(DRAWER_STORAGE_KEY, next ? '1' : '0')
     } catch {
       // Storage blocked: the choice just isn't remembered.
     }
@@ -519,12 +545,47 @@ export default function MapExplorer({
     },
     [measureList]
   )
+  // A new search, filter or sort is a new list: it is read from its top. (A
+  // selection is not: the list keeps its place for when the card closes.)
+  useEffect(() => {
+    const list = listRef.current
+    if (!list || list.scrollTop === 0) return
+    list.scrollTop = 0
+    measureList()
+  }, [settledQuery, categories, statuses, sort, measureList])
+
+  // The drawer's list is a listbox: one Tab stop, and the arrow keys move the
+  // active row, which the map shows off as it does a hovered one.
+  const activateRow = useCallback(
+    (id: string | null) => {
+      setActiveRowId(id)
+      setHighlightedId(id)
+      if (id) showRow(id)
+    },
+    [showRow]
+  )
+  const onRowsKeyDown = (event: React.KeyboardEvent) => {
+    if (shown.length === 0) return
+    const at = shown.findIndex(org => org.id === activeRowId)
+    let to: number | null = null
+    if (event.key === 'ArrowDown') to = Math.min(at + 1, shown.length - 1)
+    else if (event.key === 'ArrowUp') to = Math.max(at - 1, 0)
+    else if (event.key === 'Home') to = 0
+    else if (event.key === 'End') to = shown.length - 1
+    else if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      if (at >= 0) select(shown[at].id)
+      return
+    } else return
+    event.preventDefault()
+    activateRow(shown[to].id)
+  }
   useEffect(() => {
     const id = focusRowRef.current
-    const row = id ? document.getElementById(id) : null
-    if (!row) return
+    if (!id) return
     focusRowRef.current = null
-    row.focus({ preventScroll: true })
+    rowsRef.current?.focus({ preventScroll: true })
+    activateRow(id)
   })
   const select = useCallback((id: string) => {
     setSelectedId(id)
@@ -569,6 +630,41 @@ export default function MapExplorer({
 
   // The legend sits over the map's corner: it makes way for the keyboard.
   const closeLegend = useCallback(() => setLegendOpen(false), [])
+  // Closed from inside (its close button, or Esc): the focus goes back to
+  // the link that opened it.
+  const dismissLegend = () => {
+    setLegendOpen(false)
+    legendToggleRef.current?.focus()
+  }
+
+  // A phone's hint has done its work the first time the map is moved.
+  const dragHintRef = useRef(dragHint)
+  useEffect(() => {
+    dragHintRef.current = dragHint
+  }, [dragHint])
+  const onUserMove = useCallback(() => {
+    if (!dragHintRef.current) return
+    dragHintRef.current = false
+    setDragHint(false)
+    try {
+      localStorage.setItem(DRAG_HINT_STORAGE_KEY, '1')
+    } catch {
+      // Storage blocked: the hint comes back next visit.
+    }
+  }, [])
+
+  // What floats over the map, for its place names to keep clear of.
+  const overlayRects = useCallback(
+    () =>
+      [
+        ...(explorerRootRef.current?.querySelectorAll<HTMLElement>(
+          '[data-map-cover]'
+        ) ?? []),
+      ]
+        .filter(element => element.offsetParent !== null)
+        .map(element => element.getBoundingClientRect()),
+    []
+  )
 
   // A shared link's pin is shown once the map is there to show it.
   const onMapReady = useCallback(() => {
@@ -614,7 +710,26 @@ export default function MapExplorer({
     const here = onMap.filter(org => mapAreaFor(org.category) === fitArea)
     return fittedStatus(fitArea, here.length, onMap.length - here.length)
   }, [fitArea, shown])
+  // A search with a handful of hits on the map: the view is fitted to them.
+  const fitIds = useMemo(() => {
+    if (!hasQuery) return null
+    const onMap = shown.filter(isPlacedOnMap)
+    return onMap.length > 0 && onMap.length <= SEARCH_FIT_MAX_HITS
+      ? onMap.map(org => org.id)
+      : null
+  }, [hasQuery, shown])
   const overlayOpen = selected !== null || drawerOpen
+  const overlayKey = [
+    drawerOpen,
+    legendOpen,
+    selectedId,
+    categories.length,
+    isFiltered,
+    filtersOpen,
+    pane,
+    singlePane,
+    fitArea,
+  ].join('|')
   const explorerLink = useMemo(
     (): MapExplorerLink => ({
       matchingIds,
@@ -626,6 +741,10 @@ export default function MapExplorer({
       onToggleInactive: toggleInactive,
       fitArea,
       showEveryMatch: hasQuery,
+      fitIds,
+      overlayRects,
+      overlayKey,
+      onUserMove,
       selectedId,
       highlightedId,
       onSelect: select,
@@ -648,6 +767,10 @@ export default function MapExplorer({
       toggleInactive,
       fitArea,
       hasQuery,
+      fitIds,
+      overlayRects,
+      overlayKey,
+      onUserMove,
       selectedId,
       highlightedId,
       select,
@@ -684,7 +807,11 @@ export default function MapExplorer({
             className={`color-teal-bright-300 underline cursor-pointer ${styles['explorer-clear']}`}
             aria-expanded={legendOpen}
             aria-controls={LEGEND_ID}
+            ref={legendToggleRef}
             onClick={() => setLegendOpen(open => !open)}
+            onKeyDown={event => {
+              if (event.key === 'Escape' && legendOpen) setLegendOpen(false)
+            }}
           >
             How to read the map
           </button>
@@ -692,6 +819,7 @@ export default function MapExplorer({
       </div>
 
       <div
+        ref={explorerRootRef}
         className={`container-wide ${styles.explorer}`}
         data-pane={pane}
         data-drawer={drawerOpen ? 'open' : 'closed'}
@@ -706,6 +834,7 @@ export default function MapExplorer({
         >
           <CardsViewTracker page="Map" />
           <div
+            data-map-cover
             className={`${styles['explorer-search-row']} ${styles['explorer-controls']}`}
           >
             <div role="search" className={styles['explorer-search']}>
@@ -716,7 +845,7 @@ export default function MapExplorer({
               <SearchBar
                 className={styles['explorer-search-input']}
                 value={query}
-                onChange={setQuery}
+                onChange={typeQuery}
                 inputRef={searchRef}
                 aria-label="Search organizations"
                 placeholder={`Search ${total} organizations…`}
@@ -738,7 +867,12 @@ export default function MapExplorer({
               className={`border-plus-fill ${styles['explorer-pane-button']}`}
               aria-label={pane === 'map' ? 'Show the list' : 'Show the map'}
               ref={paneButtonRef}
-              onClick={() => setPane(pane === 'map' ? 'list' : 'map')}
+              onClick={() => {
+                // With an org selected the list opens at its card.
+                if (pane === 'list') setPane('map')
+                else if (selectedId) showInList()
+                else setPane('list')
+              }}
             >
               <Icon
                 src={
@@ -752,6 +886,7 @@ export default function MapExplorer({
           </div>
 
           <div
+            data-map-cover
             className={`flex flex-wrap items-center gap-8px ${styles['explorer-controls']} ${styles['explorer-pills']}`}
           >
             {categories.map(category => (
@@ -774,6 +909,8 @@ export default function MapExplorer({
               counts={categoryCounts}
               countLabel
               onToggle={toggleCategory}
+              optionNote={mapAreaFor}
+              onClear={() => setCategories([])}
             />
             <button
               type="button"
@@ -782,28 +919,37 @@ export default function MapExplorer({
               onClick={toggleInactive}
             >
               <Icon src="/images/icons/eye.svg" size={16} />
-              Show inactive · {statusCounts['No longer active'] ?? 0}
+              Show inactive · {inactiveTotal}
             </button>
-            <button
-              type="button"
-              className={`border-plus-fill paragraph-small ${styles['explorer-pill']}${drawerOpen ? ` ${styles['explorer-pill-active']}` : ''}`}
-              aria-expanded={drawerOpen}
-              aria-controls={LIST_ID}
-              ref={listPillRef}
-              onClick={toggleDrawer}
-            >
-              <Icon src="/images/icons/list.svg" size={16} />
-              List · {shown.length}
-            </button>
-            {isFiltered && (
+            {/* A phone has the list button beside the search instead. */}
+            {!singlePane && (
               <button
                 type="button"
-                className={`border-plus-fill paragraph-small ${styles['explorer-pill']}`}
-                onClick={clearAll}
+                className={`border-plus-fill paragraph-small ${styles['explorer-pill']}${drawerOpen ? ` ${styles['explorer-pill-active']}` : ''}`}
+                aria-expanded={drawerOpen}
+                aria-controls={LIST_ID}
+                ref={listPillRef}
+                onClick={toggleDrawer}
               >
-                <Icon src="/images/icons/x.svg" size={16} />
-                Clear all
+                <Icon src="/images/icons/list.svg" size={16} />
+                List · {shown.length}
               </button>
+            )}
+            {isFiltered && (
+              <>
+                {/* With chips in the row, "Clear all" starts the next line. */}
+                {categories.length > 0 && (
+                  <span className={styles['explorer-pills-break']} />
+                )}
+                <button
+                  type="button"
+                  className={`border-plus-fill paragraph-small ${styles['explorer-pill']}`}
+                  onClick={clearAll}
+                >
+                  <Icon src="/images/icons/x.svg" size={16} />
+                  Clear all
+                </button>
+              </>
             )}
           </div>
           {/* Announced apart from the visible count, so a screen reader hears
@@ -835,6 +981,7 @@ export default function MapExplorer({
 
           <section
             id={LIST_ID}
+            data-map-cover
             aria-label="Organizations"
             className={`border-plus-fill drop-shadow-dark ${styles['explorer-drawer']}`}
             hidden={selected !== null && !singlePane}
@@ -894,8 +1041,41 @@ export default function MapExplorer({
             >
               {shown.length > 0 ? (
                 <ul
+                  ref={rowsRef}
                   className={styles['explorer-rows']}
                   style={{ height: shown.length * rowHeight }}
+                  // On a desktop the rows are a listbox, one Tab stop with the
+                  // arrow keys inside it; a phone's cards hold links, so they
+                  // stay a plain list.
+                  {...(singlePane
+                    ? {}
+                    : {
+                        role: 'listbox',
+                        'aria-label': 'Organizations',
+                        tabIndex: 0,
+                        'aria-activedescendant':
+                          activeRowId &&
+                          shown
+                            .slice(rows.start, rows.end)
+                            .some(org => org.id === activeRowId)
+                            ? activeRowId
+                            : undefined,
+                        onKeyDown: onRowsKeyDown,
+                        // Reached with the keyboard (a click focuses the
+                        // list too, and must not scroll it from under the
+                        // pointer): carry on from the active row.
+                        onFocus: event => {
+                          if (!event.currentTarget.matches(':focus-visible'))
+                            return
+                          activateRow(
+                            activeRowId &&
+                              shown.some(org => org.id === activeRowId)
+                              ? activeRowId
+                              : (shown[0]?.id ?? null)
+                          )
+                        },
+                        onBlur: () => setHighlightedId(null),
+                      })}
                 >
                   {shown.slice(rows.start, rows.end).map((org, offset) => (
                     <li
@@ -905,8 +1085,14 @@ export default function MapExplorer({
                       aria-posinset={rows.start + offset + 1}
                       onMouseEnter={() => setHighlightedId(org.id)}
                       onMouseLeave={() => setHighlightedId(null)}
-                      onFocus={() => setHighlightedId(org.id)}
-                      onBlur={() => setHighlightedId(null)}
+                      {...(singlePane
+                        ? {}
+                        : {
+                            id: org.id,
+                            role: 'option',
+                            'aria-selected': org.id === selectedId,
+                            onClick: () => select(org.id),
+                          })}
                     >
                       {singlePane ? (
                         <MapListCard
@@ -917,10 +1103,9 @@ export default function MapExplorer({
                         />
                       ) : (
                         <MapResultRow
-                          id={org.id}
                           org={org}
                           selected={org.id === selectedId}
-                          onSelect={() => select(org.id)}
+                          active={org.id === activeRowId}
                         />
                       )}
                     </li>
@@ -964,11 +1149,25 @@ export default function MapExplorer({
               something to point at. Opening the drawer or a card closes it. */}
           <div
             id={LEGEND_ID}
+            data-map-cover
             role="note"
             aria-label="How to read the map"
             className={`border-plus-fill ${styles['explorer-legend']}`}
             hidden={!legendOpen}
+            onKeyDown={event => {
+              if (event.key !== 'Escape') return
+              event.stopPropagation()
+              dismissLegend()
+            }}
           >
+            <button
+              type="button"
+              className={`${styles['details-close']} ${styles['explorer-legend-close']}`}
+              aria-label="Close how to read the map"
+              onClick={dismissLegend}
+            >
+              <Icon src="/images/icons/x.svg" size={16} />
+            </button>
             <p className="paragraph-small-bold padding-bottom-8px">
               How to read the map
             </p>
@@ -984,8 +1183,16 @@ export default function MapExplorer({
               </li>
             </ul>
           </div>
+          {singlePane && pane === 'map' && dragHint && !selected && (
+            <p
+              className={`border-plus-fill paragraph-xs color-teal-300 ${styles['explorer-drag-hint']}`}
+            >
+              Drag to explore
+            </p>
+          )}
           {fitted && !selected && (
             <p
+              data-map-cover
               className={`border-plus-fill drop-shadow-dark paragraph-small color-teal-300 ${styles['explorer-fitted']}`}
               data-overlay={overlayOpen ? 'open' : undefined}
             >

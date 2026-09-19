@@ -69,6 +69,7 @@ export default function MapListingDetails({
 
   return (
     <section
+      data-map-cover
       aria-label={`${org.title} details`}
       className={`border-plus-fill drop-shadow-dark ${styles['details-card']}`}
     >
