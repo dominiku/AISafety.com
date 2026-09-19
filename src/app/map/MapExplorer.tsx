@@ -573,6 +573,7 @@ export default function MapExplorer({
       showInactive,
       onToggleInactive: toggleInactive,
       fitArea,
+      showEveryMatch: hasQuery,
       selectedId,
       highlightedId,
       onSelect: select,
@@ -590,6 +591,7 @@ export default function MapExplorer({
       showInactive,
       toggleInactive,
       fitArea,
+      hasQuery,
       selectedId,
       highlightedId,
       select,
@@ -666,9 +668,14 @@ export default function MapExplorer({
                 How to read the map
               </p>
               <ul className="paragraph-xs color-teal-300">
-                <li>Each place on the island is a category of work.</li>
+                <li>
+                  Place names are categories: select one to filter the map.
+                </li>
                 <li>A bigger logo marks a larger organization.</li>
-                <li>Zooming in shows more organizations.</li>
+                <li>
+                  A number such as +12 after a place name counts the
+                  organizations that appear when zooming in.
+                </li>
                 <li>Selecting a logo shows its details.</li>
               </ul>
             </aside>

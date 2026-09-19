@@ -94,6 +94,9 @@ export interface MapExplorerLink {
   // The place the view is fitted to (exactly one category is filtered by),
   // or null for the whole island.
   fitArea: string | null
+  // While something is typed in the search, every match shows, even one the
+  // zoom tiers would hold back.
+  showEveryMatch: boolean
   selectedId: string | null
   // The result row being hovered or focused.
   highlightedId: string | null
@@ -154,6 +157,14 @@ const SELECTED_PIN_SCALE = 1.25
 const INACTIVE_CATEGORY = 'No longer active'
 // Screen pixels kept clear when the view is fitted to a place: breathing room
 // at the sides, and the status line along the bottom.
+// Explorer: a pin can be clicked or tapped within at least this many screen
+// pixels, however small it is drawn (WCAG 2.5.8), and on a phone the smallest
+// pin is drawn at least MOBILE_MIN_PIN_PX across.
+const MIN_HIT_PX = 24
+const MOBILE_MIN_PIN_PX = 26
+// Explorer, on a phone: pins carry no names at the resting view; they all do
+// from this many times closer in.
+const MOBILE_LABEL_ZOOM = 1.6
 const FIT_SIDE_ROOM = 48
 const FIT_BOTTOM_ROOM = 112
 
@@ -511,6 +522,14 @@ export default function D3Map({
         // What the name reads at rest, and how many pins stand there.
         restingText: string
         count: number
+        // Explorer: the "+N" badge after the name, for the pins of this place
+        // that only show closer in. null where the name is no button.
+        badge: {
+          group: d3.Selection<SVGGElement, unknown, null, undefined>
+          rect: d3.Selection<SVGRectElement, unknown, null, undefined>
+          text: d3.Selection<SVGTextElement, unknown, null, undefined>
+          count: number
+        } | null
         // Explorer: the category the name toggles (null: it is no button).
         category: string | null
         anchorX: number
@@ -533,6 +552,36 @@ export default function D3Map({
         const primary = primaryCategory(org.category)
         return primary !== null && categories.includes(primary)
       }).length
+    }
+
+    // Explorer: the pill behind a place's name is as wide as the name and its
+    // "+N" badge, so it is laid out again whenever either changes.
+    const layoutAreaPill = (label: string) => {
+      const pill = areaPills.get(label)
+      const box = pill?.text.node()?.getBBox()
+      if (!pill || !box) return
+      let width = box.width + finalPadX * 2
+      const badge = pill.badge
+      if (badge) {
+        badge.group.style('display', badge.count > 0 ? 'inline' : 'none')
+        if (badge.count > 0) {
+          badge.text.text(`+${badge.count}`)
+          const textBox = badge.text.node()?.getBBox()
+          const badgeWidth = (textBox?.width ?? 0) + finalPadX
+          const badgeHeight = box.height + finalPadY * 0.5
+          const left = box.x + box.width + finalPadX * 0.6
+          const middle = box.y + box.height / 2
+          badge.rect
+            .attr('x', left)
+            .attr('y', middle - badgeHeight / 2)
+            .attr('width', badgeWidth)
+            .attr('height', badgeHeight)
+            .attr('rx', badgeHeight / 2)
+          badge.text.attr('x', left + badgeWidth / 2).attr('y', middle)
+          width = left + badgeWidth + finalPadX * 0.5 - (box.x - finalPadX)
+        }
+      }
+      pill.rect.attr('x', box.x - finalPadX).attr('width', width)
     }
 
     scheme.areas.forEach(({ label, x, y }) => {
@@ -591,6 +640,11 @@ export default function D3Map({
           })
       }
 
+      const badgeGroup =
+        category !== null && !isCaption
+          ? labelGroup.append('g').style('display', 'none')
+          : null
+
       const bbox = textEl.node()?.getBBox()
       if (bbox) {
         const rectEl = labelGroup
@@ -608,6 +662,21 @@ export default function D3Map({
           rect: rectEl,
           restingText: textEl.text(),
           count: pinCount,
+          badge: badgeGroup
+            ? {
+                group: badgeGroup,
+                rect: badgeGroup.append('rect').attr('fill', 'var(--teal-900)'),
+                text: badgeGroup
+                  .append('text')
+                  .attr('text-anchor', 'middle')
+                  .attr('dominant-baseline', 'central')
+                  .attr('font-family', 'Inter, sans-serif')
+                  .attr('font-weight', 700)
+                  .attr('font-size', finalFontSize * 0.8)
+                  .attr('fill', '#fff'),
+                count: 0,
+              }
+            : null,
           category: isCaption ? null : category,
           anchorX: xPos,
           anchorY: yPos,
@@ -618,6 +687,16 @@ export default function D3Map({
           width: bbox.width + finalPadX * 2,
           height: bbox.height + finalPadY * 2,
         })
+        // Pins slide off the name's box: it is measured with a two-figure
+        // badge in place, so a badge is not drawn under a pin.
+        const pill = areaPills.get(label)
+        if (pill?.badge) {
+          pill.badge.count = 88
+          layoutAreaPill(label)
+          pill.width = Number(pill.rect.attr('width'))
+          pill.badge.count = 0
+          layoutAreaPill(label)
+        }
       }
     })
 
@@ -637,6 +716,10 @@ export default function D3Map({
     const pins: {
       tier: TierPin
       group: d3.Selection<SVGGElement, unknown, null, undefined>
+      // The pin's name under its disc, and (explorer) the transparent square
+      // that keeps it clickable however small it is drawn.
+      label: d3.Selection<SVGGElement, unknown, null, undefined>
+      hit: d3.Selection<SVGRectElement, unknown, null, undefined> | null
       // The pin's focusable element and the pill behind its name, which the
       // explorer's selection restyles.
       link: SVGElement | null
@@ -853,6 +936,11 @@ export default function D3Map({
 
         pins.push({
           group: itemGroup,
+          label: labelG,
+          hit:
+            hasLink && hasExplorer
+              ? linkEl.append('rect').attr('fill', 'transparent').lower()
+              : null,
           link: linkEl.node() as SVGElement | null,
           labelRect,
           tier: {
@@ -955,6 +1043,16 @@ export default function D3Map({
     }
     const zoomOf = (k: number) =>
       (k * screenScaleAtRest) / REFERENCE_SCREEN_SCALE
+    // Explorer, on a phone: the smallest pin (Small, 0.4 of the base logo) is
+    // never drawn under MOBILE_MIN_PIN_PX. The floor is part of the config,
+    // so the layout keeps the bigger pins apart too.
+    const tierConfig = () => {
+      const config = tierConfigRef.current
+      if (!hasExplorer || !isMobile()) return config
+      const smallest = BASE_LOGO_SIZE * SIZE_TO_SCALE.Small
+      const floor = MOBILE_MIN_PIN_PX / (smallest * REFERENCE_SCREEN_SCALE)
+      return { ...config, minPinScale: Math.max(config.minPinScale, floor) }
+    }
     // Pins slide off the area names; the names themselves never move.
     const obstacles: MapObstacle[] = [...areaPills.values()].map(pill => ({
       x: pill.anchorX + pill.x,
@@ -988,9 +1086,16 @@ export default function D3Map({
     applyPins = (k: number) => {
       appliedK = k
       if (!layout) return
-      const config = tierConfigRef.current
+      const config = tierConfig()
       const z = zoomOf(k)
       const s = pinMapScale(z, config)
+      // Explorer: screen pixels per unit of a pin's own drawing, for the
+      // square that keeps it clickable; and which pins carry names here.
+      const pinUnitPx = screenScaleAtRest * k * s
+      const phone = isMobile()
+      const namesOnPhone = k >= fitTransform().k * MOBILE_LABEL_ZOOM
+      // Pins held back at this zoom, by the place they stand in.
+      const heldBack = new Map<string, number>()
       const labelScale = labelMapScale(z, config, labelCap)
       for (const pill of areaPills.values()) {
         pill.group
@@ -1006,7 +1111,7 @@ export default function D3Map({
       const link = explorerRef.current
       const showAllMatches =
         !!link?.matchingIds && link.matchingIds.size <= EXPLORER_SHOW_ALL_MAX
-      for (const { tier, group } of pins) {
+      for (const { tier, group, label, hit } of pins) {
         const matches = matchesExplorer(tier.id)
         // A hidden non-match has no place in the layout (see applyTiers).
         if (
@@ -1017,12 +1122,41 @@ export default function D3Map({
           continue
         }
         const revealed =
-          (showAllMatches && !!link?.matchingIds?.has(tier.id)) ||
+          ((showAllMatches || link?.showEveryMatch === true) &&
+            !!link?.matchingIds?.has(tier.id)) ||
           (layout.reveal.get(tier.id) ?? 0) <= z
         const at = pinPositionAt(layout, tier.id, z)
         if (revealed) showing.push({ ...tier, ...at })
         else if (tier.scale === 'Large') largeHeldBack++
-        const size = tier.id === link?.selectedId ? s * SELECTED_PIN_SCALE : s
+        const isSelected = tier.id === link?.selectedId
+        const size = isSelected ? s * SELECTED_PIN_SCALE : s
+        if (link) {
+          const showing = revealed || isSelected || tier.id === forcedPinId
+          const place = tier.regions.at(-1)
+          if (!showing && matches && place) {
+            heldBack.set(place, (heldBack.get(place) ?? 0) + 1)
+          }
+          // Names: on a desktop the Large and Medium pins carry theirs (the
+          // layout has kept room for them) and the Small ones join in once
+          // the map is close enough for them all to show; on a phone none do
+          // at the resting view and all do closer in. The selected pin
+          // always does.
+          const named =
+            isSelected ||
+            (phone
+              ? namesOnPhone
+              : tier.scale !== 'Small' || z >= config.smallZoom)
+          label.style('display', named ? 'inline' : 'none')
+          if (hit) {
+            const disc = -tier.top * 2
+            const side = Math.max(disc, MIN_HIT_PX / (pinUnitPx || 1))
+            hit
+              .attr('x', -side / 2)
+              .attr('y', -side / 2)
+              .attr('width', side)
+              .attr('height', side)
+          }
+        }
         group
           .attr('transform', `translate(${at.x}, ${at.y}) scale(${size})`)
           .classed(
@@ -1030,6 +1164,25 @@ export default function D3Map({
             !revealed && tier.id !== forcedPinId && tier.id !== link?.selectedId
           )
           .classed('mapDimmed', !matches)
+      }
+      if (link) {
+        for (const [place, pill] of areaPills) {
+          if (!pill.badge || pill.category === null) continue
+          const count = heldBack.get(place) ?? 0
+          if (count !== pill.badge.count) {
+            pill.badge.count = count
+            layoutAreaPill(place)
+          }
+          const about = `${place}, ${pill.count} organizations`
+          const more =
+            count > 0 ? `, ${count} more pins appear when you zoom in` : ''
+          pill.group.attr(
+            'aria-label',
+            pill.category === INACTIVE_CATEGORY
+              ? `Show inactive organizations (${about})`
+              : `Filter by ${pill.category} (${about}${more})`
+          )
+        }
       }
       if (tierReadoutRef.current) {
         const { pairs, onObstacles } = countOverlaps(
@@ -1064,7 +1217,7 @@ export default function D3Map({
           )
           .map(pin => pin.tier),
         obstacles,
-        tierConfigRef.current,
+        tierConfig(),
         zoomOf(1),
         focus
       )
@@ -1426,25 +1579,13 @@ export default function D3Map({
               active ? 'var(--teal-900)' : dashed ? 'var(--teal-300)' : '#fff'
             )
           // The name may have changed length: the pill follows it.
-          const box = pill.text.node()?.getBBox()
-          if (box) {
-            pill.rect
-              .attr('x', box.x - finalPadX)
-              .attr('width', box.width + finalPadX * 2)
-          }
+          layoutAreaPill(label)
           pill.rect
             .attr('fill', active ? 'var(--teal-bright-400)' : AREA_PILL_FILL)
             .attr('stroke', dashed ? 'var(--teal-300)' : 'none')
             .attr('stroke-width', 2)
             .attr('stroke-dasharray', dashed ? '8 6' : null)
-          pill.group
-            .attr('aria-pressed', pressed)
-            .attr(
-              'aria-label',
-              isGraveyard
-                ? `Show inactive organizations (${label}, ${pill.count} organizations)`
-                : `Filter by ${pill.category} (${label}, ${pill.count} organizations)`
-            )
+          pill.group.attr('aria-pressed', pressed)
         }
         for (const pin of pins) {
           pin.labelRect.attr(
