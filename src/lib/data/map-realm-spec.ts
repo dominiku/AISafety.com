@@ -14,8 +14,8 @@
 // What is kept from Søren's background spec of 18 September and the first
 // sketch: the Talent pipeline as a band running in from the west shore, with
 // the road along the middle of it and the castle town (Career support) at
-// its east end, in the very middle of the island, now as an octagon the other
-// realms' borders run out from like the spokes of a wheel; Policy and strategy
+// its east end, in the very middle of the island, now as an uneven octagon
+// the other realms' borders run out from like the spokes of a wheel; Policy and strategy
 // and Technical research as the two bands running east from the castle, with
 // the crossroads where their border meets it; Advocacy as a U of its own land
 // around a small cove by the castle, with a boardwalk between them; footpaths,
@@ -38,6 +38,22 @@ import type { Point, RealmMapSpec } from './map-realm-layout'
 // corner, which the outline leaves as open sea below the Talent pipeline's
 // shore and west of Field infrastructure's.
 export const MAP_35_GRAVEYARD_MOVE: Point = [-48.5, 1]
+
+// The castle town's ground: an octagon with its corners at the angles of a
+// regular one but its sides of uneven length, so it does not look ruled. It is
+// about two units across and sits around (0, 0); the layout scales it to the
+// land the town needs. The Talent pipeline's polygon below ends in the same
+// shape (this outline times 3.55, about the seed), so the town fills it.
+const CASTLE_TOWN: Point[] = [
+  [-0.28, -0.94],
+  [0.62, -0.94],
+  [1.04, -0.52],
+  [1.04, 0.28],
+  [0.3, 1.02],
+  [-0.48, 1.02],
+  [-0.98, 0.52],
+  [-0.98, -0.24],
+]
 
 export const MAP_35_SPEC: RealmMapSpec = {
   // The castle town: every stretch of coast is in sight of it.
@@ -88,7 +104,7 @@ export const MAP_35_SPEC: RealmMapSpec = {
       [-2, -2],
       [26, -2],
       [26, 12.2],
-      [28.4, 14.26],
+      [28.4, 14.4],
       [2, 13.7],
       [-2, 13.7],
     ],
@@ -97,12 +113,12 @@ export const MAP_35_SPEC: RealmMapSpec = {
     'Talent pipeline': [
       [-2, 13.7],
       [2, 13.7],
-      [30.05, 14.3],
-      [32.95, 14.3],
-      [35, 16.35],
-      [35, 19.25],
-      [32.95, 21.3],
-      [30.05, 21.3],
+      [30.51, 14.46],
+      [33.7, 14.46],
+      [35.19, 15.95],
+      [35.19, 18.79],
+      [32.57, 21.42],
+      [29.8, 21.42],
       [13, 22.8],
       [10.5, 27],
       [8, 36],
@@ -111,31 +127,31 @@ export const MAP_35_SPEC: RealmMapSpec = {
     // Under the band and the castle town, as far as Technical research.
     'Field infrastructure': [
       [13, 22.8],
-      [30.05, 21.3],
-      [32.95, 21.3],
+      [29.8, 21.42],
+      [32.57, 21.42],
       [46.6, 26.6],
       [48, 36],
       [8, 36],
       [10.5, 27],
     ],
     'Policy and strategy': [
-      [32.95, 14.3],
+      [33.7, 14.46],
       [36.4, 13.4],
       [37.4, 10],
       [37.4, -2],
       [64, -2],
       [64, 17.8],
-      [35, 17.8],
-      [35, 16.35],
+      [35.19, 17.8],
+      [35.19, 15.95],
     ],
     'Technical research': [
-      [35, 17.8],
+      [35.19, 17.8],
       [64, 17.8],
       [64, 36],
       [48, 36],
       [46.6, 26.6],
-      [32.95, 21.3],
-      [35, 19.25],
+      [32.57, 21.42],
+      [35.19, 18.79],
     ],
   },
   anchorage: {
@@ -147,9 +163,9 @@ export const MAP_35_SPEC: RealmMapSpec = {
       [37.4, -2],
       [37.4, 10],
       [36.4, 13.4],
-      [32.95, 14.3],
-      [30.05, 14.3],
-      [28.4, 14.26],
+      [33.7, 14.46],
+      [30.51, 14.46],
+      [28.4, 14.4],
       [26, 12.2],
     ],
     water: [
@@ -218,7 +234,10 @@ export const MAP_35_SPEC: RealmMapSpec = {
     // footpaths run out to the east, the boardwalk north to the cove, and
     // every realm but Media meets one of its eight sides. Its ground is the
     // Talent pipeline's.
-    'Career support and placement': { seed: [31.5, 17.8], shape: 'octagon' },
+    'Career support and placement': {
+      seed: [31.5, 17.8],
+      outline: CASTLE_TOWN,
+    },
     // The Forum: four entries, one built landmark in the corner of Media
     // between the cove's land and the Talent pipeline.
     'Forums and online communities': { seed: [26, 12.2] },
@@ -248,7 +267,7 @@ export const MAP_35_SPEC: RealmMapSpec = {
   ],
   // From the top of the castle town to the foot of the cove.
   boardwalk: [
-    [31.5, 14.2],
+    [31.5, 14.4],
     [31.5, 12.5],
   ],
   coastFeatures: [
@@ -257,8 +276,8 @@ export const MAP_35_SPEC: RealmMapSpec = {
   ],
   landmarks: {
     arrivalHarbour: [5, 17.5],
-    crossroads: [35, 17.8],
-    departureHarbour: [31.5, 14.3],
+    crossroads: [35.19, 17.8],
+    departureHarbour: [31.5, 14.46],
     controlDam: [38, 17.8],
   },
 }

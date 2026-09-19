@@ -101,11 +101,11 @@ export interface RealmMapSpec {
     right: string[]
   }[]
   // Districts that are a town: a block, not a share of the open land. It
-  // grows as a square around `seed`, or as a regular octagon (a square with
-  // its corners cut) for a town that is the hub the borders run out from. Put
-  // the seed on a corner or an edge of the realm and the town fills that
-  // corner or end of it.
-  blocks?: Record<string, { seed: Point; shape?: 'square' | 'octagon' }>
+  // grows around `seed` as a square, or as the `outline` given: a polygon
+  // around (0, 0), about one unit across, that is scaled up until the town
+  // holds its share. Put the seed on a corner or an edge of the realm and the
+  // town fills that corner or end of it.
+  blocks?: Record<string, { seed: Point; outline?: Point[] }>
   // Footpaths, each as the districts it calls at, in order. The first is
   // where it sets out from, which it does not run through the middle of.
   trails?: string[][]
@@ -193,6 +193,14 @@ export function pinFootprint(scale: string | null): number {
   const size = (scale ?? 'Medium').toLowerCase()
   return size === 'large' ? 4 : size === 'small' ? 1 : 2
 }
+
+// A town with no outline of its own: a square one unit across.
+const SQUARE_TOWN: Point[] = [
+  [-0.5, -0.5],
+  [0.5, -0.5],
+  [0.5, 0.5],
+  [-0.5, 0.5],
+]
 
 const snapTo = (value: number, grid: number) => Math.round(value / grid) * grid
 
@@ -943,74 +951,41 @@ export function layoutRealmMap(
     const byDistrict = groupBy(inRealm, pin => pin.district)
     const realmFootprint = footprintOf(inRealm)
 
-    // The towns first: each a square (or octagon) grown around its seed until
-    // it holds the district's share of the realm. What they take is no longer open to
-    // the other districts, and they are drawn over them.
+    // The towns first: each its outline (a square, if the spec gives none)
+    // grown around its seed until it holds the district's share of the realm.
+    // What they take is no longer open to the other districts, and they are
+    // drawn over them.
     let open = room
     const towns: typeof planned = []
     for (const [district, inDistrict] of byDistrict) {
       const block = spec.blocks?.[district]
       if (!block) continue
       const target = (footprintOf(inDistrict) / realmFootprint) * room.length
-      const squareOf = (side: number) => {
-        const x0 = block.seed[0] - side / 2
-        const y0 = block.seed[1] - side / 2
-        return { x0, y0, x1: x0 + side, y1: y0 + side }
-      }
-      // An octagon is the square less its corners: the cut runs where the
-      // distances from the seed along x and y add up to half the side times
-      // the square root of two.
-      const octagon = block.shape === 'octagon'
-      const inSquare = (side: number) => {
-        const { x0, y0, x1, y1 } = squareOf(side)
-        const reach = (side / 2) * Math.SQRT2
-        return open.filter(
-          i =>
-            xs[i] >= x0 &&
-            xs[i] < x1 &&
-            ys[i] >= y0 &&
-            ys[i] < y1 &&
-            (!octagon ||
-              Math.abs(xs[i] - block.seed[0]) +
-                Math.abs(ys[i] - block.seed[1]) <=
-                reach)
-        )
+      const unit = block.outline ?? SQUARE_TOWN
+      const outlineAt = (scale: number): Point[] =>
+        unit.map(([x, y]) => [
+          block.seed[0] + x * scale,
+          block.seed[1] + y * scale,
+        ])
+      const within = (scale: number) => {
+        const outline = outlineAt(scale)
+        return open.filter(i => insidePolygon(xs[i], ys[i], outline))
       }
       let low = 0
       let high = 48
       for (let round = 0; round < 20; round++) {
-        const side = (low + high) / 2
-        if (inSquare(side).length < target) low = side
-        else high = side
+        const scale = (low + high) / 2
+        if (within(scale).length < target) low = scale
+        else high = scale
       }
-      const { x0, y0, x1, y1 } = squareOf(high)
-      const taken = new Set(inSquare(high))
+      const taken = new Set(within(high))
       open = open.filter(i => !taken.has(i))
-      // How far in from each corner of the square an octagon's cut starts.
-      const cut = octagon ? (high / 2) * (2 - Math.SQRT2) : 0
-      const outline: Point[] = octagon
-        ? [
-            [x0 + cut, y0],
-            [x1 - cut, y0],
-            [x1, y0 + cut],
-            [x1, y1 - cut],
-            [x1 - cut, y1],
-            [x0 + cut, y1],
-            [x0, y1 - cut],
-            [x0, y0 + cut],
-          ]
-        : [
-            [x0, y0],
-            [x1, y0],
-            [x1, y1],
-            [x0, y1],
-          ]
       towns.push({
         district,
         realm,
         pins: inDistrict,
         block: true,
-        pieces: [outline],
+        pieces: [outlineAt(high)],
       })
     }
 

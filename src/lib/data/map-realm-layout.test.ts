@@ -212,20 +212,27 @@ describe('layoutRealmMap', () => {
     expect(width / height).toBeLessThan(1.33)
   })
 
-  it('makes a town an octagon when the spec asks for one', () => {
+  it('grows a town to the outline the spec gives it', () => {
+    // A lopsided diamond around the seed.
+    const unit: Point[] = [
+      [0, -0.6],
+      [0.5, 0],
+      [0, 0.4],
+      [-0.4, 0],
+    ]
     const hub = layoutRealmMap(pins, graveyard, {
       ...spec,
-      blocks: { 'East two': { seed: [44, 22], shape: 'octagon' } },
+      blocks: { 'East two': { seed: [44, 22], outline: unit } },
     })
     const town = hub.districts.find(d => d.district === 'East two')!
     const [outline] = town.pieces
-    expect(outline).toHaveLength(8)
-    // All eight sides are the same length, and it holds its pins.
-    const sides = outline.map((p, i) => {
-      const q = outline[(i + 1) % outline.length]
-      return Math.hypot(q[0] - p[0], q[1] - p[1])
+    // The same shape, scaled up about the seed.
+    const scale = (outline[1][0] - 44) / unit[1][0]
+    expect(scale).toBeGreaterThan(1)
+    outline.forEach(([x, y], n) => {
+      expect(x).toBeCloseTo(44 + unit[n][0] * scale, 5)
+      expect(y).toBeCloseTo(22 + unit[n][1] * scale, 5)
     })
-    for (const side of sides) expect(side).toBeCloseTo(sides[0], 5)
     for (const pin of pins.filter(p => p.district === 'East two')) {
       const spot = hub.positions.get(pin.id)!
       expect(inside([spot.x, spot.y], outline), pin.id).toBe(true)
