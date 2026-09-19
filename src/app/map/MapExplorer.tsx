@@ -380,12 +380,14 @@ export default function MapExplorer({
       <Suspense fallback={null}>
         <ParamSync onParams={readUrl} />
       </Suspense>
-      <div className="container-wide padding-top-24px padding-bottom-24px">
-        <h1 className="padding-bottom-8px">Map of AI Existential Safety</h1>
+      <div className="container-wide padding-top-8px padding-bottom-40px">
+        <h1 className={`padding-bottom-12px ${styles['explorer-title']}`}>
+          Map of AI Existential Safety
+        </h1>
         {lastUpdatedIso && (
           <RelativeDate
             iso={lastUpdatedIso}
-            className="paragraph-small color-teal-300"
+            className="paragraph-xs color-white"
           />
         )}
       </div>
@@ -413,8 +415,16 @@ export default function MapExplorer({
           className={styles['explorer-list']}
         >
           <CardsViewTracker page="Map" />
-          <div role="search" className="padding-bottom-16px">
+          <div
+            role="search"
+            className={`padding-bottom-16px ${styles['explorer-search']}`}
+          >
+            <span
+              className={styles['explorer-search-icon']}
+              aria-hidden="true"
+            />
             <SearchBar
+              className={styles['explorer-search-input']}
               value={query}
               onChange={setQuery}
               inputRef={searchRef}
@@ -457,7 +467,7 @@ export default function MapExplorer({
             {isFiltered && (
               <button
                 type="button"
-                className={`paragraph-xs-bold color-teal-300 underline cursor-pointer ${styles['explorer-clear']}`}
+                className={`paragraph-small-bold color-teal-bright-300 underline cursor-pointer ${styles['explorer-clear']}`}
                 onClick={clearAll}
               >
                 Clear all
@@ -545,14 +555,7 @@ export default function MapExplorer({
             tabIndex={collapsed ? -1 : undefined}
             onClick={toggleCollapsed}
           >
-            <Icon
-              src={
-                collapsed
-                  ? '/images/icons/arrow-right.svg'
-                  : '/images/icons/arrow-left.svg'
-              }
-              size={16}
-            />
+            <Icon src="/images/icons/chevron-down.svg" size={16} />
           </button>
           {collapsed && (
             <button

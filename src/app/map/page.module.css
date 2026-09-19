@@ -402,6 +402,62 @@
   list-style: none;
 }
 
+/* The page title is smaller than the site's 72px h1: this page is a tool,
+   and every line the title takes is a line the map and the list lose.
+   Tracking keeps the h1's -6%. (Figma: map3.5_v1, "Page Title".) */
+.explorer-title {
+  font-size: 48px;
+  letter-spacing: -2.88px;
+}
+
+/* The design system's inline search field (Figma: Search Field, Inline):
+   a 48px pill on a 7% white fill, with the magnifying glass inside. */
+.explorer-search {
+  position: relative;
+}
+
+.explorer-search-icon {
+  position: absolute;
+  top: 24px;
+  left: 16px;
+  z-index: 1;
+  width: 16px;
+  height: 16px;
+  transform: translateY(-50%);
+  background-color: var(--white);
+  -webkit-mask: url('/images/icons/magnifying-glass.svg') no-repeat center /
+    contain;
+  mask: url('/images/icons/magnifying-glass.svg') no-repeat center / contain;
+  pointer-events: none;
+}
+
+.explorer-search-input,
+select.explorer-sort {
+  height: 48px;
+  border-color: var(--teal-500);
+  border-radius: 24px;
+  background-color: color-mix(in srgb, var(--white) 7%, transparent);
+  color: var(--white);
+  font-size: 15px;
+  letter-spacing: -0.3px;
+}
+
+.explorer-search-input {
+  padding-left: 42px;
+}
+
+.explorer-search-input::placeholder {
+  color: color-mix(in srgb, var(--white) 55%, transparent);
+}
+
+/* iOS zooms the page when it focuses a field under 16px (same fix as the
+   map's own search box). */
+@media (max-width: 991px) and (pointer: coarse) {
+  .explorer-search-input {
+    font-size: 16px;
+  }
+}
+
 .explorer-collapsed .explorer-list {
   display: none;
 }
@@ -431,18 +487,26 @@
   width: 28px;
   height: 64px;
   transform: translateY(-50%);
-  border: 1px solid var(--teal-bright-800);
+  border: 1px solid var(--teal-700);
   border-left: none;
-  border-radius: 0 8px 8px 0;
-  background-color: var(--teal-bright-850);
-  color: var(--teal-300);
+  border-radius: 0 12px 12px 0;
+  background-color: var(--teal-850);
+  color: var(--white);
   cursor: pointer;
-  transition: all var(--hover-transition);
+  transition: background-color var(--hover-transition);
 }
 
 .explorer-edge-tab:hover {
-  border-color: var(--teal-bright-750);
-  color: var(--white);
+  background-color: var(--teal-800);
+}
+
+/* One chevron, turned: left to hide the list, right to show it. */
+.explorer-edge-tab > span {
+  transform: rotate(90deg);
+}
+
+.explorer-collapsed .explorer-edge-tab > span {
+  transform: rotate(-90deg);
 }
 
 .explorer-show-list {
@@ -472,8 +536,8 @@
   background: none;
 }
 
-.explorer-sort {
-  width: auto;
+select.explorer-sort {
+  width: 180px;
 }
 
 .explorer-card-selected {
