@@ -61,10 +61,10 @@ const TILES = `
   ..  ..  Fo  Fo~ Fo~ Ne~ Ne  Ne  Fr  Gr  cv! Pa  Pa  Go  Th  Th! Th  Lo  ..
   ..  ..  Fo~ Fo! Fo  Ne  Ne~ Ne~ Fr  Gr  cv  Pa  Ma  Ma  Ma! St  Lo  ..  ..
   ..  In! In  In  Fb  Pp  Pp  Pp  Fr~ Ca~ Ca  Ca  Ma  Ma  St  Ev  Ev  mt~ ..
-  ..  hb  hb  In= Fb= Pp= Pp= Tp= Tp= Ca= kp  Ca~ Al~ Al~ Al  Ev~ Ev~ Ip  ..
-  ..  In  hb  In  Fb  Tp  Tp! Tp  Tp  Hu  Ca  Gm  Al  Al  Al~ Co  Ip  Ip! ..
+  ..  hb  hb  In= Fb= Pp= Pp= Tp= Ca= Ca= kp  Ca~ Al~ Al~ Al  Ev~ Ev~ Ip  ..
+  ..  In  hb  In  Fb  Tp  Tp! Tp  Ca  Hu  Ca  Gm  Al  Al  Al~ Co  Ip  Ip! ..
   ..  ..  In  Tp  Tp  Tp  Tp  Op  Hu  Gm  Gm  Gm  Gm  Co  Co  Co! Cp  Cp! ..
-  Gy! Gy  ..  ..  ..  Op  Op  To  Hu  Gm  Gm! Gm  Vc  Vc  Co  Cp  Cp  ..  ..
+  Gy! Gy  ..  ..  Tp  Op  Op  To  Hu  Gm  Gm! Gm  Vc  Vc  Co  Cp  Cp  ..  ..
   Gy  Gy  Gy  ..  ..  ..  ..  ..  To  To  Gm  Gm  ..  ..  ..  ..  ..  ..  ..
   ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..
 `
@@ -109,10 +109,11 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
       landmark: { symbol: 'cave', width: 1.7, height: 1.63 } },
     { code: 'Ip', district: 'Interpretability and model understanding', realm: 'Technical research', height: 5.5,
       landmark: { symbol: 'range', width: 2.8, height: 1.98 } },
-    { code: 'Cp', district: 'Capabilities research', realm: 'Technical research', height: 3.5,
+    { code: 'Cp', district: 'Capabilities research', realm: 'Technical research', height: 3.5, walled: true,
       landmark: { symbol: 'skull-mountain', width: 2.6, height: 2.25 } },
-    { code: 'Gy', district: QUIET_REALM, realm: QUIET_REALM, height: 1,
-      landmark: { symbol: 'gravestones', width: 3, height: 1.42 } },
+    // The closed orgs: sunken ships, on open water off the south-west coast.
+    { code: 'Gy', district: QUIET_REALM, realm: QUIET_REALM, height: 0, sunken: true,
+      landmark: { symbol: 'sailboat', width: 1.7, height: 1.4 } },
   ],
   // prettier-ignore
   features: [
@@ -123,10 +124,12 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
     { code: 'hb', kind: 'water', height: 0 },
     // The high peak the river rises on.
     { code: 'mt', kind: 'scenery', realm: 'Technical research', height: 6.5 },
-    // The castle's keep, level with the six tiles of Career support round it:
-    // the river circles it as a moat and the road ends at its bridge.
+    // The castle's keep, level with the six tiles of Career support round it.
+    // The castle is larger than the keep's tile; the river circles it as a
+    // moat through the middles of those six tiles, and the road ends at its
+    // bridge. Career support's logos stand outside the moat.
     { code: 'kp', kind: 'keep', realm: 'Talent pipeline', height: 3,
-      landmark: { symbol: 'castle', width: 3.7, height: 2.31 } },
+      landmark: { symbol: 'castle', width: 5, height: 3.12 } },
   ],
   river: { width: 0.85, branch: 0.78 },
   road: { width: 0.55 },

@@ -338,6 +338,15 @@ describe('the Map 3.5 hex map', () => {
     expect(layout.unplaced).toEqual([])
   })
 
+  it('lays the closed orgs on open water, as sunken ships', () => {
+    const wrecks = layout.tiles.filter(tile => tile.code === 'Gy')
+    expect(wrecks.length).toBeGreaterThan(0)
+    for (const tile of wrecks) {
+      expect(tile.sunken).toBe(true)
+      expect(tile.height).toBe(0)
+    }
+  })
+
   it('is one island, but for the closed orgs’ islet', () => {
     expect(strandedTiles(layout, MAP_35_HEX_ISLETS)).toEqual([])
   })
@@ -352,10 +361,22 @@ describe('the Map 3.5 hex map', () => {
       expect(tile.district).toBe('Career support and placement')
       expect(tile.state).toBe('used')
     }
-    // Its logos need no more than those six.
+    // The moat runs through the middles of those six, and the castle fills
+    // what is inside it, so Career support has a little more ground outside.
     expect(
       layout.tiles.filter(tile => tile.code === 'Ca' && tile.state === 'used')
-    ).toHaveLength(6)
+        .length
+    ).toBeGreaterThanOrEqual(6)
+    const moat = layout.pieces.find(piece => piece.closed)!
+    ring.forEach(tile => {
+      expect(
+        moat.points.some(
+          point =>
+            Math.hypot(point[0] - tile.center[0], point[1] - tile.center[1]) <
+            1e-6
+        )
+      ).toBe(true)
+    })
   })
 
   it('has a delta of several mouths, and falls the viewer can see', () => {

@@ -71,10 +71,21 @@ const TONE_LIGHTNESS = 0.085
 const TONE_HUE = 5
 // DESIGN REVIEW (Melissa): the classic map's three greens are one hue, light,
 // mid and dark, and side by side as whole realms they were hard to tell
-// apart. Here each green realm's ground is turned a little (degrees of hue):
-// Media and discourse toward the blue of its delta, Policy and strategy
-// toward a leafier green; the Talent pipeline keeps the classic green.
-const REALM_HUE: Record<string, number> = { media: 14, policy: -24 }
+// apart. Here the Talent pipeline's ground is turned (degrees of hue) toward
+// a leafier, more verdant green; Media and discourse keeps the classic light
+// wetland green for its delta; Policy and strategy becomes plains (below).
+const REALM_HUE: Record<string, number> = { talent: -22 }
+// DESIGN REVIEW (Melissa): Policy and strategy as open plains: a dry grass
+// ground in place of the classic dark green, so that it reads apart from the
+// Talent pipeline's and the delta's greens at a glance.
+const POLICY_PLAINS: Partial<RealmTheme> = {
+  tones: ['#b9c76a'],
+  cliff: { lip: '#cdd884', face: '#8d9c47', foot: '#66742f' },
+  growth: '#8d9c47',
+}
+const TURNED_SATURATION = 0.8
+// The peaks that wall a forbidding district in.
+const WALL = { lit: '#972f00', shade: '#571f02' }
 // A thin dark line along the edge of every district, over its rim.
 const BORDER_LINE = { width: 2.5, opacity: 0.55 }
 // How much darker than the ground a district's rim is, and a tile's
@@ -97,8 +108,14 @@ const COAST_BORDER = { outer: 0.95, inner: 0.4 }
 // Sea tiles are drawn this far past the board, so zooming out shows no edge.
 const SEA_REACH = 8
 
-const themeFor = (realm: string | null) =>
-  realm === QUIET_REALM ? QUIET_THEME : themeOf(realm ?? undefined)
+const realmKey = (realm: string | null) =>
+  (realm ?? '').split(' ')[0].toLowerCase()
+const themeFor = (realm: string | null): RealmTheme =>
+  realm === QUIET_REALM
+    ? QUIET_THEME
+    : realmKey(realm) === 'policy'
+      ? { ...themeOf(realm ?? undefined), ...POLICY_PLAINS }
+      : themeOf(realm ?? undefined)
 
 // A color as hue (degrees), saturation and lightness (of 1), and back.
 function toHsl(hex: string): [number, number, number] {
@@ -148,7 +165,9 @@ export function districtTone(
   count: number,
   turn = 0
 ) {
-  const [h, s, l] = toHsl(base)
+  const [h, full, l] = toHsl(base)
+  // A turned green is calmed a little, or it glares.
+  const s = turn === 0 ? full : full * TURNED_SATURATION
   if (count <= 1) return toHex(h + turn, s, l)
   const reach = Math.ceil((count - 1) / 2)
   const step = (index % 2 === 1 ? 1 : -1) * Math.ceil(index / 2)
@@ -188,7 +207,8 @@ export function hexBackdropMarkup(
     hexCorners(cell, view.size, scale).map(corner =>
       projectPoint(view, corner, 0)
     )
-  const land = layout.tiles.filter(tile => tile.state !== 'sea')
+  // Sunken ships are not land: the sea and its border pass under them.
+  const land = layout.tiles.filter(tile => tile.state !== 'sea' && !tile.sunken)
   const landCells = new Set(land.map(tile => hexKey(tile)))
   for (let col = -SEA_REACH; col < layout.columns + SEA_REACH; col++) {
     for (let row = -SEA_REACH; row < layout.rows + SEA_REACH; row++) {
@@ -506,9 +526,37 @@ export function hexBackdropMarkup(
     for (const spot of spots) out.push(terrainDetail(theme, spot, g, true))
   }
 
+  // A wall of dark peaks along the sides of a tile that are the edge of a
+  // walled district: the far sides' behind whatever stands on the tile, the
+  // near sides' in front of it.
+  const drawWall = (tile: HexLaidTile, sides: number[]) => {
+    const poly = (points: Point[], fill: string) =>
+      `<path d="M${points.map(xy).join('L')}Z" fill="${fill}"/>`
+    for (const k of sides) {
+      if (!tile.edges[k]) continue
+      const [a, b] = [tile.top[k], tile.top[(k + 1) % 6]]
+      ;[0.14, 0.38, 0.62, 0.86].forEach((t, n) => {
+        const roll = Math.sin(
+          (tile.col * 7 + tile.row * 13 + k * 5 + n) * 12.9898
+        )
+        const jitter = roll * 43758.5453 - Math.floor(roll * 43758.5453)
+        const x = a[0] + (b[0] - a[0]) * t
+        const foot = a[1] + (b[1] - a[1]) * t + 0.12
+        const w = 0.8 + jitter * 0.45
+        const h = 0.95 + (1 - jitter) * 0.6
+        const peak: Point = [x - w * 0.06, foot - h]
+        const fold: Point = [x + w * 0.14, foot]
+        out.push(
+          poly([[x - w / 2, foot], peak, fold], WALL.lit),
+          poly([peak, [x + w / 2, foot], fold], WALL.shade)
+        )
+      })
+    }
+  }
+
   layout.tiles.forEach((tile, n) => {
     if (tile.state === 'sea' || tile.ref === null) return
-    const turn = REALM_HUE[(tile.realm ?? '').split(' ')[0].toLowerCase()] ?? 0
+    const turn = REALM_HUE[realmKey(tile.realm)] ?? 0
     const ground = themeFor(tile.realm)
     // A realm whose ground is turned has its cliffs turned with it.
     const theme: RealmTheme =
@@ -522,7 +570,9 @@ export function hexBackdropMarkup(
               foot: districtTone(ground.cliff.foot, 0, 1, turn),
             },
           }
-    if (tile.state !== 'water') {
+    // Sunken ships lie on open water: no tile is drawn under them.
+    const solid = tile.state !== 'water' && !tile.sunken
+    if (solid) {
       drawSlab(
         tile,
         districtTone(theme.tones[0], tile.tone, tile.tones, turn),
@@ -530,6 +580,8 @@ export function hexBackdropMarkup(
         n
       )
     }
+    // Corners run E, SE, SW, W, NW, NE: sides 3 to 5 are the far ones.
+    if (tile.walled) drawWall(tile, [3, 4, 5])
     drawPieces(
       layout.pieces.filter(piece => piece.tile === tile.ref),
       `hex-path-${n}`
@@ -550,16 +602,32 @@ export function hexBackdropMarkup(
         `<path d="${d}" fill="none" stroke="${PLANK}" stroke-width="${across}" stroke-dasharray="7 3"/>`
       )
     }
-    if (tile.state !== 'water') drawCountry(tile, theme)
+    if (solid) drawCountry(tile, theme)
     if (pins) {
       for (const other of layout.tiles) {
         const mark = other.landmark
         if (!mark || mark.after !== tile.ref) continue
+        const use = (
+          symbol: string,
+          dx: number,
+          dy: number,
+          scale: number,
+          tilt: number
+        ) => {
+          const [w, h] = [mark.width * scale * g, mark.height * scale * g]
+          const [cx, cy] = [(mark.x + dx) * g, (mark.y + dy) * g]
+          return `<use href="#${symbol}" x="${(cx - w / 2).toFixed(1)}" y="${(cy - h / 2).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}"${tilt ? ` transform="rotate(${tilt} ${cx.toFixed(1)} ${cy.toFixed(1)})" opacity="0.8"` : ''}/>`
+        }
         out.push(
-          `<use href="#${mark.symbol}" x="${((mark.x - mark.width / 2) * g).toFixed(1)}" y="${((mark.y - mark.height / 2) * g).toFixed(1)}" width="${(mark.width * g).toFixed(1)}" height="${(mark.height * g).toFixed(1)}"/>`
+          other.sunken
+            ? // Wrecks: the art heeled over, half under.
+              use(mark.symbol, -0.7, 0, 1, -28) +
+                use(mark.symbol, 0.9, 0.35, 0.7, 152)
+            : use(mark.symbol, 0, 0, 1, 0)
         )
       }
     }
+    if (tile.walled) drawWall(tile, [0, 1, 2])
   })
 
   return `<defs>${clips.join('')}</defs>${out.join('')}`

@@ -24,7 +24,7 @@
 // highest tile) tile by tile through the middle of the sides they share. It
 // may part, and then runs narrower; it must never run uphill (that throws);
 // where it reaches the coast it has a mouth. Round the keep it runs as a
-// moat along the keep's sides. Where it steps down a side the viewer can see
+// moat through the middles of the six tiles about it. Where it steps down a side the viewer can see
 // it falls; where the side faces away, it goes over the far lip. The road is
 // joined up the same way, from the keep outward.
 //
@@ -70,6 +70,11 @@ export interface HexDistrictSpec {
   height: number
   // Tiles it takes up however few its logos are.
   minTiles?: number
+  // Ringed by a wall of dark peaks along its edge (a forbidding country).
+  walled?: boolean
+  // Not land at all: its logos lie on open water (the closed orgs, as
+  // sunken ships). Its tiles are not drawn and its height is 0.
+  sunken?: boolean
   // Stands on the district's tile marked "!", which then holds no logos.
   landmark?: HexLandmarkArt
 }
@@ -143,6 +148,10 @@ export interface HexLaidTile extends HexGridTile {
   // Levels above the sea as drawn: 0 for sea, whatever is planned there.
   height: number
   state: HexTileState
+  // Open water with logos on it, not land (see HexDistrictSpec.sunken).
+  sunken: boolean
+  // Its district is ringed by peaks (see HexDistrictSpec.walled).
+  walled: boolean
   district: string | null
   realm: string | null
   // The district's place among its realm's districts, and how many those
@@ -260,6 +269,8 @@ interface Plateau {
   // stretch of it.
   edge: { a: Point; b: Point; clear: number }[]
   lines: { points: Point[]; halfWidth: number; closed?: boolean }[]
+  // Ground a landmark that reaches past its own tile stands on.
+  areas: { x: number; y: number; rx: number; ry: number }[]
 }
 
 // A plateau's lattice of spots, in the order they are tried, each with the
@@ -316,6 +327,13 @@ function plateauSpots(
             gap / 2
         )
       }
+    }
+    for (const area of plateau.areas) {
+      const reach = Math.hypot(
+        (spot[0] - area.x) / area.rx,
+        (spot[1] - area.y) / area.ry
+      )
+      room = Math.min(room, (reach - 1) * Math.min(area.rx, area.ry))
     }
     return room
   }
@@ -374,9 +392,13 @@ export function layoutHexMap(
   const { view } = spec
   const districtByCode = new Map(spec.districts.map(d => [d.code, d]))
   const featureByCode = new Map(spec.features.map(f => [f.code, f]))
-  for (const { code, height } of spec.districts) {
-    if (!(height > 0)) {
-      throw new Error(`Hex map: district "${code}" needs a height above 0`)
+  for (const { code, height, sunken } of spec.districts) {
+    if (sunken ? height !== 0 : !(height > 0)) {
+      throw new Error(
+        sunken
+          ? `Hex map: the sunken district "${code}" lies at height 0`
+          : `Hex map: district "${code}" needs a height above 0`
+      )
     }
   }
   const where = (tile: HexGridTile) => `column ${tile.col}, row ${tile.row}`
@@ -607,7 +629,10 @@ export function layoutHexMap(
             width: own * MOAT_WIDTH,
             tile: front && ring.includes(front) ? front.ref : tile.ref,
             clip: [tile.ref, ...ring.map(neighbor => neighbor.ref)],
-            points: topOf(tile),
+            // Round through the middles of the six tiles about the keep.
+            points: HEX_DIRECTIONS.map(side =>
+              drawn(tile, hexCenter(hexNeighbor(tile, side), view.size))
+            ),
             closed: true,
           })
         }
@@ -667,8 +692,12 @@ export function layoutHexMap(
           })
         }
       }
+      // Toward the keep it runs only as far as the moat, which passes through
+      // the middle of this tile.
       const at = (side: HexDirection | null): Point =>
-        side === null ? middle : hexSideMiddle(tile, side, view.size)
+        side === null || neighborOf(tile, side) === keep
+          ? middle
+          : hexSideMiddle(tile, side, view.size)
       const clip = [
         tile.ref,
         ...[above, ...below]
@@ -707,22 +736,30 @@ export function layoutHexMap(
         springs.push({ tile: tile.ref, at: drawn(tile, middle), width: own })
       }
       if (kind === 'road' && above === keep && keep) {
-        // Planks over the moat, from the road's side of it to the keep's.
+        // Planks over the moat in the middle of the tile, and the road on
+        // from them to the castle's gate.
         const edge = hexSideMiddle(tile, sideTo(keep), view.size)
         const [ux, uy] = [edge[0] - middle[0], edge[1] - middle[1]]
         const length = Math.hypot(ux, uy)
         const reach = spec.river.width * MOAT_WIDTH * 0.75
         const front = neighborOf(keep, 'S')
+        pieces.push({
+          kind,
+          width: own,
+          tile: tile.ref,
+          clip: [tile.ref],
+          points: [drawn(tile, middle), drawn(tile, edge)],
+        })
         bridges.push({
           tile: front && kindOf(front) !== 'water' ? front.ref : keep.ref,
           width: own,
           a: drawn(tile, [
-            edge[0] - (ux / length) * reach,
-            edge[1] - (uy / length) * reach,
+            middle[0] - (ux / length) * reach,
+            middle[1] - (uy / length) * reach,
           ]),
           b: drawn(tile, [
-            edge[0] + (ux / length) * reach,
-            edge[1] + (uy / length) * reach,
+            middle[0] + (ux / length) * reach,
+            middle[1] + (uy / length) * reach,
           ]),
         })
       }
@@ -796,6 +833,16 @@ export function layoutHexMap(
           halfWidth: piece.width / 2,
           closed: piece.closed,
         })),
+      // The castle is larger than the keep's tile.
+      areas:
+        keep && landmarkOn.has(keep.ref)
+          ? [landmarkOn.get(keep.ref)!].map(mark => ({
+              x: mark.x,
+              y: mark.y + mark.height * 0.12,
+              rx: mark.width * 0.47,
+              ry: mark.height * 0.4,
+            }))
+          : [],
     }
   }
   for (const { code, district, minTiles = 1 } of spec.districts) {
@@ -919,6 +966,8 @@ export function layoutHexMap(
       ...laid,
       ref: plan?.ref ?? null,
       state,
+      sunken: district?.sunken === true && state !== 'sea',
+      walled: district?.walled === true && state !== 'sea',
       district: state === 'sea' ? null : (district?.district ?? null),
       realm: state === 'sea' ? null : realm,
       tone:
