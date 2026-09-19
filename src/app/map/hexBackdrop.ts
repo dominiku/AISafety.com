@@ -109,7 +109,14 @@ const JOIN_SEAL = 3
 // Pixels of darker bank either side of the water.
 const BANK = 3
 // Map grid units a river piece runs on past its ends, under the next piece.
-const SEAM_OVERLAP = 0.08
+// A tile's side lies at a slant on the screen while a piece ends square to
+// its own line, so it has to reach well past the side, or a sliver of ground
+// shows at one bank.
+const SEAM_OVERLAP = 0.3
+// Share of the next tile's side a district's rim is carried along past a
+// corner: enough to draw the corner whole, and short of the middle of the
+// side, where a river or road may cross.
+const RIM_CARRY = 0.22
 // A fall this high (map grid units) or more is a large one.
 const LARGE_FALL = 0.55
 // Map grid units the two bands of the border of shallows reach out from the
@@ -391,8 +398,19 @@ export function hexBackdropMarkup(
           piece.width * g + BANK * 2
         )
       } else {
+        // A bank is kept to the piece's own tile: carried on past the side
+        // it would part from the next piece's bank, which bends its own way.
+        const tile = tileByRef.get(piece.tile)
+        const own = `${id}-bank-${pieces.indexOf(piece)}`
+        if (tile) {
+          clips.push(
+            `<clipPath id="${own}"><path d="${outline(tile.top)}"/></clipPath>`
+          )
+        }
         for (const bank of banksOf(piece)) {
-          stroke(clip, line(bank), SHALLOWS, BANK * 2)
+          out.push(
+            `<path${tile ? ` clip-path="url(#${own})"` : clip} d="${line(bank)}" fill="none" stroke="${SHALLOWS}" stroke-width="${BANK * 2}" stroke-linejoin="round"/>`
+          )
         }
       }
     }
@@ -475,17 +493,17 @@ export function hexBackdropMarkup(
     if (drop.dam) {
       // A dam across the river at the lip: a stone wall down the face, wider
       // than the river, with buttresses; the fall is its spillway.
-      const wall = `M${at(-0.55, -6)}L${at(1.55, -6)}L${at(1.55, fall)}L${at(-0.55, fall)}Z`
+      const wall = `M${at(-0.3, -6)}L${at(1.3, -6)}L${at(1.3, fall)}L${at(-0.3, fall)}Z`
       out.push(
         `<path d="${wall}" fill="${DAM.stone}" stroke="${DAM.line}" stroke-width="2"/>`
       )
-      for (const t of [-0.4, -0.12, 1.12, 1.4]) {
+      for (const t of [-0.22, -0.08, 1.08, 1.22]) {
         out.push(
           `<path d="M${at(t - 0.05, 0)}L${at(t + 0.05, 0)}L${at(t + 0.09, fall)}L${at(t - 0.09, fall)}Z" fill="${DAM.line}" fill-opacity="0.55"/>`
         )
       }
       out.push(
-        `<path d="M${at(-0.55, -6)}L${at(1.55, -6)}" stroke="${DAM.cap}" stroke-width="5" stroke-linecap="round"/>`
+        `<path d="M${at(-0.3, -6)}L${at(1.3, -6)}" stroke="${DAM.cap}" stroke-width="5" stroke-linecap="round"/>`
       )
     }
     const large = drop.fall >= LARGE_FALL
@@ -625,19 +643,63 @@ export function hexBackdropMarkup(
       )
     }
     // The rim: a darker band just inside the sides that are the edge of the
-    // tile's district. Tiles of one district run into each other without
-    // one. Drawn as one wide line along those sides, the outer half clipped
-    // away; round ends close the band where it turns onto the next tile.
-    const rim = tile.edges
-      .flatMap((edge, k) =>
-        edge ? [`M${xy(top[k])}L${xy(top[(k + 1) % top.length])}`] : []
-      )
-      .join('')
-    if (rim) {
+    // tile's district, with a thin dark line along the edge itself. Tiles of
+    // one district run into each other without one. The edge of a district
+    // is one unbroken line that turns a corner wherever it passes from one
+    // tile to the next, so each run of edge sides is drawn as one line with
+    // square, mitred corners, and carried one side further at either end,
+    // along the next tile's stretch of the same edge. That way the corner at
+    // the join is drawn whole (no gap in the dark line, no knuckle), and the
+    // next tile draws the very same shape over it.
+    const corner = (k: number) => top[((k % 6) + 6) % 6]
+    // Past corner `at`, the third side that meets there: the two sides of
+    // this tile at the corner and that one run off at even angles, so the
+    // three of them, taken from the corner, add up to nothing.
+    const onward = (at: number, from: number, other: number): Point => [
+      corner(at)[0] +
+        (corner(at)[0] * 2 - corner(from)[0] - corner(other)[0]) * RIM_CARRY,
+      corner(at)[1] +
+        (corner(at)[1] * 2 - corner(from)[1] - corner(other)[1]) * RIM_CARRY,
+    ]
+    // The runs of the sides picked out by `include`, each carried on past
+    // its ends where the district's edge goes on along the next tile.
+    const runsOf = (include: boolean[]): Point[][] => {
+      if (include.every(Boolean)) return [[...top, top[0], top[1]]]
+      const found: Point[][] = []
+      for (let k = 0; k < 6; k++) {
+        if (!include[k] || include[(k + 5) % 6]) continue
+        const run: Point[] = [corner(k)]
+        if (!tile.edges[(k + 5) % 6]) run.unshift(onward(k, k + 1, k - 1))
+        let side = k
+        while (include[side % 6] && side < k + 6) {
+          run.push(corner(side + 1))
+          side++
+        }
+        if (!tile.edges[side % 6]) run.push(onward(side, side - 1, side + 1))
+        found.push(run)
+      }
+      return found
+    }
+    const runs = runsOf(tile.edges)
+    // The thin dark line is left off along the foot of a higher neighbor: a
+    // cliff marks that border itself, and the line would end in a stub where
+    // the cliff hides it.
+    const lineRuns = runsOf(
+      tile.edges.map((edge, k) => {
+        const beside = laidByCell.get(hexKey(hexNeighbor(tile, SIDE_NAMES[k])))
+        const higher =
+          beside !== undefined &&
+          beside.state !== 'sea' &&
+          beside.state !== 'water' &&
+          !beside.sunken &&
+          beside.height > tile.height
+        return edge && !higher
+      })
+    )
+    if (runs.length > 0) {
       // Kept to the top of this tile and of the tiles of its district beside
-      // it, and in solid colors, not see-through ones: the band runs on over
-      // the join into the next tile's band without a hairline between them,
-      // and where the two overlap they do not darken each other.
+      // it, and in solid colors, not see-through ones, so that where this
+      // tile's band and the next tile's overlap they look like one.
       const tops = [
         top,
         ...SIDE_NAMES.flatMap((side, k) => {
@@ -648,13 +710,27 @@ export function hexBackdropMarkup(
       clips.push(
         `<clipPath id="hex-top-${n}"><path d="${tops.map(outline).join('')}"/></clipPath>`
       )
+      const pathOf = (all: Point[][]) =>
+        all.map(run => `M${run.map(xy).join('L')}`).join('')
       const band = mixHex(tone, LINE, RIM_SHADE)
+      const line = mixHex(band, LINE, BORDER_LINE.opacity)
+      const stroke = (all: Point[][], color: string, across: number) =>
+        `<path clip-path="url(#hex-top-${n})" d="${pathOf(all)}" fill="none" stroke="${color}" stroke-width="${across.toFixed(1)}" stroke-linejoin="miter" stroke-linecap="butt"/>`
       out.push(
-        // A hairline of the border's own color right on the edge, unclipped,
-        // closes the softened gap between this region's top and the next's.
-        `<path d="${rim}" fill="none" stroke="${mixHex(band, LINE, BORDER_LINE.opacity)}" stroke-width="1.5" stroke-linecap="round"/>`,
-        `<path clip-path="url(#hex-top-${n})" d="${rim}" fill="none" stroke="${band}" stroke-width="${(RIM_WIDTH * 2 * g).toFixed(1)}" stroke-linecap="round" stroke-linejoin="round"/>`,
-        `<path clip-path="url(#hex-top-${n})" d="${rim}" fill="none" stroke="${mixHex(band, LINE, BORDER_LINE.opacity)}" stroke-width="${BORDER_LINE.width * 2}" stroke-linecap="round"/>`
+        // A hairline of the border's own color right on this tile's edge
+        // sides, unclipped, closes the softened gap between this region's
+        // top and the next's.
+        `<path d="${tile.edges
+          .flatMap((edge, k) =>
+            edge ? [`M${xy(top[k])}L${xy(top[(k + 1) % 6])}`] : []
+          )
+          .join(
+            ''
+          )}" fill="none" stroke="${line}" stroke-width="1.5" stroke-linecap="round"/>`,
+        stroke(runs, band, RIM_WIDTH * 2 * g),
+        ...(lineRuns.length > 0
+          ? [stroke(lineRuns, line, BORDER_LINE.width * 2)]
+          : [])
       )
     }
   }
