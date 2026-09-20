@@ -475,11 +475,20 @@ describe('layoutHexMap', () => {
   it('keeps places for scenery, spread out and clear of logos, and brings a ship to an arrival harbor', () => {
     const all = logos('Beta', 8, 0.3)
     const layout = layoutHexMap(
-      withTiles(SPEC.tiles, {
-        districts: [SPEC.districts[0], { ...SPEC.districts[1], scenery: 3 }],
-        features: [{ code: 'cv', kind: 'water', height: 0, arrival: true }],
-        takeAllTiles: true,
-      }),
+      withTiles(
+        `
+          ..  ..  ..  ..  ..  ..
+          ..  Aa  Aa  Aa  cv  ..
+          ..  Bb  Bb  Bb  cv  ..
+          ..  Bb  Bb  Bb  ..  ..
+          ..  ..  ..  ..  ..  ..
+        `,
+        {
+          districts: [SPEC.districts[0], { ...SPEC.districts[1], scenery: 3 }],
+          features: [{ code: 'cv', kind: 'water', height: 0, arrival: true }],
+          takeAllTiles: true,
+        }
+      ),
       all
     )
     expect(layout.scenery).toHaveLength(3)
@@ -493,9 +502,14 @@ describe('layoutHexMap', () => {
         expect(Math.hypot(spot.x - a.x, spot.y - a.y)).toBeGreaterThan(0.3)
       }
     })
-    // The ship lies west of the middle of the harbor's tile.
+    // The ship lies in the middle of the harbor's water, not on one tile of
+    // it: here, halfway between the two.
     expect(layout.arrivals).toHaveLength(1)
-    expect(layout.arrivals[0][0]).toBeLessThan(at(layout, 4, 2).center[0])
+    const harbor = [at(layout, 4, 1), at(layout, 4, 2)]
+    expect(layout.arrivals[0][0]).toBeCloseTo(harbor[0].center[0])
+    expect(layout.arrivals[0][1]).toBeCloseTo(
+      (harbor[0].center[1] + harbor[1].center[1]) / 2
+    )
   })
 
   it('takes up the tiles a district is told to, however few its logos', () => {

@@ -964,29 +964,41 @@ export function netFrameMarkup(
   seed: number
 ): string {
   const [cx, cy, w] = [x * g, y * g, size * g]
-  const h = w * 0.92
-  const [left, right] = [cx - w * 0.46, cx + w * 0.46]
-  const [topLeft, topRight] = [cx - w * 0.34, cx + w * 0.34]
+  const h = w * 0.95
   const top = cy - h
-  const belly = cy - h * (0.34 - roll(seed) * 0.12)
-  const pole = Math.max(2.4, w * 0.075).toFixed(1)
+  const [left, right] = [cx - w * 0.5, cx + w * 0.5]
+  const [hangLeft, hangRight] = [cx - w * 0.38, cx + w * 0.38]
+  // How far the net's belly hangs below its straight sides.
+  const hang = h * (0.3 + roll(seed) * 0.1)
+  const pole = Math.max(3, w * 0.085).toFixed(1)
   const markup = [
-    `<path d="M${topLeft.toFixed(1)},${top.toFixed(1)}Q${cx.toFixed(1)},${belly.toFixed(1)} ${topRight.toFixed(1)},${top.toFixed(1)}Z" fill="${net}" fill-opacity="0.55"/>`,
+    // The two poles and the spar they carry.
+    `<path d="M${left.toFixed(1)},${cy.toFixed(1)}L${(cx - w * 0.42).toFixed(1)},${(top - h * 0.09).toFixed(1)}" stroke="${PLANK_GAP}" stroke-width="${pole}" stroke-linecap="round"/>`,
+    `<path d="M${right.toFixed(1)},${cy.toFixed(1)}L${(cx + w * 0.42).toFixed(1)},${(top - h * 0.09).toFixed(1)}" stroke="${PLANK_GAP}" stroke-width="${pole}" stroke-linecap="round"/>`,
+    `<path d="M${(cx - w * 0.46).toFixed(1)},${top.toFixed(1)}L${(cx + w * 0.46).toFixed(1)},${top.toFixed(1)}" stroke="${PLANK}" stroke-width="${pole}" stroke-linecap="round"/>`,
+    // The net itself, hanging from the spar with a belly in it.
+    `<path d="M${hangLeft.toFixed(1)},${top.toFixed(1)}L${hangLeft.toFixed(1)},${(top + hang * 0.5).toFixed(1)}Q${cx.toFixed(1)},${(top + hang * 1.6).toFixed(1)} ${hangRight.toFixed(1)},${(top + hang * 0.5).toFixed(1)}L${hangRight.toFixed(1)},${top.toFixed(1)}Z" fill="${net}" fill-opacity="0.75"/>`,
   ]
-  // The mesh: a few threads hanging to the net's own belly.
-  for (let n = 1; n < 4; n++) {
-    const t = n / 4
-    const sx = topLeft + (topRight - topLeft) * t
-    const dip = top + (belly - top) * (1 - Math.abs(t - 0.5) * 2)
+  // Its mesh: threads down and two ropes across.
+  const mesh = (d: string) =>
+    `<path d="${d}" fill="none" stroke="${PLANK_GAP}" stroke-opacity="0.5" stroke-width="1.4"/>`
+  for (let n = 1; n < 5; n++) {
+    const t = n / 5
+    const sx = hangLeft + (hangRight - hangLeft) * t
+    const dip = top + hang * (0.5 + Math.sin(Math.PI * t) * 0.72)
     markup.push(
-      `<path d="M${sx.toFixed(1)},${top.toFixed(1)}L${sx.toFixed(1)},${dip.toFixed(1)}" stroke="${net}" stroke-width="1.6" stroke-opacity="0.9"/>`
+      mesh(
+        `M${sx.toFixed(1)},${top.toFixed(1)}L${sx.toFixed(1)},${dip.toFixed(1)}`
+      )
     )
   }
-  markup.push(
-    `<path d="M${left.toFixed(1)},${cy.toFixed(1)}L${topLeft.toFixed(1)},${(top - h * 0.1).toFixed(1)}" stroke="${PLANK_GAP}" stroke-width="${pole}" stroke-linecap="round"/>`,
-    `<path d="M${right.toFixed(1)},${cy.toFixed(1)}L${topRight.toFixed(1)},${(top - h * 0.1).toFixed(1)}" stroke="${PLANK_GAP}" stroke-width="${pole}" stroke-linecap="round"/>`,
-    `<path d="M${(topLeft - w * 0.08).toFixed(1)},${top.toFixed(1)}L${(topRight + w * 0.08).toFixed(1)},${top.toFixed(1)}" stroke="${PLANK}" stroke-width="${pole}" stroke-linecap="round"/>`
-  )
+  for (const down of [0.18, 0.4]) {
+    markup.push(
+      mesh(
+        `M${hangLeft.toFixed(1)},${(top + hang * down).toFixed(1)}Q${cx.toFixed(1)},${(top + hang * (down + 1.05)).toFixed(1)} ${hangRight.toFixed(1)},${(top + hang * down).toFixed(1)}`
+      )
+    )
+  }
   return markup.join('')
 }
 

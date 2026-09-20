@@ -72,8 +72,8 @@ const TILES = `
   ..  hb  hb  In= Fb= Pp= Pp= Tp= Tp= Ca= kp  Ca~ Al  Al  Al  Co  Ip  Ip  ..
   ..  In  hb  In  Fb  Tp  Tp  Tp  Tp  Hu  Ca  Al~ Al~ Al~ Co~ Co  Co  Cp  ..
   ..  ..  In  Tp  Tp  Tp  Tp  Hu  Hu  Gm  Gm  Vc  Vc~ Al  Co  Co! Cp  Cp! ..
-  Gy! Gy  ..  ..  Op  Op  Op  Op  Gm  Gm  Gm  Gm  Vc  Al^ Al^ Gm  Cp  ..  ..
-  Gy  Gy  Gy  ..  ..  ..  ..  To  To  To  Gm  Gm  Gm  Gm  Gm  ..  ..  ..  ..
+  Gy  Gy  ..  ..  Op  Op  Op  Op  Gm  Gm  Gm  Gm  Vc  Al^ Al^ Gm  Cp  ..  ..
+  Gy  Gy! Gy  ..  ..  ..  ..  To  To  To  Gm  Gm  Gm  Gm  Gm  ..  ..  ..  ..
   ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..
 `
 
@@ -141,9 +141,11 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
       landmark: { symbol: 'range', width: 2.8, height: 1.98 } },
     { code: 'Cp', district: 'Capabilities research', realm: 'Technical research', height: 6, walled: true,
       landmark: { symbol: 'skull-mountain', width: 2.6, height: 2.25 } },
-    // The closed orgs: sunken ships, on open water off the south-west coast.
+    // The closed orgs: a ships' graveyard on open water off the south-west
+    // coast. The gravestones are the original map's own art for them; the
+    // wrecks are scattered over the rest of its water.
     { code: 'Gy', district: QUIET_REALM, realm: QUIET_REALM, height: 0, sunken: true,
-      landmark: { symbol: 'sailboat', width: 1.7, height: 1.4 } },
+      landmark: { symbol: 'gravestones', width: 4.6, height: 2.2 } },
   ],
   // prettier-ignore
   features: [
@@ -183,6 +185,9 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
       ],
     },
   ],
+  // The compass rose, on the open sea in the board's south-east corner,
+  // where no land is painted and nothing else stands.
+  compass: { at: [17, 10], width: 4.6, height: 4.7 },
   river: { width: 0.85, branch: 0.78, headwater: 0.5 },
   road: { width: 0.55 },
   // For now every painted tile is land, so the coast is as smooth as it is

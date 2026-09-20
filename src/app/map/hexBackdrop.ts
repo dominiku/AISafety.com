@@ -1271,7 +1271,7 @@ export function hexBackdropMarkup(
     seed: number
   ) => {
     const cover = plateau.tiles[0].cover
-    if (!pins || cover === 'fields' || cover === 'vineyard') return
+    if (!pins || cover === 'vineyard') return
     if (!(theme.terrain || cover)) return
     const { inside, logos, fixed } = canvasOf(plateau)
     const extent = { width: width / g, height: height / g }
@@ -1419,6 +1419,38 @@ export function hexBackdropMarkup(
       })
       return
     }
+    if (cover === 'fields') {
+      // Farming country: a farmstead here and there among the plots, a house
+      // with an outbuilding beside it and a tree by some of them. Sparse, and
+      // standing whatever logos are over it, so the fields still read as
+      // fields and not as a village.
+      scatterSpots(inside, fixed, extent, {
+        spacing: 2.4,
+        minRoom: 0.7,
+        maxRoom: 1.2,
+      }).forEach(spot => {
+        const foot = spot.y + 0.2
+        const cottage = spot.roll > 0.5
+        stand(
+          foot,
+          level,
+          (spot.roll < 0.35
+            ? stamp('tree', spot.x - 0.64, foot, 0.34, 0.68)
+            : '') +
+            stamp(cottage ? 'cottage' : 'house', spot.x, foot, 0.92, 1.2) +
+            (spot.room > 0.85
+              ? stamp(
+                  cottage ? 'house' : 'cottage',
+                  spot.x + 0.76,
+                  foot - 0.04,
+                  0.6,
+                  0.78
+                )
+              : '')
+        )
+      })
+      return
+    }
     if (cover === 'reeds') {
       // An estuary's shore: big beds of reed standing in the wet ground, and
       // down on the strand itself a boat drawn up or a net hung out to dry.
@@ -1440,9 +1472,9 @@ export function hexBackdropMarkup(
       // its country, as the dunes are the dunes' (the logos are drawn over
       // them).
       scatterSpots(inside, fixed, extent, {
-        spacing: 1.35,
-        minRoom: 0.45,
-        maxRoom: 1.2,
+        spacing: 0.8,
+        minRoom: 0.26,
+        maxRoom: 1,
       }).forEach((spot, n) => {
         const foot = spot.y + 0.2
         const shore = strand.some(
@@ -1451,21 +1483,21 @@ export function hexBackdropMarkup(
         stand(
           foot,
           level,
-          shore && spot.roll > 0.55
-            ? stamp('rowboat', spot.x, foot, 1.3, 0.58)
+          shore && spot.roll > 0.45
+            ? stamp('rowboat', spot.x, foot, 0.92, 0.41)
             : shore
               ? netFrameMarkup(
                   spot.x,
                   foot,
-                  1.15,
+                  0.78,
                   g,
-                  mixHex(tone, '#ffffff', 0.5),
+                  mixHex(tone, '#ffffff', 0.62),
                   seed * 97 + n
                 )
               : reedBedMarkup(
                   spot.x,
                   foot,
-                  1.05 + spot.roll * 0.4,
+                  0.52 + spot.roll * 0.24,
                   g,
                   reed,
                   PLANK,
@@ -2018,13 +2050,39 @@ export function hexBackdropMarkup(
       tile.height,
       (lantern && layout.arrivals.length > 0
         ? beaconMarkup(lantern, layout.arrivals[0], g)
-        : '') +
-        (tile.sunken
-          ? // Wrecks: the art heeled over, half under.
-            stamp(mark.symbol, -0.7, 0, 1, -28) +
-            stamp(mark.symbol, 0.9, 0.35, 0.7, 152)
-          : stamp(mark.symbol, 0, 0, 1, 0))
+        : '') + stamp(mark.symbol, 0, 0, 1, 0)
     )
+  }
+  // The ships' graveyard: over the rest of a sunken district's water, hulls
+  // heeled over and half under, with a broken spar standing out of the sea
+  // beside some of them.
+  if (pins) {
+    // A fixed number from 0 to 1, so the wrecks lie the same way every time.
+    const roll = (n: number) => {
+      const value = Math.sin(n * 12.9898) * 43758.5453
+      return value - Math.floor(value)
+    }
+    const wrecks = layout.tiles.filter(tile => tile.sunken && !tile.landmark)
+    wrecks.forEach((tile, n) => {
+      for (let k = 0; k < 2; k++) {
+        const seed = n * 7 + k * 3
+        const rower = roll(seed * 5) > 0.55
+        const [w, h] = rower ? [0.95, 0.42] : [1.15, 0.95]
+        const x = tile.center[0] + (roll(seed) - 0.5) * 1.9
+        const y = tile.center[1] + (roll(seed + 1) - 0.5) * 1.2
+        const tilt = (roll(seed + 2) - 0.5) * 60 + (k === 1 ? 160 : 0)
+        const spar =
+          roll(seed * 11) > 0.6
+            ? `<path d="M${((x + 0.6) * g).toFixed(1)},${((y + 0.12) * g).toFixed(1)}L${((x + 0.9) * g).toFixed(1)},${((y - 0.7) * g).toFixed(1)}" stroke="${PLANK_GAP}" stroke-width="3" stroke-linecap="round"/>`
+            : ''
+        stand(
+          y,
+          0,
+          `<use href="#${rower ? 'rowboat' : 'sailboat'}" x="${((x - w / 2) * g).toFixed(1)}" y="${((y - h / 2) * g).toFixed(1)}" width="${(w * g).toFixed(1)}" height="${(h * g).toFixed(1)}" transform="rotate(${tilt.toFixed(1)} ${(x * g).toFixed(1)} ${(y * g).toFixed(1)})" opacity="0.8"/>` +
+            spar
+        )
+      }
+    })
   }
   // A ship coming in to the harbor, with its wake behind it: among what
   // stands, so that the low land round the bay does not cover its masthead.
@@ -2032,6 +2090,13 @@ export function hexBackdropMarkup(
     for (const [x, y] of layout.arrivals) {
       stand(y, 0, arrivalShipMarkup(x, y, 1.9, g))
     }
+  }
+  // The compass rose, on the open sea where the spec puts it.
+  if (pins && layout.compass) {
+    const rose = layout.compass
+    out.push(
+      `<use href="#compass" x="${((rose.x - rose.width / 2) * g).toFixed(1)}" y="${((rose.y - rose.height / 2) * g).toFixed(1)}" width="${(rose.width * g).toFixed(1)}" height="${(rose.height * g).toFixed(1)}"/>`
+    )
   }
   // Footpaths, over the ground of every level; then the districts' buildings
   // among what stands.
