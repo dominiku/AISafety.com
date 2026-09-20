@@ -65,10 +65,10 @@ const TILES = `
 # 0   1   2   3   4   5   6   7   8   9   10  11  12  13  14  15  16  17  18
   ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..
   ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  Th  ..  ..  ..
-  ..  ..  Ne  Ne~ Ne  Fo~ Fo  Fo  Fo  Gr  cv! cv  Go  Go  Th  Th  Th  ..  ..
+  ..  ..  Ne  Ne~ Ne  Fo~ Fo  Fo  Fo  Gr  cv  cv  Go  Go  Th  Th  Th  ..  ..
   ..  ..  Ne  Ne~ Ne~ Fo~ Fo! Fo  Fr  Gr  cv  Pa  Pa  Go  Th  Th! Lo  Lo  ..
-  ..  ..  Ne~ Ne  Ne  Fo  Fo~ Fo~ Fr  Gr  cv  Pa  Ma  Ma  Ma  St  Lo  ..  ..
-  ..  In! In  In  Fb  Pp  Pp  Tp  Fr~ Ca~ Ca  Ca  Ma  Ma  St  Co  Co  cr  ..
+  ..  ..  Ne~ Ne  Ne  Fo  Fo~ Fo~ Fr  Gr  Pa= Pa  Ma  Ma  Ma  St  Lo  ..  ..
+  ..  In! In  In  Fb  Pp  Pp  Tp  Fr~ Ca~ Ca= Ca  Ma  Ma  St  Co  Co  cr  ..
   ..  hb  hb  In= Fb= Pp= Pp= Tp= Tp= Ca= kp  Ca~ Al  Al  Al  Co  Ip  Ip  ..
   ..  In  hb  In  Fb  Tp  Tp  Tp  Tp  Hu  Ca  Al~ Al~ Al~ Co~ Co  Co  Cp  ..
   ..  ..  In  Tp  Tp  Tp  Tp  Hu  Hu  Gm  Gm  Vc  Vc~ Al  Co  Co! Cp  Cp! ..
@@ -152,14 +152,22 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
   // prettier-ignore
   features: [
     // Advocacy Anchorage: water inside the coast, between the two arms of
-    // Advocacy, open to the north. Its own boats lie moored well inside it,
-    // by the head of Persuasion Pier; one ship is standing out for the rest
+    // Advocacy, open to the north. Her own boats lie at moorings spread
+    // about her; one ship is standing out for the rest
     // of the world. The sailboat art is sideways-on and cannot be turned to
     // point out of the bay, so she lies up and to the east of the mouth, and
     // her wake curves: straight out of the bay, then a turn to the right
     // along the coast.
     { code: 'cv', kind: 'water', height: 0,
-      landmark: { symbol: 'boats', width: 2.8, height: 1.04, shift: [0.22, 1.4] },
+      // Her own boats lie at moorings spread about the anchorage rather than
+      // all in one row, and the layout keeps each of them off Persuasion
+      // Pier, wherever the pier runs.
+      moorings: [
+        { at: [10, 2], shift: [-0.78, 0.11], kind: 'sailboat', size: 1.15 },
+        { at: [10, 2], shift: [1.82, 0.31], kind: 'rowboat', size: 0.85 },
+        { at: [11, 2], shift: [0.15, 0.24], kind: 'sailboat', size: 1.1 },
+        { at: [10, 3], shift: [0.92, -0.23], kind: 'rowboat', size: 0.85 },
+      ],
       departs: [{ at: [11, 1], shift: [0.3, -0.52], size: 1.35 }] },
     // The harbor the road starts from: a bay between the arms of the landing.
     { code: 'hb', kind: 'water', height: 0, arrival: true },
@@ -198,7 +206,7 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
   // round the four buttons of map furniture, wherever they stand.
   compass: { width: 5.2, height: 5.3 },
   river: { width: 0.85, branch: 0.78, headwater: 0.5 },
-  road: { width: 0.55 },
+  road: { width: 0.4 },
   // For now every painted tile is land, so the coast is as smooth as it is
   // painted. To give a district room to grow, paint more tiles for it.
   takeAllTiles: true,

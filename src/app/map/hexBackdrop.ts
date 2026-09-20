@@ -159,6 +159,8 @@ const FACE_FOOT = 0.12
 // Pixels of darker bank either side of the water: none. (Robert, 20
 // September 2026: water has no dark outline, as on the classic map.)
 const BANK = 0
+// A fading road narrows to this share of its width, a track, as it pales.
+const FADE_TRACK = 0.3
 // Map grid units a river piece runs on past its ends, under the next piece.
 // A tile's side lies at a slant on the screen while a piece ends square to
 // its own line, so it has to reach well past the side, or a sliver of ground
@@ -321,11 +323,15 @@ export function hexBackdropMarkup(
   // Piers: out from the harbor where the road ends at the water, and from the
   // shore of a district that has one. (Where the river reaches the coast its
   // water simply ends at the edge of the land.)
+  // (A pier whose deck stands level with high land is drawn later, with the
+  // ground of that level, or the land drawn after it here would cover it.)
+  const raisedPiers: { up: number; markup: string }[] = []
   for (const end of layout.ends) {
     if (end.kind === 'river') continue
+    const up = end.deck ?? 0
     const at = (along: number): Point => [
       end.at[0] + end.toward[0] * along,
-      end.at[1] + end.toward[1] * along,
+      end.at[1] + end.toward[1] * along - up,
     ]
     // A district's pier is an L: a short arm at its head, turned toward the
     // viewer, for boats to lie along.
@@ -336,17 +342,36 @@ export function hexBackdropMarkup(
       end.kind === 'pier'
         ? `L${xy([head[0] + turn[0] * 0.75, head[1] + turn[1] * 0.75])}`
         : ''
-    const d = `M${xy(at(0.2))}L${xy(head)}${arm}`
+    const d = `M${xy(at(up > 0 ? -0.05 : 0.2))}L${xy(head)}${arm}`
     const across = (end.width * g * 0.8).toFixed(1)
-    out.push(
+    const deck = [
       `<path d="${d}" fill="none" stroke="${PLANK_GAP}" stroke-width="${across}"/>`,
-      `<path d="${d}" fill="none" stroke="${PLANK}" stroke-width="${across}" stroke-dasharray="7 3"/>`
-    )
+      `<path d="${d}" fill="none" stroke="${PLANK}" stroke-width="${across}" stroke-dasharray="7 3"/>`,
+    ]
+    if (up > 0) {
+      // Posts from the deck down to the water, a pair every so often.
+      const half = end.width * 0.3
+      const posts = [0.55, 1.1, 1.65]
+        .filter(along => along <= (end.kind === 'pier' ? 1.7 : 1.3))
+        .flatMap(along =>
+          [-half, half].map(aside => {
+            const [x, y] = at(along)
+            const [px, py] = [x + turn[0] * aside, y + turn[1] * aside]
+            return `<path d="M${xy([px, py])}L${xy([px, py + up])}" stroke="${PLANK_GAP}" stroke-width="3" stroke-linecap="round"/>`
+          })
+        )
+      raisedPiers.push({
+        up,
+        markup: [...posts, ...deck].join(''),
+      })
+    } else {
+      out.push(...deck)
+    }
     // A rowboat tied up in the crook of the L.
     if (end.kind === 'pier' && pins) {
       const [w, h] = [0.95, 0.42]
       const x = head[0] - tx * 0.55 + turn[0] * 0.5
-      const y = head[1] - ty * 0.55 + turn[1] * 0.5
+      const y = head[1] - ty * 0.55 + turn[1] * 0.5 + up
       out.push(
         `<use href="#rowboat" x="${((x - w / 2) * g).toFixed(1)}" y="${((y - h / 2) * g).toFixed(1)}" width="${(w * g).toFixed(1)}" height="${(h * g).toFixed(1)}"/>`
       )
@@ -434,6 +459,34 @@ export function hexBackdropMarkup(
     return `<path${clip} d="${outline([...left, ...[...right].reverse()])}" fill="${WATER}"/>`
   }
 
+  // A road that leads on to nowhere in particular: it narrows to a track and
+  // pales into the ground over the length of the piece, its pebbles thinning
+  // out with it.
+  let fadeCount = 0
+  const fadingRoad = (piece: HexPathPiece, clip: string) => {
+    const id = `hex-road-fade-${fadeCount++}`
+    const [left, right] = banksOf(
+      { ...piece, widthEnd: piece.width * FADE_TRACK },
+      false
+    )
+    const [from, to] = [piece.points[0], piece.points[piece.points.length - 1]]
+    const dots = alongLine(piece.points)
+    const pebbles = dots.flatMap(([x, y], k) => {
+      const share = k / (dots.length - 1)
+      if (k % 2 === 1 || share > 0.7) return []
+      const roll = Math.sin((k + from[0] * 3.1) * 12.9898) * 43758.5453
+      const side =
+        (roll - Math.floor(roll) - 0.5) * piece.width * g * (1 - share)
+      return [
+        `<circle cx="${(x * g + side * 0.55).toFixed(1)}" cy="${(y * g + side * 0.33).toFixed(1)}" r="${k % 3 === 0 ? 3 : 2}" fill="${ROAD_PEBBLE}" opacity="${(1 - share / 0.7).toFixed(2)}"/>`,
+      ]
+    })
+    return [
+      `<linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="${(from[0] * g).toFixed(1)}" y1="${(from[1] * g).toFixed(1)}" x2="${(to[0] * g).toFixed(1)}" y2="${(to[1] * g).toFixed(1)}"><stop offset="0" stop-color="${ROAD}"/><stop offset="0.25" stop-color="${ROAD}"/><stop offset="1" stop-color="${ROAD}" stop-opacity="0"/></linearGradient>`,
+      `<g${clip}><path d="${outline([...left, ...[...right].reverse()])}" fill="url(#${id})"/>${pebbles.join('')}</g>`,
+    ].join('')
+  }
+
   // The river and road pieces drawn once a tile is: every bank first, then
   // the water over them all, so that where the river parts no bank crosses
   // the water; then the road over the water.
@@ -514,6 +567,10 @@ export function hexBackdropMarkup(
       }
       // The classic brown road, but a worn one: its edge comes and goes, and
       // dark pebbles lie on it.
+      if (piece.fade) {
+        out.push(fadingRoad(piece, clip))
+        continue
+      }
       stroke(clip, line(piece.points), ROAD, piece.width * g)
       out.push(`<g${clip}>`)
       alongLine(piece.points).forEach(([x, y], k) => {
@@ -2153,6 +2210,11 @@ export function hexBackdropMarkup(
       )
     }
     for (const drop of layout.drops) if (refs.has(drop.tile)) drawDrop(drop)
+    // A pier level with this ground: after it, and before the higher ground
+    // that may stand in front of it.
+    for (const pier of raisedPiers) {
+      if (Math.abs(pier.up - height * view.lift) < 1e-6) out.push(pier.markup)
+    }
     for (const bridge of layout.bridges) {
       if (!refs.has(bridge.tile)) continue
       const d = `M${xy(bridge.a)}L${xy(bridge.b)}`
@@ -2248,6 +2310,16 @@ export function hexBackdropMarkup(
   if (pins) {
     for (const [x, y] of layout.arrivals) {
       stand(y, 0, arrivalShipMarkup(x, y, 1.9, g))
+    }
+    // Boats lying at their moorings about the anchorage.
+    for (const boat of layout.moorings) {
+      const [w, h] =
+        boat.kind === 'rowboat'
+          ? [boat.size, boat.size * 0.44]
+          : [boat.size, boat.size * 0.82]
+      out.push(
+        `<use href="#${boat.kind}" x="${((boat.at[0] - w / 2) * g).toFixed(1)}" y="${((boat.at[1] - h / 2) * g).toFixed(1)}" width="${(w * g).toFixed(1)}" height="${(h * g).toFixed(1)}"/>`
+      )
     }
     // And ships standing out from the anchorage for the rest of the world,
     // each with its wake angling back to the mouth it came out of.

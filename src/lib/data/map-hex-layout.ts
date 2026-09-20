@@ -163,6 +163,16 @@ export interface HexFeatureSpec {
   // must be east of the water's mouth: the art is sideways-on, so the wake
   // astern of it is what says where it came from.
   departs?: { at: [number, number]; shift?: [number, number]; size: number }[]
+  // Boats lying at moorings in this water, each on one of its tiles (column,
+  // row) and moved `shift` grid units off that tile's middle. They are kept
+  // clear of any pier for themselves, so a pier may be moved without their
+  // having to be moved after it.
+  moorings?: {
+    at: [number, number]
+    shift?: [number, number]
+    kind?: 'sailboat' | 'rowboat'
+    size?: number
+  }[]
 }
 
 export interface HexMapSpec {
@@ -401,6 +411,8 @@ export interface HexLayout {
   // Where a ship is coming in (see HexFeatureSpec.arrival): the middle of
   // its waterline, in the middle of the harbor's water.
   arrivals: Point[]
+  // Boats at their moorings (see HexFeatureSpec.moorings).
+  moorings: { at: Point; kind: 'sailboat' | 'rowboat'; size: number }[]
   // Ships standing out to sea (see HexFeatureSpec.departs): where each is,
   // how large, and the middle of the mouth it came out of, which its wake
   // angles back to.
@@ -1020,12 +1032,18 @@ export function layoutHexMap(
     const touching = (tile: PlannedTile) =>
       HEX_DIRECTIONS.filter(side => nodes.has(hexKey(hexNeighbor(tile, side))))
     // The river starts at its highest tile (of those, one at the end of a
-    // run); the road at the keep, or at one end.
+    // run); the road at the keep, or at one end (not the end it fades at).
     const candidates = [...nodes].map(key => planned.get(key)!)
+    const fadesAt = (tile: HexGridTile) =>
+      (spec.road.fades ?? []).some(
+        ([col, row]) => col === tile.col && row === tile.row
+      )
     const root =
       kind === 'road'
         ? (candidates.find(tile => tile === keep) ??
-          candidates.find(tile => touching(tile).length === 1) ??
+          candidates.find(
+            tile => touching(tile).length === 1 && !fadesAt(tile)
+          ) ??
           candidates[0])
         : [...candidates].sort(
             (a, b) =>
@@ -1238,11 +1256,7 @@ export function layoutHexMap(
           })
         }
       }
-      const fades =
-        kind === 'road' &&
-        (spec.road.fades ?? []).some(
-          ([col, row]) => col === tile.col && row === tile.row
-        )
+      const fades = kind === 'road' && fadesAt(tile)
       if (fades && (below.length > 0 || outSides[0] !== null)) {
         throw new Error(
           `Hex map: the road is to fade away on "${tile.ref}" at ${where(tile)}, but it runs on from there; a road fades where it ends inland`
@@ -2036,6 +2050,25 @@ export function layoutHexMap(
     return null
   }
 
+  // Every pier, as a line of points along its stem and the arm at its head,
+  // so that what floats can be kept off it (see HexFeatureSpec.moorings).
+  const pierPlanks: Point[] = ends
+    .filter(end => end.kind === 'pier')
+    .flatMap(end => {
+      const along = (far: number): Point => [
+        end.at[0] + end.toward[0] * far,
+        end.at[1] + end.toward[1] * far,
+      ]
+      const [tx, ty] = end.toward
+      const turn: Point = tx > 0 ? [-ty, tx] : [ty, -tx]
+      const head = along(1.7)
+      const stem = [0.2, 0.6, 1, 1.4, 1.7].map(along)
+      const arm = [0.25, 0.5, 0.75].map(
+        (far): Point => [head[0] + turn[0] * far, head[1] + turn[1] * far]
+      )
+      return [...stem, ...arm]
+    })
+
   return {
     view,
     tiles,
@@ -2069,6 +2102,36 @@ export function layoutHexMap(
           ] as Point,
         ]
       }),
+    moorings: spec.features
+      .filter(feature => feature.moorings)
+      .flatMap(feature =>
+        feature.moorings!.map(boat => {
+          const size = boat.size ?? 1
+          const [x, y] = projectPoint(
+            view,
+            hexCenter({ col: boat.at[0], row: boat.at[1] }, view.size),
+            0
+          )
+          let at: Point = [
+            x + (boat.shift?.[0] ?? 0),
+            y + (boat.shift?.[1] ?? 0),
+          ]
+          // Nothing lies over a pier: a boat too near one is pushed off it,
+          // straight away from the nearest plank.
+          const clear = size * 0.6 + 0.4
+          for (const plank of pierPlanks) {
+            const [dx, dy] = [at[0] - plank[0], at[1] - plank[1]]
+            const gap = Math.hypot(dx, dy)
+            if (gap >= clear) continue
+            const push = gap === 0 ? ([1, 0] as Point) : [dx / gap, dy / gap]
+            at = [
+              plank[0] + push[0] * clear,
+              plank[1] + push[1] * clear,
+            ] as Point
+          }
+          return { at, kind: boat.kind ?? 'sailboat', size }
+        })
+      ),
     departures: spec.features
       .filter(feature => feature.departs)
       .flatMap(feature => {

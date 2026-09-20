@@ -295,6 +295,76 @@ describe('layoutHexMap', () => {
     expect(layout.drops).toEqual([])
   })
 
+  it('leads several roads out from the keep, each over its own bridge', () => {
+    const tiles = `
+      ..  ..  ..  ..  ..
+      ..  Aa  Aa= Aa  ..
+      ..  Aa= kp  Aa= ..
+      ..  ..  Aa= ..  ..
+      ..  ..  ..  ..  ..
+    `
+    const features = [{ code: 'kp', kind: 'keep' as const, height: 3 }]
+    const layout = layoutHexMap(withTiles(tiles, { features }), [])
+    expect(layout.bridges).toHaveLength(4)
+    // Each runs out to the coast. Off a shore that faces away from the viewer
+    // the pier stands level with the land, or the land would hide it.
+    const piers = layout.ends.filter(end => end.kind === 'road')
+    expect(piers).toHaveLength(4)
+    const north = piers.find(end => end.toward[1] < -0.9)!
+    const south = piers.find(end => end.toward[1] > 0.9)!
+    expect(north.deck).toBeCloseTo(3 * SPEC.view.lift)
+    expect(south.deck).toBeUndefined()
+  })
+
+  it('fades a road away where the spec says so, inland at its end', () => {
+    const tiles = SPEC.tiles.replace('..  Bb  Bb  Bb  cv', '..  Bb= Bb= Bb  cv')
+    const fading = (fades: [number, number][]) =>
+      layoutHexMap(withTiles(tiles, { road: { width: 0.6, fades } }), [])
+    const layout = fading([[2, 2]])
+    const faded = layout.pieces.filter(piece => piece.fade)
+    expect(faded.map(piece => piece.tile)).toEqual([at(layout, 2, 2).ref])
+    expect(() => fading([[1, 2]])).toThrow(/runs on from there/)
+    expect(() => fading([[3, 3]])).toThrow(/no road tile/)
+  })
+
+  it('stands a pier where the spec says, or at the end of a road to its shore', () => {
+    const beta = (pier: HexMapSpec['districts'][number]['pier']) => [
+      SPEC.districts[0],
+      { ...SPEC.districts[1], pier },
+    ]
+    const placed = layoutHexMap(
+      withTiles(SPEC.tiles, {
+        districts: beta({ at: [3, 2], side: 'NE' }),
+      }),
+      []
+    )
+    expect(placed.ends).toHaveLength(1)
+    const { center } = at(placed, 3, 2)
+    expect(placed.ends[0].kind).toBe('pier')
+    expect(placed.ends[0].at[0]).toBeGreaterThan(center[0])
+    // (Into the cove, off a side that faces away: level with the land.)
+    expect(placed.ends[0].deck).toBeCloseTo(2 * SPEC.view.lift)
+    expect(() =>
+      layoutHexMap(
+        withTiles(SPEC.tiles, { districts: beta({ at: [2, 2], side: 'N' }) }),
+        []
+      )
+    ).toThrow(/no shore of the district/)
+
+    // One pier, not two: the road's end is the district's pier.
+    const byRoad = layoutHexMap(
+      withTiles(
+        SPEC.tiles
+          .replace('..  Bb  Bb  Bb  cv', '..  Bb  Bb= Bb  cv')
+          .replace('..  Bb  Bb  Bb  ..', '..  Bb  Bb= Bb  ..'),
+        { districts: beta(true) }
+      ),
+      []
+    )
+    expect(byRoad.ends.map(end => end.kind)).toEqual(['pier'])
+    expect(byRoad.ends[0].toward[1]).toBeGreaterThan(0.9)
+  })
+
   it('gives a district its pier on a shore, and its river a dam where it falls in sight', () => {
     const tiles = SPEC.tiles
       .replace('..  Aa  Aa', '..  Aa~ Aa')
