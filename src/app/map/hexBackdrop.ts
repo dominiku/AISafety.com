@@ -1120,7 +1120,7 @@ export function hexBackdropMarkup(
         extent,
         cover === 'forest'
           ? { spacing: 0.42, minRoom: 0.05, maxRoom: 0.4 }
-          : { spacing: 1.5, minRoom: 0.5, maxRoom: 0.9 }
+          : { spacing: 1.2, minRoom: 0.3, maxRoom: 0.9 }
       )
         .sort((a, b) => a.y - b.y)
         .forEach((spot, n) =>
@@ -1226,8 +1226,8 @@ export function hexBackdropMarkup(
       // sand between the clumps.
       const water = fixed.map(spot => ({ ...spot, radius: 0.5 }))
       scatterSpots(inside, [...logos, ...water], extent, {
-        spacing: 1.3,
-        minRoom: 0.22,
+        spacing: 0.95,
+        minRoom: 0.16,
         maxRoom: 0.8,
       }).forEach((spot, n) => {
         const near = fixed.some(
@@ -1287,8 +1287,8 @@ export function hexBackdropMarkup(
     if (cover === 'thermals') {
       // A geyser going off here and there, where there is a good gap.
       scatterSpots(inside, [...logos, ...fixed], extent, {
-        spacing: 2.2,
-        minRoom: 0.35,
+        spacing: 1.25,
+        minRoom: 0.17,
         maxRoom: 0.8,
       }).forEach((spot, n) =>
         stand(
