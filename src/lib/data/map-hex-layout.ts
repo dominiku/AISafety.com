@@ -24,7 +24,7 @@
 // highest tile) tile by tile through the middle of the sides they share. It
 // may part, and then runs narrower; it must never run uphill (that throws);
 // where it reaches the coast it has a mouth. Round the keep it runs as a
-// moat through the middles of the six tiles about it. Where it steps down a side the viewer can see
+// moat, a hexagon with rounded corners, through the middles of the six tiles about it. Where it steps down a side the viewer can see
 // it falls; where the side faces away, it goes over the far lip. The road is
 // joined up the same way, from the keep outward.
 //
@@ -410,7 +410,10 @@ const CENTERING_STEP = 0.4
 const WANDER = 0.22
 // The moat is this share of the river's width.
 const MOAT_WIDTH = 0.8
-const MOAT_POINTS = 48
+// Points to each corner and each straight reach of the moat, and the share of
+// a reach each rounded corner takes up at either end.
+const MOAT_POINTS = 6
+const MOAT_CORNER = 0.24
 
 // From a to b, leaving a along `ha` and arriving at b against `hb` (both of
 // length 1), swaying by `sway` map units on the way: a smooth curve, as
@@ -1065,15 +1068,45 @@ export function layoutHexMap(
             width: own * MOAT_WIDTH,
             tile: front && ring.includes(front) ? front.ref : tile.ref,
             clip: [tile.ref, ...ring.map(neighbor => neighbor.ref)],
-            // A round through the middles of the six tiles about the keep:
-            // they all lie one tile's width from its own middle.
-            points: Array.from({ length: MOAT_POINTS }, (_, n): Point => {
-              const angle = (n / MOAT_POINTS) * Math.PI * 2
-              const reach = Math.sqrt(3) * view.size
-              return drawn(tile, [
-                middle[0] + reach * Math.cos(angle),
-                middle[1] + reach * Math.sin(angle),
-              ])
+            // A hexagon the way the tiles lie (flat-topped, twice their
+            // size), so that each of its six straight reaches runs through
+            // the middle of one of the six tiles about the keep; its corners,
+            // on the sides those tiles share, are rounded.
+            points: Array.from({ length: 6 }, (_, n) => n).flatMap(n => {
+              const corner = (k: number): Point => {
+                const angle = (k / 6) * Math.PI * 2
+                return [
+                  middle[0] + 2 * view.size * Math.cos(angle),
+                  middle[1] + 2 * view.size * Math.sin(angle),
+                ]
+              }
+              const toward = (from: Point, to: Point, share: number): Point => [
+                from[0] + (to[0] - from[0]) * share,
+                from[1] + (to[1] - from[1]) * share,
+              ]
+              const [before, at, after] = [
+                corner(n - 1),
+                corner(n),
+                corner(n + 1),
+              ]
+              const [start, end] = [
+                toward(at, before, MOAT_CORNER),
+                toward(at, after, MOAT_CORNER),
+              ]
+              // The rounded corner, then the straight reach to the next one.
+              const bend = Array.from(
+                { length: MOAT_POINTS },
+                (_, k): Point => {
+                  const t = k / MOAT_POINTS
+                  const [a, b] = [toward(start, at, t), toward(at, end, t)]
+                  return toward(a, b, t)
+                }
+              )
+              const next = toward(after, at, MOAT_CORNER)
+              const reach = Array.from({ length: MOAT_POINTS }, (_, k) =>
+                toward(end, next, k / MOAT_POINTS)
+              )
+              return [...bend, ...reach].map(point => drawn(tile, point))
             }),
             closed: true,
           })
