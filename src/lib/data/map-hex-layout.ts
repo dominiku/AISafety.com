@@ -104,8 +104,11 @@ export interface HexDistrictSpec {
   ground?: string
   // The river leaves it over a dam: its fall toward the viewer is a spillway.
   dam?: boolean
-  // A plank pier runs out from its shore (into a cove, if it is on one).
-  pier?: boolean
+  // A plank pier runs out from its shore. Where a road comes down to that
+  // shore, the pier stands at the road's end; failing that the layout picks
+  // the shore (into a cove, if it is on one). Or the spec says where: the
+  // tile [column, row] and the side of it the pier leaves by.
+  pier?: boolean | { at: [number, number]; side: HexDirection }
   // Its logos may stand over the river (the castle's, over its moat).
   overWater?: boolean
   // Ringed by a wall of dark peaks along its edge (a forbidding country).
@@ -172,7 +175,9 @@ export interface HexMapSpec {
   // `headwater`: how wide the river is, as a share of its width, from its
   // source down to the first lake it runs into (a stream, not yet a river).
   river: { width: number; branch: number; headwater?: number }
-  road: { width: number }
+  // `fades`: tiles [column, row] a road ends on by fading away, going on to
+  // nowhere in particular, where it would otherwise stop short.
+  road: { width: number; fades?: [number, number][] }
   // The compass rose, as the original map draws it: round the four buttons
   // of map furniture (Merch, Suggest entry and the rest), which stand at its
   // four points. Only how large it is belongs here; where it goes follows
@@ -311,6 +316,9 @@ export interface HexPathPiece {
   rampTo?: string[]
   // It runs into the moat, which is drawn later and over its end.
   joinsMoat?: boolean
+  // A road that leads on to nowhere in particular: over this piece it
+  // narrows and pales away to nothing.
+  fade?: boolean
 }
 
 // A road or river stepping down the side of a tile. `a` and `b` are the ends
@@ -336,6 +344,10 @@ export interface HexPathEnd {
   width: number
   at: Point
   toward: Point
+  // A pier off a shore that faces away from the viewer would lie hidden
+  // behind its own land at sea level: its deck stands this high over the
+  // water (map grid units up the screen), level with the land, on posts.
+  deck?: number
 }
 
 export interface HexLayout {
@@ -424,6 +436,9 @@ const MOAT_WIDTH = 0.8
 // a reach each rounded corner takes up at either end.
 const MOAT_POINTS = 6
 const MOAT_CORNER = 0.28
+// How far in the moat lies from the middles of the six tiles about the keep,
+// as a share of the way from a tile's middle to the keep's side.
+const MOAT_IN = 0.42
 
 // From a to b, leaving a along `ha` and arriving at b against `hb` (both of
 // length 1), swaying by `sway` map units on the way: a smooth curve, as
@@ -974,6 +989,24 @@ export function layoutHexMap(
     const n = Math.sin(tile.col * 127.1 + tile.row * 311.7) * 43758.5453
     return (n - Math.floor(n)) * 2 - 1
   }
+  // Where the moat crosses one of the six tiles about the keep: on the way
+  // from the tile's middle to the side it shares with the keep.
+  const moatOn = (tile: HexGridTile, toKeep: HexDirection): Point => {
+    const middle = flatCenter(tile)
+    const side = hexSideMiddle(tile, toKeep, view.size)
+    return [
+      middle[0] + (side[0] - middle[0]) * MOAT_IN,
+      middle[1] + (side[1] - middle[1]) * MOAT_IN,
+    ]
+  }
+  // Districts whose pier stands where a road came down to their shore.
+  const pierPlaced = new Set<string>()
+  // A pier off a side that faces away from the viewer stands level with its
+  // land, or that land would hide it.
+  const deckOver = (tile: PlannedTile, side: HexDirection) =>
+    SOUTH_FACING.includes(side) || tile.height <= 0
+      ? {}
+      : { deck: tile.height * view.lift }
   const joinUp = (kind: 'road' | 'river', width: number) => {
     const marked = [...planned.values()].filter(tile => tile.mark === kind)
     if (marked.length === 0) return
@@ -1085,11 +1118,12 @@ export function layoutHexMap(
             // in a wide curve that keeps it close round the castle.
             points: Array.from({ length: 6 }, (_, n) => n).flatMap(n => {
               const corner = (k: number): Point => {
-                // (Twice a tile's size out: its sides then pass through the
+                // (Twice a tile's size out, its sides would pass through the
                 // middles of the six tiles, which lie at 30, 90, 150...
-                // degrees.)
+                // degrees; it lies MOAT_IN of the way in from there toward
+                // the keep's own sides.)
                 const angle = (k / 6) * Math.PI * 2
-                const reach = 2 * view.size
+                const reach = (2 - MOAT_IN) * view.size
                 return [
                   middle[0] + reach * Math.cos(angle),
                   middle[1] + reach * Math.sin(angle),
@@ -1190,20 +1224,41 @@ export function layoutHexMap(
               visible: true,
             })
           }
+          // A road that comes down to the shore of a district with a pier
+          // ends on that pier (unless the spec stands the pier elsewhere).
+          const roadsPier =
+            kind === 'road' && districtByCode.get(tile.code!)?.pier === true
+          if (roadsPier) pierPlaced.add(tile.code!)
           ends.push({
-            kind,
+            kind: roadsPier ? 'pier' : kind,
             width: own,
             at: to,
             toward: [(to[0] - from[0]) / length, (to[1] - from[1]) / length],
+            ...(kind === 'road' ? deckOver(tile, out) : {}),
           })
         }
       }
-      // Toward the keep it runs only as far as the moat, which passes through
-      // the middle of this tile.
+      const fades =
+        kind === 'road' &&
+        (spec.road.fades ?? []).some(
+          ([col, row]) => col === tile.col && row === tile.row
+        )
+      if (fades && (below.length > 0 || outSides[0] !== null)) {
+        throw new Error(
+          `Hex map: the road is to fade away on "${tile.ref}" at ${where(tile)}, but it runs on from there; a road fades where it ends inland`
+        )
+      }
+      // Toward the keep the river runs only as far as the moat, which crosses
+      // this tile between its middle and the keep; the road runs to the
+      // tile's middle, and on over its bridge.
       const inland = (side: HexDirection | null) =>
         side === null || neighborOf(tile, side) === keep
       const at = (side: HexDirection | null): Point =>
-        inland(side) ? middle : hexSideMiddle(tile, side!, view.size)
+        !inland(side)
+          ? hexSideMiddle(tile, side!, view.size)
+          : kind === 'river' && side !== null
+            ? moatOn(tile, side)
+            : middle
       const clip = [
         tile.ref,
         ...[above, ...below]
@@ -1237,9 +1292,15 @@ export function layoutHexMap(
           for (const [other, atStart] of climbs) {
             if (!other || other === keep || other.height <= tile.height)
               continue
-            ramps.push(
-              raise(points, atStart, (other.height - tile.height) * view.lift)
+            const side = raise(
+              points,
+              atStart,
+              (other.height - tile.height) * view.lift
             )
+            // A ramp up to ground that stands nearer the viewer climbs
+            // toward the viewer: its side lies behind that ground's edge,
+            // out of sight, and only the road on it shows.
+            if (!SOUTH_FACING.includes(sideTo(other))) ramps.push(side)
             rampTo.push(other.ref)
           }
         }
@@ -1259,7 +1320,8 @@ export function layoutHexMap(
           tile: tile.ref,
           clip,
           points,
-          ...(ramps.length > 0 ? { ramps, rampTo } : {}),
+          ...(rampTo.length > 0 ? { ramps, rampTo } : {}),
+          ...(fades ? { fade: true } : {}),
           ...(kind === 'river' &&
           keep &&
           [inSide, outSide].some(
@@ -1280,6 +1342,7 @@ export function layoutHexMap(
         const length = Math.hypot(ux, uy)
         const reach = spec.river.width * MOAT_WIDTH * 0.75
         const front = neighborOf(keep, 'S')
+        const over = moatOn(tile, sideTo(keep))
         pieces.push({
           kind,
           width: own,
@@ -1291,12 +1354,12 @@ export function layoutHexMap(
           tile: front && kindOf(front) !== 'water' ? front.ref : keep.ref,
           width: own,
           a: drawn(tile, [
-            middle[0] - (ux / length) * reach,
-            middle[1] - (uy / length) * reach,
+            over[0] - (ux / length) * reach,
+            over[1] - (uy / length) * reach,
           ]),
           b: drawn(tile, [
-            middle[0] + (ux / length) * reach,
-            middle[1] + (uy / length) * reach,
+            over[0] + (ux / length) * reach,
+            over[1] + (uy / length) * reach,
           ]),
         })
       }
@@ -1334,11 +1397,18 @@ export function layoutHexMap(
   }
   joinUp('river', spec.river.width)
   joinUp('road', spec.road.width)
+  for (const [col, row] of spec.road.fades ?? []) {
+    if (planned.get(hexKey({ col, row }))?.mark !== 'road') {
+      throw new Error(
+        `Hex map: the road is to fade away at column ${col}, row ${row}, but no road tile (=) is marked there`
+      )
+    }
+  }
 
   // A district's pier: out from one of its shores, into a cove for choice,
   // and on a side the viewer sees for choice.
   for (const { code, pier } of spec.districts) {
-    if (!pier) continue
+    if (!pier || pierPlaced.has(code)) continue
     const shores = (tilesOf.get(code) ?? []).flatMap(tile =>
       HEX_DIRECTIONS.filter(side => isWater(tile, side)).map(side => ({
         tile,
@@ -1355,10 +1425,21 @@ export function layoutHexMap(
           inland(tile) / 1000,
       }))
     )
-    const best = shores.sort((a, b) => b.worth - a.worth)[0]
+    // Where the spec says, if it does; or the best of its shores.
+    const placed = pier === true ? null : pier
+    const best = placed
+      ? shores.find(
+          ({ tile, side }) =>
+            tile.col === placed.at[0] &&
+            tile.row === placed.at[1] &&
+            side === placed.side
+        )
+      : shores.sort((a, b) => b.worth - a.worth)[0]
     if (!best) {
       throw new Error(
-        `Hex map: district "${code}" is to have a pier but has no shore`
+        placed
+          ? `Hex map: district "${code}" is to have its pier on the ${placed.side} side of the tile at column ${placed.at[0]}, row ${placed.at[1]}, but that is no shore of the district`
+          : `Hex map: district "${code}" is to have a pier but has no shore`
       )
     }
     const from = projectPoint(view, flatCenter(best.tile), 0)
@@ -1373,6 +1454,7 @@ export function layoutHexMap(
       width: spec.road.width,
       at: to,
       toward: [(to[0] - from[0]) / length, (to[1] - from[1]) / length],
+      ...(placed ? deckOver(best.tile, best.side) : {}),
     })
   }
 
