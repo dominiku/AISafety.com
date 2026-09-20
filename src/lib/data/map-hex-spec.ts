@@ -70,8 +70,8 @@ const TILES = `
   ..  ..  Ne~ Ne! Ne  Fo  Fo~ Fo~ Fr  Gr  cv  Pa  Ma  Ma  Ma! St  Lo  ..  ..
   ..  In! In  In  Fb  Pp  Pp  Tp  Fr~ Ca~ Ca  Ca  Ma  Ma  St  Co  Co  cr  ..
   ..  hb  hb  In= Fb= Pp= Pp= Tp= Tp= Ca= kp  Ca~ Al~ Al  Al  Co  Ip  Ip  ..
-  ..  In  hb  In  Fb  Tp  Tp  Tp  Tp  Hu  Ca  Al~ Al~ Al~ Co~ Co  Co  Cp  ..
-  ..  ..  In  Tp  Tp  Tp  Tp  Hu  Hu  Gm  Gm  Vc~ Vc  Al  Co  Co! Cp  Cp! ..
+  ..  In  hb  In  Fb  Tp  Tp  Tp  Tp  Hu  Ca  Al  Al~ Al~ Co~ Co  Co  Cp  ..
+  ..  ..  In  Tp  Tp  Tp  Tp  Hu  Hu  Gm  Gm  Vc  Vc~ Al  Co  Co! Cp  Cp! ..
   Gy! Gy  ..  ..  Op  Op  Op  Op  Gm  Gm  Gm  Gm  Vc  Al^ Al^ Gm  Cp  ..  ..
   Gy  Gy  Gy  ..  ..  ..  ..  To  To  To  Gm  Gm  Gm  Gm  Gm  ..  ..  ..  ..
   ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..
@@ -130,7 +130,7 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
     // beach, the escarpment: one long leaning slope of banded rock.
     { code: 'Al', district: 'Alignment and control', realm: 'Technical research', height: 4 },
     { code: 'Ev', district: 'Evaluations and threat research', realm: 'Technical research', height: 4, onSlopesOf: 'Al' },
-    { code: 'Co', district: 'Conceptual and foundations research', realm: 'Technical research', height: 5, cover: 'thermals',
+    { code: 'Co', district: 'Conceptual and foundations research', realm: 'Technical research', height: 5, cover: 'thermals', scenery: 4,
       landmark: { symbol: 'cave', width: 1.7, height: 1.63 } },
     { code: 'Ip', district: 'Interpretability and model understanding', realm: 'Technical research', height: 6.5, cone: true,
       landmark: { symbol: 'range', width: 2.8, height: 1.98 } },
@@ -146,10 +146,10 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
     { code: 'cv', kind: 'water', height: 0,
       landmark: { symbol: 'boats', width: 3.4, height: 1.26, shift: [1.5, 0.7] } },
     // The harbor the road starts from: a bay between the arms of the landing.
-    { code: 'hb', kind: 'water', height: 0 },
+    { code: 'hb', kind: 'water', height: 0, arrival: true },
     // The top of the volcano, in the Range's back corner, with only sea
     // behind it to hide.
-    { code: 'cr', kind: 'crater', realm: 'Technical research', height: 7.5 },
+    { code: 'cr', kind: 'crater', realm: 'Technical research', height: 6.5 },
     // The castle's keep, level with the six tiles of Career support round it.
     // The castle is larger than the keep's tile; the river circles it as a
     // moat through the middles of those six tiles, and the road ends at its
@@ -169,9 +169,9 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
         [12, 7],
       ],
       dam: [
-        [11, 7, 'S'],
-        [11, 7, 'SE'],
         [12, 7, 'S'],
+        [12, 7, 'SW'],
+        [11, 7, 'SE'],
       ],
     },
   ],

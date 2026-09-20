@@ -472,6 +472,32 @@ describe('layoutHexMap', () => {
     ).toThrow(/no district's tile/)
   })
 
+  it('keeps places for scenery, spread out and clear of logos, and brings a ship to an arrival harbor', () => {
+    const all = logos('Beta', 8, 0.3)
+    const layout = layoutHexMap(
+      withTiles(SPEC.tiles, {
+        districts: [SPEC.districts[0], { ...SPEC.districts[1], scenery: 3 }],
+        features: [{ code: 'cv', kind: 'water', height: 0, arrival: true }],
+        takeAllTiles: true,
+      }),
+      all
+    )
+    expect(layout.scenery).toHaveLength(3)
+    expect(layout.scenery.map(site => site.tall)).toEqual([false, true, false])
+    layout.scenery.forEach((a, i) => {
+      for (const b of layout.scenery.slice(i + 1)) {
+        expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThan(1.4)
+      }
+      for (const logo of all) {
+        const spot = layout.positions.get(logo.id)!
+        expect(Math.hypot(spot.x - a.x, spot.y - a.y)).toBeGreaterThan(0.3)
+      }
+    })
+    // The ship lies west of the middle of the harbor's tile.
+    expect(layout.arrivals).toHaveLength(1)
+    expect(layout.arrivals[0][0]).toBeLessThan(at(layout, 4, 2).center[0])
+  })
+
   it('takes up the tiles a district is told to, however few its logos', () => {
     const layout = layoutHexMap(
       {

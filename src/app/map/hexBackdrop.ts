@@ -66,6 +66,11 @@ import {
   parasolMarkup,
   thatchHouseMarkup,
   volcanoMarkup,
+  arrivalShipMarkup,
+  lakeShore,
+  scaledAbout,
+  smoothClosedPath,
+  thermalSpringMarkup,
   beachHutMarkup,
   sulphurPoolMarkup,
   slopeCornerMarkup,
@@ -1049,86 +1054,29 @@ export function hexBackdropMarkup(
     out.push('</g>')
   }
 
-  // Where a thermal district's hot springs and geysers go, worked out
-  // together so that they are spread out: none touches another, a logo, or
-  // the spring the river rises from; and a geyser's jet, which stands tall,
-  // has clear air above it, with no logo behind it.
-  interface ThermalSite {
-    x: number
-    y: number
-    size: number
-    seed: number
+  // The hot spring a river rises from: toward the way the river leaves it.
+  const thermalSpring = (
+    spring: HexLayout['springs'][number],
+    layer: 'bed' | 'water'
+  ) => {
+    const first = layout.pieces.find(
+      piece => piece.kind === 'river' && piece.tile === spring.tile
+    )
+    const toward = first
+      ? first.points[Math.floor(first.points.length / 2)]
+      : ([spring.at[0] - 1, spring.at[1]] as Point)
+    return thermalSpringMarkup(
+      spring.at,
+      toward,
+      spring.width * 2.7,
+      view.squash,
+      g,
+      layer
+    )
   }
-  const thermalPlans = new Map<
-    string,
-    { pools: ThermalSite[]; geysers: ThermalSite[] }
-  >()
-  const thermalPlan = (plateau: { tiles: HexLaidTile[] }) => {
-    const key = plateau.tiles[0].ref ?? ''
-    const known = thermalPlans.get(key)
-    if (known) return known
-    const { inside, logos, fixed } = canvasOf(plateau)
-    const extent = { width: width / g, height: height / g }
-    const refs = new Set(plateau.tiles.map(tile => tile.ref))
-    // What is taken already, as circles: the river's spring, then each site
-    // as it is chosen.
-    const taken = layout.springs
-      .filter(spring => refs.has(spring.tile))
-      .map(spring => ({
-        x: spring.at[0],
-        y: spring.at[1],
-        radius: spring.width * 1.6,
-      }))
-    const free = (x: number, y: number, radius: number) =>
-      taken.every(
-        other => Math.hypot(other.x - x, other.y - y) > other.radius + radius
-      )
-    const geysers: ThermalSite[] = []
-    scatterSpots(inside, [...logos, ...fixed], extent, {
-      spacing: 0.9,
-      minRoom: 0.2,
-      maxRoom: 0.8,
-    })
-      // The roomiest first.
-      .sort((a, b) => b.room - a.room)
-      .forEach((spot, n) => {
-        const size = 1 + spot.roll * 0.35
-        const foot = spot.y + 0.2
-        // Clear air for the jet and its spray: no logo up the column.
-        // (The spray at the top is wider than the jet; the river counts too.)
-        const inTheWay = [
-          ...logos,
-          ...fixed.map(point => ({ ...point, radius: 0.45 })),
-        ]
-        const clear = [0, 0.3, 0.55, 0.8, 1, 1.25, 1.5].every(up =>
-          inTheWay.every(
-            thing =>
-              Math.hypot(thing.x - spot.x, thing.y - (foot - size * up)) >
-              thing.radius + size * (up > 0.5 ? 0.3 : 0.14)
-          )
-        )
-        if (!clear || !free(spot.x, foot - size * 0.4, 0.9)) return
-        taken.push({ x: spot.x, y: foot - size * 0.4, radius: 0.9 })
-        geysers.push({ x: spot.x, y: foot, size, seed: n })
-      })
-    const pools: ThermalSite[] = []
-    scatterSpots(inside, [...logos, ...fixed], extent, {
-      spacing: 0.9,
-      minRoom: 0.32,
-      maxRoom: 0.9,
-    })
-      .sort((a, b) => b.room - a.room)
-      .forEach((spot, n) => {
-        // A pool fills the room it has, crust and all, and no more.
-        const size = Math.min(1.5, spot.room * 1.55)
-        if (!free(spot.x, spot.y, size * 0.6 + 0.35)) return
-        taken.push({ x: spot.x, y: spot.y, radius: size * 0.6 + 0.35 })
-        pools.push({ x: spot.x, y: spot.y, size, seed: n })
-      })
-    const plan = { pools, geysers }
-    thermalPlans.set(key, plan)
-    return plan
-  }
+  // A district's places for scenery (map-hex-layout keeps the logos off them).
+  const sceneryOn = (plateau: { tiles: HexLaidTile[] }) =>
+    layout.scenery.filter(site => site.district === plateau.tiles[0].district)
 
   // What lies under the logos, so that it reads however crowded the
   // district: a forest's canopy, or hot springs.
@@ -1189,19 +1137,20 @@ export function hexBackdropMarkup(
     }
     if (cover === 'thermals' && pins) {
       out.push(`<g clip-path="url(#${clip})">`)
-      for (const pool of thermalPlan(plateau).pools) {
+      sceneryOn(plateau).forEach((site, n) => {
+        if (site.tall) return
         out.push(
           sulphurPoolMarkup(
-            pool.x,
-            pool.y,
-            pool.size,
+            site.x,
+            site.y,
+            1.25 + ((n * 0.37) % 0.4),
             view.squash,
             g,
-            pool.seed,
-            false
+            n,
+            true
           )
         )
-      }
+      })
       out.push('</g>')
     }
     if (cover === 'forest' && pins) {
@@ -1368,20 +1317,21 @@ export function hexBackdropMarkup(
     }
     if (cover === 'thermals') {
       // Geysers going off, where the plan found them clear air.
-      for (const geyser of thermalPlan(plateau).geysers) {
+      sceneryOn(plateau).forEach((site, n) => {
+        if (!site.tall) return
         stand(
-          geyser.y,
+          site.y + 0.2,
           level,
           geyserMarkup(
-            geyser.x,
-            geyser.y,
-            geyser.size,
+            site.x,
+            site.y + 0.2,
+            1.35 + ((n * 0.29) % 0.3),
             g,
             theme.cliff.foot,
-            seed * 97 + geyser.seed
+            seed * 97 + n
           )
         )
-      }
+      })
       return
     }
     if (cover === 'meadow') {
@@ -1557,8 +1507,20 @@ export function hexBackdropMarkup(
     tile.state !== 'water' &&
     tile.ref !== null &&
     !tile.sunken
-  const plateauKey = (tile: HexLaidTile) =>
-    tile.district !== null ? `d:${tile.district}` : `t:${tile.ref}`
+  const plateauKey = (tile: HexLaidTile) => {
+    if (tile.district !== null) return `d:${tile.district}`
+    if (tile.state === 'crater') {
+      // A volcano rises out of the ground beside it: its tile is drawn as
+      // part of the neighboring district's plateau of the same height.
+      const beside = SIDE_NAMES.map(side =>
+        laidByCell.get(hexKey(hexNeighbor(tile, side)))
+      ).find(
+        next => next && next.district !== null && next.height === tile.height
+      )
+      if (beside) return `d:${beside.district}`
+    }
+    return `t:${tile.ref}`
+  }
   const grouped = new Map<string, HexLaidTile[]>()
   for (const tile of layout.tiles) {
     if (!solid(tile)) continue
@@ -1567,7 +1529,11 @@ export function hexBackdropMarkup(
       tile,
     ])
   }
-  const plateaus: Plateau[] = [...grouped.values()].map(tiles => {
+  const plateaus: Plateau[] = [...grouped.values()].map(group => {
+    // A district's own tiles first: the plateau takes its look from them.
+    const tiles = [...group].sort(
+      (a, b) => Number(a.district === null) - Number(b.district === null)
+    )
     const within = new Set(tiles.map(tile => hexKey(tile)))
     // Every side with no tile of the plateau across it, as a step from one
     // corner to the next; corners run the same way round on every tile, so
@@ -1702,31 +1668,31 @@ export function hexBackdropMarkup(
     for (const plateau of level) {
       for (const tile of plateau.tiles) drawStrand(tile)
     }
-    // Lakes on this level: every lobe's bank, then every lobe's water, so
-    // that they run together as one lake; cut off at the plateau's edge,
-    // where a dam holds the lake back.
+    // Lakes on this level: one irregular shore round all of a lake's lobes;
+    // cut off at the plateau's edge, where a dam holds the lake back.
     level.forEach((plateau, n) => {
       const id = `hex-plateau-${height}-${n}`.replace('.', '_')
       for (const lake of layout.lakes) {
         if (!plateau.tiles.some(tile => tile.ref === lake.tile)) continue
-        const lobe = (
-          { x, y, rx, ry }: (typeof lake.lobes)[number],
-          fill: string,
-          grow: number
-        ) =>
-          `<ellipse cx="${(x * g).toFixed(1)}" cy="${(y * g).toFixed(1)}" rx="${(rx * g + grow).toFixed(1)}" ry="${(ry * g + grow).toFixed(1)}" fill="${fill}"/>`
+        const shore = smoothClosedPath(lakeShore(lake.lobes, 1), g)
         out.push(
           `<g clip-path="url(#${id})">`,
-          ...lake.lobes.map(part => lobe(part, SHALLOWS, BANK)),
-          ...lake.lobes.map(part => lobe(part, WATER, 0)),
-          ...lake.lobes.map(
-            ({ x, y, rx }) =>
-              `<path d="M${xy([x - rx * 0.45, y - 0.1])}h${(rx * 0.5 * g).toFixed(1)}" stroke="${WATER_STREAK}" stroke-width="3" stroke-linecap="round"/>`
-          ),
+          `<path d="${shore}" fill="${WATER}" stroke="${SHALLOWS}" stroke-width="${BANK * 2}"/>`,
           '</g>'
         )
       }
     })
+    // The hot spring a river rises from lies under the river.
+    for (const spring of layout.springs) {
+      if (
+        level.some(plateau =>
+          plateau.tiles.some(tile => tile.ref === spring.tile)
+        ) &&
+        tileByRef.get(spring.tile)?.cover === 'thermals'
+      ) {
+        out.push(thermalSpring(spring, 'bed'))
+      }
+    }
     // The piers that stand at this height, over the water of their tiles.
     for (const tile of layout.tiles) {
       if (tile.deck?.height !== height) continue
@@ -1750,17 +1716,18 @@ export function hexBackdropMarkup(
       const id = `hex-plateau-${height}-${n}`.replace('.', '_')
       for (const lake of layout.lakes) {
         if (!plateau.tiles.some(tile => tile.ref === lake.tile)) continue
-        // The lake's water again, over the river: no river bank shows in it.
+        // The lake's water again, over the river: no river bank shows in
+        // it, and the river runs into it and out of it at its shore.
+        const shore = lakeShore(lake.lobes, 1)
         out.push(
           `<g clip-path="url(#${id})">`,
-          ...lake.lobes.map(
-            ({ x, y, rx, ry }) =>
-              `<ellipse cx="${(x * g).toFixed(1)}" cy="${(y * g).toFixed(1)}" rx="${(rx * g).toFixed(1)}" ry="${(ry * g).toFixed(1)}" fill="${WATER}"/>`
-          ),
-          ...lake.lobes.map(
-            ({ x, y, rx }) =>
-              `<path d="M${xy([x - rx * 0.45, y - 0.1])}h${(rx * 0.5 * g).toFixed(1)}" stroke="${WATER_STREAK}" stroke-width="3" stroke-linecap="round"/>`
-          ),
+          `<path d="${smoothClosedPath(shore, g)}" fill="${WATER}"/>`,
+          ...scaledAbout(shore, 0.55)
+            .filter((_, k) => k % 24 === 6)
+            .map(
+              point =>
+                `<path d="M${xy(point)}h${(0.7 * g).toFixed(1)}" stroke="${WATER_STREAK}" stroke-width="3" stroke-linecap="round"/>`
+            ),
           '</g>'
         )
       }
@@ -1768,16 +1735,7 @@ export function hexBackdropMarkup(
     for (const spring of layout.springs) {
       if (!refs.has(spring.tile)) continue
       if (tileByRef.get(spring.tile)?.cover === 'thermals') {
-        out.push(
-          sulphurPoolMarkup(
-            spring.at[0],
-            spring.at[1],
-            spring.width * 2.6,
-            view.squash,
-            g,
-            2
-          )
-        )
+        out.push(thermalSpring(spring, 'water'))
         continue
       }
       out.push(
@@ -1829,6 +1787,13 @@ export function hexBackdropMarkup(
             stamp(mark.symbol, 0.9, 0.35, 0.7, 152)
         : stamp(mark.symbol, 0, 0, 1, 0)
     )
+  }
+  // A ship coming in to the harbor, with its wake behind it: among what
+  // stands, so that the low land round the bay does not cover its masthead.
+  if (pins) {
+    for (const [x, y] of layout.arrivals) {
+      stand(y, 0, arrivalShipMarkup(x, y, 1.9, g))
+    }
   }
   // Footpaths, over the ground of every level; then the districts' buildings
   // among what stands.

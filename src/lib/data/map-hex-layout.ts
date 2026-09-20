@@ -106,6 +106,9 @@ export interface HexDistrictSpec {
   // A village on stilts: its ground is a deck of planks, and what shows
   // under its edges toward the viewer is not cliff but the posts it stands on.
   stilts?: boolean
+  // Pieces of scenery (hot springs, geysers) spread out over its ground,
+  // this many: each has a place of its own, and the logos stand round them.
+  scenery?: number
   // A building of its own stands in the middle of its most central tile,
   // and its logos round it.
   building?: 'capitol' | 'school' | 'forum'
@@ -138,6 +141,9 @@ export interface HexFeatureSpec {
   height: number
   // On the feature's tiles marked "!"; on the keep itself.
   landmark?: HexLandmarkArt
+  // Water a ship is sailing into from the west (the harbor newcomers
+  // arrive at).
+  arrival?: boolean
 }
 
 export interface HexMapSpec {
@@ -337,6 +343,12 @@ export interface HexLayout {
     lobes: { x: number; y: number; rx: number; ry: number }[]
   }[]
   dams: { tile: string; side: number }[]
+  // Places kept for scenery (see HexDistrictSpec.scenery): every second
+  // one is for something tall (a geyser), with clear air above it.
+  scenery: { district: string; x: number; y: number; tall: boolean }[]
+  // Where a ship is coming in (see HexFeatureSpec.arrival): the middle of
+  // its waterline, on the open sea just west of the harbor.
+  arrivals: Point[]
   // Footpaths from a building to another district's landmark.
   paths: { points: Point[]; width: number }[]
   districtAt: (x: number, y: number) => string | null
@@ -447,6 +459,11 @@ const SIDES: HexDirection[] = ['SE', 'S', 'SW', 'NW', 'N', 'NE']
 // ground): an escarpment's, and a volcano's.
 const SCARP_RUN = 0.45
 const CONE_RUN = 0.35
+
+// The clear ground a piece of scenery needs, and how far apart pieces keep
+// (map grid units).
+const SCENERY_ROOM = 0.7
+const SCENERY_APART = 2.2
 
 // How far a logo keeps in from the edge of a slope it stands on.
 const SLOPE_MARGIN = 0.1
@@ -1221,6 +1238,7 @@ export function layoutHexMap(
     })
   }
 
+  const sceneryOf = new Map<string, HexLayout['scenery']>()
   // A district's building stands in the middle of a tile: the one nearest
   // the middle of the district (of the tiles with no river, road or
   // landmark) that leaves all its logos room.
@@ -1368,6 +1386,24 @@ export function layoutHexMap(
               ry: mark.height * 0.4,
             }))
           : []),
+        // Logos stand clear of the pool a river rises from, where the
+        // district has scenery of its own (its spring is a large hot one).
+        ...(sceneryOf.has(tiles[0]?.code ?? '')
+          ? springs
+              .filter(spring => refs.has(spring.tile))
+              .map(spring => ({
+                x: spring.at[0],
+                y: spring.at[1],
+                rx: spring.width * 0.8,
+                ry: spring.width * 0.8 * view.squash + 0.1,
+              }))
+          : []),
+        // Logos stand clear of scenery: of all of something tall.
+        ...(sceneryOf.get(tiles[0]?.code ?? '') ?? []).map(site =>
+          site.tall
+            ? { x: site.x, y: site.y - 0.45, rx: 0.45, ry: 0.8 }
+            : { x: site.x, y: site.y, rx: 0.62, ry: 0.42 }
+        ),
         // Logos stand round a lake, not on it.
         ...(lakeAreas.get(tiles[0]?.code ?? '') ?? []).map(lobe => ({
           x: lobe.x,
@@ -1458,6 +1494,47 @@ export function layoutHexMap(
     lines: [],
     areas: [],
   })
+
+  // Scenery: places spread as far from each other (and from the spring a
+  // river rises at) as the district's ground allows, each with room round it.
+  const scenery: HexLayout['scenery'] = []
+  for (const { code, district, scenery: count } of spec.districts) {
+    const tiles = tilesOf.get(code) ?? []
+    if (!count || tiles.length === 0) continue
+    const refs = new Set(tiles.map(tile => tile.ref))
+    const open = plateauSpots(plateauOf(tiles), packing).spots.filter(
+      spot => spot.room >= SCENERY_ROOM
+    )
+    const taken: Point[] = springs
+      .filter(spring => refs.has(spring.tile))
+      .map(spring => spring.at)
+    const apart = (at: Point) =>
+      Math.min(
+        ...taken.map(other =>
+          // Depth counts for more than breadth on a board seen at a slant.
+          Math.hypot(other[0] - at[0], (other[1] - at[1]) / view.squash)
+        )
+      )
+    const sites: HexLayout['scenery'] = []
+    for (let n = 0; n < count && open.length > 0; n++) {
+      const best =
+        taken.length === 0
+          ? open[Math.floor(open.length / 2)]
+          : open.reduce((far, spot) =>
+              apart(spot.at) > apart(far.at) ? spot : far
+            )
+      if (taken.length > 0 && apart(best.at) < SCENERY_APART) break
+      taken.push(best.at)
+      sites.push({ district, x: best.at[0], y: best.at[1], tall: n % 2 === 1 })
+    }
+    if (sites.length < count) {
+      console.warn(
+        `Hex map: district "${code}" has room for ${sites.length} of its ${count} pieces of scenery`
+      )
+    }
+    scenery.push(...sites)
+    sceneryOf.set(code, sites)
+  }
 
   const packDistrict = ({
     code,
@@ -1721,6 +1798,19 @@ export function layoutHexMap(
     ends,
     springs,
     bridges,
+    scenery,
+    arrivals: spec.features
+      .filter(feature => feature.arrival)
+      .flatMap(feature => {
+        const water = [...planned.values()].filter(
+          tile => tile.code === feature.code
+        )
+        if (water.length === 0) return []
+        const west = water.reduce((a, b) => (b.col < a.col ? b : a))
+        const [x, y] = projectPoint(view, flatCenter(west), 0)
+        // In the harbor's mouth, its wake trailing out to sea.
+        return [[x - view.size * 0.3, y + 0.2] as Point]
+      }),
     lakes,
     dams: [...damSides].map(key => {
       const [cell, side] = key.split('|')

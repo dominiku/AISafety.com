@@ -469,14 +469,20 @@ export function canopyMarkup(
   )
 }
 
+// DESIGN REVIEW (Melissa): lava, and the smoke of a live volcano.
+const LAVA = { edge: '#ff7c25', core: '#f2c84b' }
+const SMOKE = { dark: '#5f7370', light: '#d9e2df' }
+
 /**
- * A volcano rising from its tile: the tile's own six sides are the foot of
- * the cone, and its flanks go up from them to a rim the same shape, smaller
- * and higher. `top` is the tile's top (corners E, SE, SW, W, NW, NE), so the
- * three flanks toward the viewer stand on its sides SE, S and SW; they are
- * lit from the left. Gullies run down them, ash lies pale round the rim, a
- * lake fills the crater, and steam rises from it. `height` is how far up the
- * screen the rim stands (map grid units).
+ * A live volcano rising out of its tile. The tile's ground is its
+ * neighbors' (it is drawn as part of their plateau), so the cone has no base
+ * to sit on: a skirt of scree the shape of the tile fades into that ground,
+ * and the flanks go up from a foot a little inside it to a rim the same shape,
+ * smaller and higher. `top` is the tile's top (corners E, SE, SW, W, NW, NE):
+ * the flanks toward the viewer stand on its sides SE, S and SW, lit from the
+ * left. Gullies run down them and ash lies pale round the rim; lava glows in
+ * the crater and runs down one flank; smoke drifts off downwind. `height` is
+ * how far up the screen the rim stands (map grid units).
  */
 export function volcanoMarkup(
   top: Point[],
@@ -488,33 +494,38 @@ export function volcanoMarkup(
     top.reduce((sum, point) => sum + point[0], 0) / 6,
     top.reduce((sum, point) => sum + point[1], 0) / 6,
   ]
-  const RIM = 0.36
-  const rim = top.map(
-    ([x, y]): Point => [
-      middle[0] + (x - middle[0]) * RIM,
-      middle[1] + (y - middle[1]) * RIM - height,
-    ]
-  )
+  const ring = (scale: number, up: number) =>
+    top.map(
+      ([x, y]): Point => [
+        middle[0] + (x - middle[0]) * scale,
+        middle[1] + (y - middle[1]) * scale - up,
+      ]
+    )
+  const foot = ring(0.9, 0)
+  const rim = ring(0.3, height)
   const xy = ([x, y]: Point) => `${(x * g).toFixed(1)},${(y * g).toFixed(1)}`
   const path = (points: Point[]) => `M${points.map(xy).join('L')}Z`
   const between = (a: Point, b: Point, t: number): Point => [
     a[0] + (b[0] - a[0]) * t,
     a[1] + (b[1] - a[1]) * t,
   ]
-  const markup: string[] = []
+  const markup: string[] = [
+    // The skirt of scree: two soft rings out to the tile's own outline.
+    `<path d="${path(ring(1, 0))}" fill="${cliff.face}" fill-opacity="0.22"/>`,
+    `<path d="${path(ring(0.96, 0))}" fill="${cliff.face}" fill-opacity="0.3"/>`,
+  ]
   // The three flanks toward the viewer: SE in shade, S, SW in the light.
   const tones = [cliff.foot, cliff.face, cliff.lip]
   ;[0, 1, 2].forEach(k => {
-    const [a, b, c, d] = [top[k], top[k + 1], rim[k + 1], rim[k]]
+    const [a, b, c, d] = [foot[k], foot[k + 1], rim[k + 1], rim[k]]
     markup.push(
       `<path d="${path([a, b, c, d])}" fill="${cliff.face}" stroke="${cliff.face}" stroke-width="1" stroke-linejoin="round"/>`,
       `<path d="${path([a, b, c, d])}" fill="${tones[k]}" fill-opacity="${k === 1 ? 0 : 0.55}"/>`,
-      // Ash round the top of the flank.
-      `<path d="${path([between(d, a, 0.24), between(c, b, 0.24), c, d])}" fill="${SNOW_ASH}" fill-opacity="0.8"/>`
+      `<path d="${path([between(d, a, 0.2), between(c, b, 0.2), c, d])}" fill="${SNOW_ASH}" fill-opacity="0.75"/>`
     )
     for (let n = 0; n < 3; n++) {
       const t = (n + 0.5 + (roll(k * 5 + n) - 0.5) * 0.4) / 3
-      const from = between(between(d, c, t), between(a, b, t), 0.3)
+      const from = between(between(d, c, t), between(a, b, t), 0.28)
       const to = between(
         between(d, c, t),
         between(a, b, t),
@@ -525,26 +536,37 @@ export function volcanoMarkup(
       )
     }
   })
-  // The crater: the wall inside the far rim, the lake, the rim's lip.
-  const rimMiddle: Point = [middle[0], middle[1] - height]
-  const lake = rim.map(
-    ([x, y]): Point => [
-      rimMiddle[0] + (x - rimMiddle[0]) * 0.74,
-      rimMiddle[1] +
-        (y - rimMiddle[1]) * 0.6 +
-        (rim[1][1] - rimMiddle[1]) * 0.3,
-    ]
+  // Lava down the front flank, from a notch in the rim.
+  const notch = between(rim[1], rim[2], 0.4)
+  const run = [
+    notch,
+    between(notch, between(foot[1], foot[2], 0.3), 0.3),
+    between(notch, between(foot[1], foot[2], 0.5), 0.55),
+    between(notch, between(foot[1], foot[2], 0.42), 0.8),
+  ]
+  const flow = `M${run.map(xy).join('L')}`
+  markup.push(
+    `<path d="${flow}" fill="none" stroke="${LAVA.edge}" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>`,
+    `<path d="${flow}" fill="none" stroke="${LAVA.core}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>`
   )
+  // The crater: the dark wall inside the far rim, the lava, the rim's lip.
+  const rimMiddle: Point = [middle[0], middle[1] - height]
+  const pool = (scale: number): Point[] =>
+    rim.map(([x, y]) => [
+      rimMiddle[0] + (x - rimMiddle[0]) * scale,
+      rimMiddle[1] +
+        (y - rimMiddle[1]) * scale * 0.75 +
+        (rim[1][1] - rimMiddle[1]) * 0.28,
+    ])
   markup.push(
     `<path d="${path(rim)}" fill="${cliff.foot}"/>`,
-    `<path d="${path(lake)}" fill="${WATER}" stroke="${WATER}" stroke-width="3" stroke-linejoin="round"/>`,
-    `<path d="M${xy([lake[3][0] + 0.12, lake[3][1]])}h${((lake[0][0] - lake[3][0]) * 0.4 * g).toFixed(1)}" stroke="${WATER_STREAK}" stroke-width="2.4" stroke-linecap="round"/>`,
+    `<path d="${path(pool(0.8))}" fill="${LAVA.edge}" stroke="${LAVA.edge}" stroke-width="3" stroke-linejoin="round"/>`,
+    `<path d="${path(pool(0.45))}" fill="${LAVA.core}"/>`,
     `<path d="${path(rim)}" fill="none" stroke="${cliff.lip}" stroke-width="3" stroke-linejoin="round"/>`
   )
-  // Crags on the far rim.
   ;[3, 4, 5].forEach(k => {
     const at = between(rim[k], rim[(k + 1) % 6], 0.5)
-    const w = Math.abs(rim[0][0] - rim[3][0]) * 0.2
+    const w = Math.abs(rim[0][0] - rim[3][0]) * 0.22
     const h = w * (0.9 + roll(k + 41) * 0.6)
     markup.push(
       `<path d="${path([
@@ -559,14 +581,22 @@ export function volcanoMarkup(
       ])}" fill="${cliff.foot}"/>`
     )
   })
-  markup.push(
-    steamMarkup(
-      (rimMiddle[0] + 0.1) * g,
-      (rimMiddle[1] - 0.1) * g,
-      Math.abs(rim[0][0] - rim[3][0]) * 0.7 * g,
-      0.75
+  // Smoke: puffs going up and off downwind, larger and paler as they go.
+  const across = Math.abs(rim[0][0] - rim[3][0])
+  ;[
+    [0.05, 0.22, 0.3],
+    [0.4, 0.55, 0.4],
+    [0.95, 0.85, 0.5],
+    [1.6, 1.05, 0.58],
+    [2.3, 1.2, 0.62],
+    [3, 1.28, 0.52],
+  ].forEach(([dx, up, r], n) => {
+    const [x, y] = [rimMiddle[0] + dx * across, rimMiddle[1] - up * across]
+    markup.push(
+      `<circle cx="${(x * g).toFixed(1)}" cy="${(y * g).toFixed(1)}" r="${(r * across * g).toFixed(1)}" fill="${n < 3 ? SMOKE.dark : SMOKE.light}" fill-opacity="${(0.85 - n * 0.11).toFixed(2)}"/>`,
+      `<circle cx="${((x - r * across * 0.25) * g).toFixed(1)}" cy="${((y - r * across * 0.25) * g).toFixed(1)}" r="${(r * across * 0.55 * g).toFixed(1)}" fill="${SMOKE.light}" fill-opacity="${(0.5 - n * 0.05).toFixed(2)}"/>`
     )
-  )
+  })
   return markup.join('')
 }
 
@@ -713,4 +743,168 @@ export function parasolMarkup(
     canopy(-0.3, -0.1, SNOW_ASH),
     canopy(0.1, 0.3, SNOW_ASH),
   ].join('')
+}
+
+// ---------------------------------------------------------------------------
+// Natural water: shapes with no straight side and no perfect curve.
+
+interface Lobe {
+  x: number
+  y: number
+  rx: number
+  ry: number
+}
+
+/**
+ * The shore of a lake made of several lobes run together: one outline round
+ * them all, seen from their middle, with the cusps between lobes rounded off
+ * and the whole a little irregular. Points in map grid units.
+ */
+export function lakeShore(lobes: Lobe[], seed = 0): Point[] {
+  const heart: Point = [
+    lobes.reduce((sum, lobe) => sum + lobe.x, 0) / lobes.length,
+    lobes.reduce((sum, lobe) => sum + lobe.y, 0) / lobes.length,
+  ]
+  const steps = 72
+  const reach = Array.from({ length: steps }, (_, n) => {
+    const angle = (n / steps) * Math.PI * 2
+    const [dx, dy] = [Math.cos(angle), Math.sin(angle)]
+    let far = 0
+    for (const { x, y, rx, ry } of lobes) {
+      // Where the ray from the heart leaves this lobe.
+      const [px, py] = [(heart[0] - x) / rx, (heart[1] - y) / ry]
+      const [qx, qy] = [dx / rx, dy / ry]
+      const a = qx * qx + qy * qy
+      const b = 2 * (px * qx + py * qy)
+      const c = px * px + py * py - 1
+      const root = b * b - 4 * a * c
+      if (root < 0) continue
+      far = Math.max(far, (-b + Math.sqrt(root)) / (2 * a))
+    }
+    return far
+  })
+  const floor = Math.min(...lobes.map(lobe => Math.min(lobe.rx, lobe.ry))) * 0.5
+  return reach.map((_, n): Point => {
+    // Rounded: the mean of the reach over a few steps to either side.
+    let sum = 0
+    for (let k = -3; k <= 3; k++) sum += reach[(n + k + steps) % steps]
+    const angle = (n / steps) * Math.PI * 2
+    const wobble =
+      1 +
+      0.07 * Math.sin(angle * 3 + seed * 1.7 + 0.6) +
+      0.05 * Math.sin(angle * 5 + seed * 2.9 + 2.1)
+    const r = Math.max(floor, (sum / 7) * wobble)
+    return [heart[0] + Math.cos(angle) * r, heart[1] + Math.sin(angle) * r]
+  })
+}
+
+/** A closed smooth curve through the middles of a shape's sides. */
+export function smoothClosedPath(points: Point[], g: number): string {
+  const at = (n: number) => points[(n + points.length) % points.length]
+  const middle = (a: Point, b: Point) =>
+    `${(((a[0] + b[0]) / 2) * g).toFixed(1)},${(((a[1] + b[1]) / 2) * g).toFixed(1)}`
+  let d = `M${middle(at(-1), at(0))}`
+  points.forEach((point, n) => {
+    d += `Q${(point[0] * g).toFixed(1)},${(point[1] * g).toFixed(1)} ${middle(point, at(n + 1))}`
+  })
+  return `${d}Z`
+}
+
+/** The shape of `points` grown (or shrunk) about their middle. */
+export function scaledAbout(points: Point[], scale: number): Point[] {
+  const middle: Point = [
+    points.reduce((sum, point) => sum + point[0], 0) / points.length,
+    points.reduce((sum, point) => sum + point[1], 0) / points.length,
+  ]
+  return points.map(([x, y]) => [
+    middle[0] + (x - middle[0]) * scale,
+    middle[1] + (y - middle[1]) * scale,
+  ])
+}
+
+/**
+ * The hot spring a river rises from: an irregular pool in its crust of
+ * sulphur, longer toward `toward` (the way the river leaves it), so that the
+ * river runs out of its water. Layer "bed" is the crust and the water, drawn
+ * under the river; "water" is the water alone, drawn over the river's first
+ * stretch so that no river bank crosses the pool.
+ */
+export function thermalSpringMarkup(
+  at: Point,
+  toward: Point,
+  size: number,
+  squash: number,
+  g: number,
+  layer: 'bed' | 'water'
+): string {
+  const [dx, dy] = [toward[0] - at[0], toward[1] - at[1]]
+  const length = Math.hypot(dx, dy) || 1
+  const [ux, uy] = [dx / length, dy / length]
+  const r = size / 2
+  const shore = lakeShore(
+    [
+      { x: at[0], y: at[1], rx: r, ry: r * squash },
+      {
+        x: at[0] - ux * r * 0.55 + uy * r * 0.35,
+        y: at[1] - uy * r * 0.4 - ux * r * 0.2,
+        rx: r * 0.7,
+        ry: r * 0.62 * squash,
+      },
+      // The tongue of water the river leaves by.
+      {
+        x: at[0] + ux * r * 0.75,
+        y: at[1] + uy * r * 0.75,
+        rx: r * 0.6,
+        ry: r * 0.42 * squash + 0.12,
+      },
+    ],
+    3
+  )
+  const ring = (scale: number, fill: string) =>
+    `<path d="${smoothClosedPath(scaledAbout(shore, scale), g)}" fill="${fill}"/>`
+  if (layer === 'water') {
+    return ring(0.8, WATER) + ring(0.42, WATER_STREAK)
+  }
+  return (
+    ring(1.2, SULPHUR.crust) +
+    ring(1.03, SULPHUR.pale) +
+    ring(0.8, WATER) +
+    steamMarkup(at[0] * g, (at[1] - r * 0.2) * g, r * 0.8 * g, 0.55)
+  )
+}
+
+/**
+ * A ship coming in: the classic sailboat with a pennant at its masthead, and
+ * behind it (to the west: it sails east, into the bay) the spreading lines of
+ * its wake. `x, y` is the middle of its waterline, `size` its width, in map
+ * grid units.
+ */
+export function arrivalShipMarkup(
+  x: number,
+  y: number,
+  size: number,
+  g: number
+): string {
+  const [cx, cy, w] = [x * g, y * g, size * g]
+  const h = w * 0.82
+  const markup: string[] = []
+  // The wake: two lines opening out astern, and the churned water between.
+  for (const side of [-1, 1]) {
+    markup.push(
+      `<path d="M${(cx - w * 0.3).toFixed(1)},${(cy + side * 2).toFixed(1)}Q${(cx - w * 1.1).toFixed(1)},${(cy + side * w * 0.1).toFixed(1)} ${(cx - w * 1.5).toFixed(1)},${(cy + side * w * 0.34).toFixed(1)}" fill="none" stroke="${WATER_STREAK}" stroke-opacity="0.8" stroke-width="2.4" stroke-linecap="round"/>`,
+      `<path d="M${(cx - w * 0.5).toFixed(1)},${(cy + side * 1).toFixed(1)}Q${(cx - w * 1).toFixed(1)},${(cy + side * w * 0.04).toFixed(1)} ${(cx - w * 1.2).toFixed(1)},${(cy + side * w * 0.14).toFixed(1)}" fill="none" stroke="${WATER_STREAK}" stroke-opacity="0.5" stroke-width="2" stroke-linecap="round"/>`
+    )
+  }
+  for (const back of [0.7, 1, 1.3]) {
+    markup.push(
+      `<path d="M${(cx - w * back).toFixed(1)},${cy.toFixed(1)}h${(-w * 0.16).toFixed(1)}" stroke="${WATER_STREAK}" stroke-opacity="0.6" stroke-width="2" stroke-linecap="round"/>`
+    )
+  }
+  markup.push(
+    `<use href="#sailboat" x="${(cx - w / 2).toFixed(1)}" y="${(cy - h * 0.92).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}"/>`,
+    // The pennant, streaming aft from the masthead.
+    `<path d="M${cx.toFixed(1)},${(cy - h * 0.9).toFixed(1)}V${(cy - h * 1.12).toFixed(1)}" stroke="${PLANK_GAP}" stroke-width="2"/>`,
+    `<path d="M${cx.toFixed(1)},${(cy - h * 1.12).toFixed(1)}L${(cx - w * 0.3).toFixed(1)},${(cy - h * 1.06).toFixed(1)}L${cx.toFixed(1)},${(cy - h * 1).toFixed(1)}Z" fill="${BUILT.roof}"/>`
+  )
+  return markup.join('')
 }
