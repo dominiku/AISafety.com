@@ -151,9 +151,19 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
   ],
   // prettier-ignore
   features: [
-    // The cove: water inside the coast, between the two arms of Advocacy.
+    // Advocacy Anchorage: water inside the coast, between the two arms of
+    // Advocacy, open to the north. Its own boats lie moored well inside it,
+    // by the head of Persuasion Pier; two ships are standing out past the
+    // headland for the rest of the world. The sailboat art is sideways-on
+    // and cannot be turned to point out of the bay, so they lie east of the
+    // mouth, as if they had cleared it and borne away along the coast, and
+    // their wakes angle back to it.
     { code: 'cv', kind: 'water', height: 0,
-      landmark: { symbol: 'boats', width: 3.4, height: 1.26, shift: [1.5, 0.7] } },
+      landmark: { symbol: 'boats', width: 2.8, height: 1.04, shift: [0.22, 1.4] },
+      departs: [
+        { at: [11, 1], shift: [-0.65, 0.2], size: 1.8 },
+        { at: [13, 0], shift: [-0.6, 0.3], size: 1.35 },
+      ] },
     // The harbor the road starts from: a bay between the arms of the landing.
     { code: 'hb', kind: 'water', height: 0, arrival: true },
     // The top of the volcano, in the Range's back corner, with only sea

@@ -60,6 +60,7 @@ import { buildingMarkup } from './hexBuildings'
 import {
   barnMarkup,
   beaconMarkup,
+  departingShipMarkup,
   haystackMarkup,
   netFrameMarkup,
   reedBedMarkup,
@@ -2247,6 +2248,15 @@ export function hexBackdropMarkup(
   if (pins) {
     for (const [x, y] of layout.arrivals) {
       stand(y, 0, arrivalShipMarkup(x, y, 1.9, g))
+    }
+    // And ships standing out from the anchorage for the rest of the world,
+    // each with its wake angling back to the mouth it came out of.
+    for (const ship of layout.departures) {
+      stand(
+        ship.at[1],
+        0,
+        departingShipMarkup(ship.at[0], ship.at[1], ship.size, ship.from, g)
+      )
     }
   }
   // The compass rose, round the four buttons of map furniture that stand at

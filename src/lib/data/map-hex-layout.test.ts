@@ -472,6 +472,33 @@ describe('layoutHexMap', () => {
     ).toThrow(/no district's tile/)
   })
 
+  it('sends ships out from a water, their wakes angling back to its mouth', () => {
+    const layout = layoutHexMap(
+      withTiles(SPEC.tiles, {
+        features: [
+          {
+            code: 'cv',
+            kind: 'water',
+            height: 0,
+            departs: [{ at: [5, 1], shift: [0.4, -0.3], size: 1.5 }],
+          },
+        ],
+        takeAllTiles: true,
+      }),
+      logos('Beta', 4)
+    )
+    expect(layout.departures).toHaveLength(1)
+    const [ship] = layout.departures
+    expect(ship.size).toBe(1.5)
+    // It lies where the spec put it: that sea tile's middle, plus the shift.
+    const berth = at(layout, 5, 1).center
+    expect(ship.at[0]).toBeCloseTo(berth[0] + 0.4)
+    expect(ship.at[1]).toBeCloseTo(berth[1] - 0.3)
+    // The mouth is the seaward side of the water: this cove's only land lies
+    // west of it, so its mouth is east of its middle.
+    expect(ship.from[0]).toBeGreaterThan(at(layout, 4, 2).center[0])
+  })
+
   it('keeps places for scenery, spread out and clear of logos, and brings a ship to an arrival harbor', () => {
     const all = logos('Beta', 8, 0.3)
     const layout = layoutHexMap(

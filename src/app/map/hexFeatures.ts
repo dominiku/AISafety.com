@@ -1098,6 +1098,55 @@ export function beaconMarkup(at: Point, toward: Point, g: number): string {
 }
 
 /**
+ * A ship standing out to sea: the classic sailboat with a pennant at its
+ * masthead, and the wake angling back to `from`, the mouth it came out of.
+ * The art has one broadside and cannot be turned to point out of a bay, so
+ * the hull stays sideways-on and the wake is what says where the ship has
+ * come from: it reads as having cleared the headland and borne away along
+ * the coast. The ship must therefore lie east of its mouth, with the wake
+ * astern of it. `x, y` is the middle of its waterline, `size` its width, in
+ * map grid units.
+ */
+export function departingShipMarkup(
+  x: number,
+  y: number,
+  size: number,
+  from: Point,
+  g: number
+): string {
+  const [cx, cy, w] = [x * g, y * g, size * g]
+  const h = w * 0.82
+  const [bx, by] = [from[0] * g - cx, from[1] * g - cy]
+  const astern = Math.hypot(bx, by)
+  if (astern === 0) return ''
+  const [ux, uy] = [bx / astern, by / astern]
+  // Across the wake, to open it out.
+  const [px, py] = [-uy, ux]
+  const at = (along: number, across: number) =>
+    `${(cx + ux * along + px * across).toFixed(1)},${(cy + uy * along + py * across).toFixed(1)}`
+  const markup: string[] = []
+  // The wake: two lines opening out astern, and the churned water between.
+  for (const side of [-1, 1]) {
+    markup.push(
+      `<path d="M${at(w * 0.3, side * 2)}Q${at(w * 1.15, side * w * 0.13)} ${at(w * 1.95, side * w * 0.4)}" fill="none" stroke="${WATER_STREAK}" stroke-opacity="0.8" stroke-width="2.4" stroke-linecap="round"/>`,
+      `<path d="M${at(w * 0.5, side * 1)}Q${at(w * 0.95, side * w * 0.05)} ${at(w * 1.3, side * w * 0.17)}" fill="none" stroke="${WATER_STREAK}" stroke-opacity="0.5" stroke-width="2" stroke-linecap="round"/>`
+    )
+  }
+  for (const along of [0.8, 1.15, 1.5]) {
+    markup.push(
+      `<path d="M${at(w * along, 0)}L${at(w * (along + 0.16), 0)}" stroke="${WATER_STREAK}" stroke-opacity="0.6" stroke-width="2" stroke-linecap="round"/>`
+    )
+  }
+  markup.push(
+    `<use href="#sailboat" x="${(cx - w / 2).toFixed(1)}" y="${(cy - h * 0.92).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}"/>`,
+    // The pennant, streaming aft from the masthead.
+    `<path d="M${cx.toFixed(1)},${(cy - h * 0.9).toFixed(1)}V${(cy - h * 1.12).toFixed(1)}" stroke="${PLANK_GAP}" stroke-width="2"/>`,
+    `<path d="M${cx.toFixed(1)},${(cy - h * 1.12).toFixed(1)}L${(cx - w * 0.3).toFixed(1)},${(cy - h * 1.06).toFixed(1)}L${cx.toFixed(1)},${(cy - h * 1).toFixed(1)}Z" fill="${BUILT.roof}"/>`
+  )
+  return markup.join('')
+}
+
+/**
  * A ship coming in: the classic sailboat with a pennant at its masthead, and
  * behind it (to the west: it sails east, into the bay) the spreading lines of
  * its wake. `x, y` is the middle of its waterline, `size` its width, in map

@@ -154,6 +154,12 @@ export interface HexFeatureSpec {
   // Water a ship is sailing into from the west (the harbor newcomers
   // arrive at).
   arrival?: boolean
+  // Ships standing out from this water for the open sea (the anchorage the
+  // field talks to the rest of the world from). Each lies on a sea tile of
+  // the board (column, row), moved `shift` grid units off its middle, and
+  // must be east of the water's mouth: the art is sideways-on, so the wake
+  // astern of it is what says where it came from.
+  departs?: { at: [number, number]; shift?: [number, number]; size: number }[]
 }
 
 export interface HexMapSpec {
@@ -383,6 +389,10 @@ export interface HexLayout {
   // Where a ship is coming in (see HexFeatureSpec.arrival): the middle of
   // its waterline, in the middle of the harbor's water.
   arrivals: Point[]
+  // Ships standing out to sea (see HexFeatureSpec.departs): where each is,
+  // how large, and the middle of the mouth it came out of, which its wake
+  // angles back to.
+  departures: { at: Point; from: Point; size: number }[]
   // How large the compass rose is drawn (see HexMapSpec.compass).
   compass: { width: number; height: number } | null
   // Footpaths from a building to another district's landmark.
@@ -1971,6 +1981,46 @@ export function layoutHexMap(
             middles.reduce((sum, point) => sum + point[1], 0) / middles.length,
           ] as Point,
         ]
+      }),
+    departures: spec.features
+      .filter(feature => feature.departs)
+      .flatMap(feature => {
+        // The mouth: the middle of every side of this water that opens on
+        // the sea.
+        const mouths = tiles
+          .filter(tile => tile.code === feature.code)
+          .flatMap(tile =>
+            tile.coast.flatMap((coast, k) =>
+              coast
+                ? [
+                    [
+                      (tile.top[k][0] + tile.top[(k + 1) % 6][0]) / 2,
+                      (tile.top[k][1] + tile.top[(k + 1) % 6][1]) / 2,
+                    ] as Point,
+                  ]
+                : []
+            )
+          )
+        if (mouths.length === 0) return []
+        const from: Point = [
+          mouths.reduce((sum, point) => sum + point[0], 0) / mouths.length,
+          mouths.reduce((sum, point) => sum + point[1], 0) / mouths.length,
+        ]
+        return feature.departs!.map(ship => {
+          const [x, y] = projectPoint(
+            view,
+            hexCenter({ col: ship.at[0], row: ship.at[1] }, view.size),
+            0
+          )
+          return {
+            at: [
+              x + (ship.shift?.[0] ?? 0),
+              y + (ship.shift?.[1] ?? 0),
+            ] as Point,
+            from,
+            size: ship.size,
+          }
+        })
       }),
     compass: spec.compass ?? null,
     lakes,
