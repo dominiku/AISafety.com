@@ -75,6 +75,7 @@ import {
   scaledAbout,
   smoothClosedPath,
   thermalSpringMarkup,
+  springOutflowMarkup,
   beachHutMarkup,
   sulphurPoolMarkup,
   slopeCornerMarkup,
@@ -130,10 +131,13 @@ const HILL = { lit: '#9ccf8f', shade: '#008969' }
 // middle of its tile it lies (map grid units). How near a dam a lake's shore
 // has to come to be drawn on to it.
 const DAM_REACH = 1.6
-// A river's mouth into a lake: how many of its piece's points back the
-// widening starts, and half the width it opens to (map grid units).
-const MOUTH_BACK = 9
-const MOUTH_WIDTH = 1.05
+// A river's mouth into a lake: how far back up the stream the widening
+// starts, and half the width it opens to (map grid units).
+const MOUTH_BACK = 1.9
+const MOUTH_WIDTH = 0.72
+const MOUTH_CLEAR = 0.26
+// How far along its stream a spring's pool narrows into it (map grid units).
+const OUTFLOW_REACH = 1.5
 const FOREST = { lit: '#00ae85', shade: '#008969' }
 const VINE = '#2f5650'
 // The peaks that wall a forbidding district in.
@@ -1102,6 +1106,31 @@ export function hexBackdropMarkup(
         layer,
         Math.hypot(spring.at[0] - pond.x, spring.at[1] - pond.y)
       ) +
+      // The pool narrows into its stream: no square-ended river laid on it.
+      (first
+        ? springOutflowMarkup(
+            // From inside the pool, out along the stream.
+            [
+              [
+                (pond.x + spring.at[0]) / 2,
+                (pond.y + spring.at[1]) / 2,
+              ] as Point,
+              ...lastStretch([...first.points].reverse(), 99)
+                .reverse()
+                .filter(
+                  point =>
+                    Math.hypot(
+                      point[0] - spring.at[0],
+                      point[1] - spring.at[1]
+                    ) < OUTFLOW_REACH
+                ),
+            ],
+            pond.rx * 0.34,
+            first.width / 2,
+            g,
+            layer
+          )
+        : '') +
       '</g>'
     )
   }
@@ -1140,6 +1169,22 @@ export function hexBackdropMarkup(
       }
       return best ? best.to : point
     })
+  }
+  // The last `reach` (map grid units) of a line, in order, with points that
+  // lie on top of each other dropped (they have no direction).
+  const lastStretch = (points: Point[], reach: number): Point[] => {
+    const kept: Point[] = []
+    let gone = 0
+    for (let k = points.length - 1; k >= 0 && gone <= reach; k--) {
+      const last = kept[0]
+      if (last) {
+        const step = Math.hypot(points[k][0] - last[0], points[k][1] - last[1])
+        if (step < 0.02) continue
+        gone += step
+      }
+      kept.unshift(points[k])
+    }
+    return kept
   }
   // A lake as a path: its smooth shore, or, where it covers the whole of its
   // tiles, their outlines.
@@ -1923,8 +1968,8 @@ export function hexBackdropMarkup(
           tile.top.map((a, k): [Point, Point] => [a, tile.top[(k + 1) % 6]])
         )
       if (sides.length === 0) return
-      const onShore = (point: Point) =>
-        sides.some(([a, b]) => {
+      const shoreAt = (point: Point) =>
+        sides.find(([a, b]) => {
           const [wx, wy] = [b[0] - a[0], b[1] - a[1]]
           const along =
             ((point[0] - a[0]) * wx + (point[1] - a[1]) * wy) /
@@ -1949,23 +1994,79 @@ export function hexBackdropMarkup(
         }
         for (const points of [piece.points, [...piece.points].reverse()]) {
           const mouth = points[points.length - 1]
-          if (!onShore(mouth)) continue
-          // A little way back up the stream, and the way it runs there.
-          const back = points[Math.max(0, points.length - 1 - MOUTH_BACK)]
-          const [dx, dy] = [mouth[0] - back[0], mouth[1] - back[1]]
-          const length = Math.hypot(dx, dy) || 1
-          const [nx, ny] = [-dy / length, dx / length]
-          const narrow = piece.width / 2
-          const at = (from: Point, aside: number): Point => [
-            from[0] + nx * aside,
-            from[1] + ny * aside,
-          ]
-          const bend: Point = [
-            back[0] + (mouth[0] - back[0]) * 0.6,
-            back[1] + (mouth[1] - back[1]) * 0.6,
-          ]
+          const shore = shoreAt(mouth)
+          if (!shore) continue
+          // The mouth lies along the lake's side (whatever way the stream
+          // wanders up to it), no wider than the side has room for, so that
+          // no corner of it sticks out past the lake.
+          const [a, b] = shore
+          const side = Math.hypot(b[0] - a[0], b[1] - a[1])
+          const along: Point = [(b[0] - a[0]) / side, (b[1] - a[1]) / side]
+          // How far the mouth may open toward each end of the side: well
+          // short of an end that is a corner of the plateau's own edge (the
+          // water would stand against the cliff there), nearly up to one
+          // that lies inland.
+          const opens = (end: Point) => {
+            const outer = plateau.loops.some(loop =>
+              loop.some(
+                corner =>
+                  Math.hypot(corner[0] - end[0], corner[1] - end[1]) < 0.02
+              )
+            )
+            return Math.min(
+              MOUTH_WIDTH,
+              Math.hypot(mouth[0] - end[0], mouth[1] - end[1]) -
+                (outer ? MOUTH_CLEAR : 0.12)
+            )
+          }
+          // The banks follow the stream's own course over its last stretch,
+          // drawing apart faster and faster, and end on the lake's side.
+          const course = lastStretch(points, MOUTH_BACK)
+          // Half the river's own width at a point of its course (it may
+          // taper along a piece).
+          const riverHalf = (point: Point) => {
+            const at = piece.points.indexOf(point)
+            const share = at < 0 ? 1 : at / (piece.points.length - 1)
+            return (
+              (piece.width +
+                ((piece.widthEnd ?? piece.width) - piece.width) * share) /
+              2
+            )
+          }
+          const first = course[0]
+          const second = course[1] ?? mouth
+          // Which way along the side lies to the stream's left.
+          const left =
+            -(second[1] - first[1]) * along[0] +
+              (second[0] - first[0]) * along[1] >
+            0
+              ? 1
+              : -1
+          const bank = (turn: number): Point[] => {
+            const sign = turn * left
+            const wide = opens(sign > 0 ? b : a)
+            return course.map((point, k): Point => {
+              if (k === course.length - 1) {
+                return [
+                  mouth[0] + along[0] * wide * sign,
+                  mouth[1] + along[1] * wide * sign,
+                ]
+              }
+              const before = course[Math.max(0, k - 1)]
+              const after = course[k + 1]
+              const run =
+                Math.hypot(after[0] - before[0], after[1] - before[1]) || 1
+              const t = k / (course.length - 1)
+              const narrow = riverHalf(point)
+              const half = narrow + Math.max(0, wide - narrow) * t * t
+              return [
+                point[0] - ((after[1] - before[1]) / run) * half * turn,
+                point[1] + ((after[0] - before[0]) / run) * half * turn,
+              ]
+            })
+          }
           out.push(
-            `<path clip-path="url(#${id})" d="M${xy(at(back, narrow))}Q${xy(at(bend, narrow * 1.15))} ${xy(at(mouth, MOUTH_WIDTH))}L${xy(at(mouth, -MOUTH_WIDTH))}Q${xy(at(bend, -narrow * 1.15))} ${xy(at(back, -narrow))}Z" fill="${WATER}"/>`
+            `<path clip-path="url(#${id})" d="M${[...bank(1), ...bank(-1).reverse()].map(xy).join('L')}Z" fill="${WATER}" stroke="${WATER}" stroke-width="1" stroke-linejoin="round"/>`
           )
         }
       }

@@ -1089,3 +1089,48 @@ export function arrivalShipMarkup(
   )
   return markup.join('')
 }
+
+/**
+ * Where a stream leaves a hot spring: the pool narrows into it. `course` is
+ * the stream's first stretch, from inside the pool outward; the water is
+ * `wide` across (half of it) at the pool and the stream's own half-width,
+ * `narrow`, at the far end, and the pool's crust of sulphur thins out along
+ * it. Layers as for the spring itself.
+ */
+export function springOutflowMarkup(
+  course: Point[],
+  wide: number,
+  narrow: number,
+  g: number,
+  layer: 'bed' | 'water'
+): string {
+  if (course.length < 3) return ''
+  const band = (extra: number, fade: boolean) => {
+    const side = (turn: number) =>
+      course.map((point, k): Point => {
+        const before = course[Math.max(0, k - 1)]
+        const after = course[Math.min(course.length - 1, k + 1)]
+        const run = Math.hypot(after[0] - before[0], after[1] - before[1]) || 1
+        const t = k / (course.length - 1)
+        // Narrowing fast at first, then slowly: the neck of a funnel.
+        const ease = (1 - t) * (1 - t)
+        const half =
+          narrow + (wide - narrow) * ease + extra * (fade ? 1 - t : 1)
+        return [
+          point[0] - ((after[1] - before[1]) / run) * half * turn,
+          point[1] + ((after[0] - before[0]) / run) * half * turn,
+        ]
+      })
+    return `M${[...side(1), ...side(-1).reverse()]
+      .map(([x, y]) => `${(x * g).toFixed(1)},${(y * g).toFixed(1)}`)
+      .join('L')}Z`
+  }
+  const shape = (extra: number, fade: boolean, fill: string) =>
+    `<path d="${band(extra, fade)}" fill="${fill}" stroke="${fill}" stroke-width="1" stroke-linejoin="round"/>`
+  if (layer === 'water') return shape(0, false, WATER)
+  return (
+    shape(0.3, true, SULPHUR.crust) +
+    shape(0.16, true, SULPHUR.pale) +
+    shape(0, false, WATER)
+  )
+}
