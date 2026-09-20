@@ -15,7 +15,7 @@
 // paint each district about as many tiles as its logos need (a tile holds
 // about one large logo, two medium or four small; the render script's need
 // report gives the count). The two rows at the top are left to the sea for
-// the map's title. Logos fill a
+// the map's title (but to the right of it, where Think-Tank Town has a tile). Logos fill a
 // district from its most inland tile (the one nearest the castle) outward.
 // With takeAllTiles off, a district takes only as many tiles as its logos
 // need and the rest stay sea until the day they are needed.
@@ -64,15 +64,15 @@ import { QUIET_REALM } from './map-realms'
 const TILES = `
 # 0   1   2   3   4   5   6   7   8   9   10  11  12  13  14  15  16  17  18
   ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..
-  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..
+  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  Th  ..  ..  ..
   ..  ..  Ne  Ne~ Ne  Fo~ Fo  Fo  Fo  Gr  cv! cv  Go  Go  Th  Th  Th  ..  ..
   ..  ..  Ne  Ne~ Ne~ Fo~ Fo! Fo  Fr  Gr  cv  Pa  Pa  Go  Th  Th! Lo  Lo  ..
   ..  ..  Ne~ Ne! Ne  Fo  Fo~ Fo~ Fr  Gr  cv  Pa  Ma  Ma  Ma! St  Lo  ..  ..
-  ..  In! In  In  Fb  Pp  Pp  Pp  Fr~ Ca~ Ca  Ca  Ma  Ma  St  Co  Co  cr  ..
+  ..  In! In  In  Fb  Pp  Pp  Tp  Fr~ Ca~ Ca  Ca  Ma  Ma  St  Co  Co  cr  ..
   ..  hb  hb  In= Fb= Pp= Pp= Tp= Tp= Ca= kp  Ca~ Al~ Al  Al  Co  Ip  Ip  ..
-  ..  In  hb  In  Fb  Tp  Tp  Tp  Tp  Hu  Ca  rs  rs~ Al~ Co~ Co  Co  Cp  ..
-  ..  ..  In  Tp  Tp  Tp  Tp  Hu  Hu  Gm  Gm  Vc  Vc~ Al  Co  Co! Cp  Cp! ..
-  Gy! Gy  ..  ..  Op  Op  Op  Op  To  Gm  Gm  Vc  Vc  Al^ Al^ Gm  Cp  ..  ..
+  ..  In  hb  In  Fb  Tp  Tp  Tp  Tp  Hu  Ca  Al~ Al~ Al~ Co~ Co  Co  Cp  ..
+  ..  ..  In  Tp  Tp  Tp  Tp  Hu  Hu  Gm  Gm  Vc~ Vc  Al  Co  Co! Cp  Cp! ..
+  Gy! Gy  ..  ..  Op  Op  Op  Op  Gm  Gm  Gm  Gm  Vc  Al^ Al^ Gm  Cp  ..  ..
   Gy  Gy  Gy  ..  ..  ..  ..  To  To  To  Gm  Gm  Gm  Gm  Gm  ..  ..  ..  ..
   ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..
 `
@@ -147,12 +147,6 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
       landmark: { symbol: 'boats', width: 3.4, height: 1.26, shift: [1.5, 0.7] } },
     // The harbor the road starts from: a bay between the arms of the landing.
     { code: 'hb', kind: 'water', height: 0 },
-    // The Control Dam's reservoir, across the head of Venture Valley: the
-    // river runs into it from the Thermals, and out of it two ways: on to the
-    // castle, and over the dam's spillway into the valley below, where it
-    // ends in the oasis's pool. The dam is the reservoir's sides toward the
-    // valley.
-    { code: 'rs', kind: 'lake', realm: 'Technical research', height: 4 },
     // The top of the volcano, in the Range's back corner, with only sea
     // behind it to hide.
     { code: 'cr', kind: 'crater', realm: 'Technical research', height: 7.5 },
@@ -162,6 +156,24 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
     // bridge. Career support's logos may stand over the moat.
     { code: 'kp', kind: 'keep', realm: 'Talent pipeline', height: 3,
       landmark: { symbol: 'castle', width: 5, height: 3.12 } },
+  ],
+  // The Control Dam's reservoir, on the Dam's own ground at the head of
+  // Venture Valley: the river runs into it from the Thermals, and out of it
+  // two ways: on to the castle, and over the dam's spillway into the valley
+  // below, where it ends in the oasis's pool.
+  lakes: [
+    {
+      cells: [
+        [12, 6],
+        [11, 7],
+        [12, 7],
+      ],
+      dam: [
+        [11, 7, 'S'],
+        [11, 7, 'SE'],
+        [12, 7, 'S'],
+      ],
+    },
   ],
   river: { width: 0.85, branch: 0.78 },
   road: { width: 0.55 },

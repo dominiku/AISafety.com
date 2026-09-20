@@ -132,7 +132,7 @@ export interface HexDistrictSpec {
 // ends at.
 export interface HexFeatureSpec {
   code: string
-  kind: 'water' | 'scenery' | 'crater' | 'lake' | 'keep'
+  kind: 'water' | 'scenery' | 'crater' | 'keep'
   realm?: string
   // Levels above the sea; 0 for water.
   height: number
@@ -149,6 +149,16 @@ export interface HexMapSpec {
   // `branch` times as wide as the stream above.
   river: { width: number; branch: number }
   road: { width: number }
+  // Lakes on a district's ground (a reservoir): each lies over part of each
+  // of its cells (column, row), a lobe to a cell, all run together; the
+  // district's logos stand round it. `dam` names the sides of cells (toward
+  // the viewer) where a dam holds it back: the lake reaches that side, the
+  // cliff under it is the dam's wall, and a river leaving over it goes down
+  // a spillway.
+  lakes?: {
+    cells: [number, number][]
+    dam: [number, number, HexDirection][]
+  }[]
   // Every painted tile is land, needed or not: the coast is exactly as it is
   // painted, and a district gets room to grow by painting more tiles.
   // Without it a district takes only the tiles its logos need and the rest
@@ -189,8 +199,6 @@ export type HexTileState =
   | 'water'
   | 'scenery'
   | 'crater'
-  // A lake on high ground (a reservoir): land, under water.
-  | 'lake'
   | 'keep'
 
 export interface HexLaidTile extends HexGridTile {
@@ -320,6 +328,15 @@ export interface HexLayout {
     width: number
     height: number
   }[]
+  // Lakes: their lobes as drawn (ellipses), the level they lie at, a tile
+  // of the plateau they lie on; and the sides of tiles that are dam walls
+  // (`side` counts as the corners of a tile's top run: 0 SE, 1 S, 2 SW).
+  lakes: {
+    tile: string
+    height: number
+    lobes: { x: number; y: number; rx: number; ry: number }[]
+  }[]
+  dams: { tile: string; side: number }[]
   // Footpaths from a building to another district's landmark.
   paths: { points: Point[]; width: number }[]
   districtAt: (x: number, y: number) => string | null
@@ -784,6 +801,70 @@ export function layoutHexMap(
     }
   }
 
+  // Lakes: a lobe over part of each cell, drawn toward the middle of the
+  // lake, or toward a dam where the cell has one.
+  const damSides = new Set<string>()
+  const lakes: HexLayout['lakes'] = []
+  const lakeAreas = new Map<string, HexLayout['lakes'][number]['lobes']>()
+  for (const lake of spec.lakes ?? []) {
+    const cells = lake.cells.map(([col, row]) => {
+      const tile = planned.get(hexKey({ col, row }))
+      if (!tile || !districtByCode.has(tile.code!)) {
+        throw new Error(
+          `Hex map: a lake lies at column ${col}, row ${row}, which is no district's tile`
+        )
+      }
+      return tile
+    })
+    if (new Set(cells.map(tile => tile.code)).size !== 1) {
+      throw new Error('Hex map: a lake lies on one district, not across two')
+    }
+    for (const [col, row, side] of lake.dam) {
+      damSides.add(`${hexKey({ col, row })}|${side}`)
+    }
+    const centers = cells.map(tile => drawn(tile, flatCenter(tile)))
+    const heart: Point = [
+      centers.reduce((sum, point) => sum + point[0], 0) / centers.length,
+      centers.reduce((sum, point) => sum + point[1], 0) / centers.length,
+    ]
+    const lobes = cells.map((tile, n) => {
+      const dammed = lake.dam.filter(
+        ([col, row]) => col === tile.col && row === tile.row
+      )
+      // Toward its dam (far enough to reach that side), or toward the heart.
+      const toward: Point =
+        dammed.length > 0
+          ? (() => {
+              const middles = dammed.map(([, , side]) =>
+                drawn(tile, hexSideMiddle(tile, side, view.size))
+              )
+              return [
+                middles.reduce((sum, point) => sum + point[0], 0) /
+                  middles.length,
+                middles.reduce((sum, point) => sum + point[1], 0) /
+                  middles.length,
+              ] as Point
+            })()
+          : heart
+      const pull = dammed.length > 0 ? 0.5 : 0.45
+      // No two lobes quite one size.
+      const rx =
+        view.size *
+        (0.62 + 0.1 * Math.abs(Math.sin(tile.col * 127.1 + tile.row * 311.7)))
+      return {
+        x: centers[n][0] + (toward[0] - centers[n][0]) * pull,
+        y: centers[n][1] + (toward[1] - centers[n][1]) * pull,
+        rx,
+        ry: rx * view.squash * 0.95,
+      }
+    })
+    lakes.push({ tile: cells[0].ref, height: cells[0].height, lobes })
+    lakeAreas.set(cells[0].code!, [
+      ...(lakeAreas.get(cells[0].code!) ?? []),
+      ...lobes,
+    ])
+  }
+
   // The river and the road, joined up tile by tile.
   const pieces: HexPathPiece[] = []
   const drops: HexPathDrop[] = []
@@ -1086,10 +1167,10 @@ export function layoutHexMap(
           b: drawn(high, along(0.5 + share)),
           fall: (high.height - low.height) * view.lift,
           visible: SOUTH_FACING.includes(face),
-          // A lake on high ground is held back by a dam wherever it has
-          // lower ground toward the viewer.
+          // Over a dam it goes down a spillway.
           ...(SOUTH_FACING.includes(face) &&
-          (districtByCode.get(high.code!)?.dam || kindOf(high) === 'lake')
+          (districtByCode.get(high.code!)?.dam ||
+            damSides.has(`${hexKey(high)}|${face}`))
             ? { dam: true }
             : {}),
         })
@@ -1287,6 +1368,13 @@ export function layoutHexMap(
               ry: mark.height * 0.4,
             }))
           : []),
+        // Logos stand round a lake, not on it.
+        ...(lakeAreas.get(tiles[0]?.code ?? '') ?? []).map(lobe => ({
+          x: lobe.x,
+          y: lobe.y,
+          rx: lobe.rx + 0.12,
+          ry: lobe.ry + 0.12,
+        })),
         ...[buildingOf.get(tiles[0]?.code ?? '')].flatMap(building =>
           building
             ? [
@@ -1633,6 +1721,14 @@ export function layoutHexMap(
     ends,
     springs,
     bridges,
+    lakes,
+    dams: [...damSides].map(key => {
+      const [cell, side] = key.split('|')
+      return {
+        tile: planned.get(cell)!.ref,
+        side: ['SE', 'S', 'SW'].indexOf(side),
+      }
+    }),
     buildings,
     paths: paths.map(({ points, width }) => ({ points, width })),
     districtAt,

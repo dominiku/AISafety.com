@@ -429,6 +429,49 @@ describe('layoutHexMap', () => {
     }
   })
 
+  it('lays a lake on a district with its logos round it, and a dam where it is told to', () => {
+    const tiles = SPEC.tiles
+      .replace('..  Aa  Aa', '..  Aa~ Aa')
+      .replace('..  Bb  Bb  Bb  cv', '..  Bb~ Bb  Bb  cv')
+    const all = logos('Alpha', 6)
+    const layout = layoutHexMap(
+      withTiles(tiles, {
+        lakes: [
+          {
+            cells: [
+              [1, 1],
+              [2, 1],
+            ],
+            dam: [[1, 1, 'S']],
+          },
+        ],
+        takeAllTiles: true,
+      }),
+      all
+    )
+    expect(layout.lakes).toHaveLength(1)
+    expect(layout.lakes[0].lobes).toHaveLength(2)
+    expect(layout.dams).toEqual([{ tile: at(layout, 1, 1).ref, side: 1 }])
+    // The river leaves the lake over its dam, down a spillway.
+    expect(layout.drops.filter(drop => drop.dam)).toHaveLength(1)
+    // No logo stands in the water.
+    for (const logo of all) {
+      const spot = layout.positions.get(logo.id)
+      if (!spot) continue
+      for (const lobe of layout.lakes[0].lobes) {
+        expect(
+          Math.hypot((spot.x - lobe.x) / lobe.rx, (spot.y - lobe.y) / lobe.ry)
+        ).toBeGreaterThan(1)
+      }
+    }
+    expect(() =>
+      layoutHexMap(
+        withTiles(SPEC.tiles, { lakes: [{ cells: [[4, 2]], dam: [] }] }),
+        []
+      )
+    ).toThrow(/no district's tile/)
+  })
+
   it('takes up the tiles a district is told to, however few its logos', () => {
     const layout = layoutHexMap(
       {

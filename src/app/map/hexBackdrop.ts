@@ -103,7 +103,14 @@ const POLICY_PLAINS: Partial<RealmTheme> = {
 const TURNED_SATURATION = 0.8
 // DESIGN REVIEW (Melissa): the dam's stone, ripe crops and vines, all from
 // the classic map's sands, oranges and dark greens.
-const DAM = { stone: '#ffd1bc', cap: '#f6fbff', line: '#972f00' }
+// DESIGN REVIEW (Melissa): a dam is masonry, not the Range's rock: a cool
+// pale stone, so that it reads as built.
+const DAM = {
+  stone: '#d9e2df',
+  cap: '#f6fbff',
+  line: '#5f7370',
+  gate: '#2f5650',
+}
 const FIELD_RIPE = '#ffd1bc'
 // DESIGN REVIEW (Melissa): an oasis's grass, from the classic trees' greens.
 const OASIS = { grass: '#9ccf8f', lush: '#00ae85' }
@@ -530,6 +537,32 @@ export function hexBackdropMarkup(
         `<path d="M${at(-0.3, -6)}L${at(1.3, -6)}" stroke="${DAM.cap}" stroke-width="5" stroke-linecap="round"/>`
       )
     }
+    if (drop.dam) {
+      const chute = `M${at(0, 0)}L${at(1, 0)}L${at(1.12, fall)}L${at(-0.12, fall)}Z`
+      out.push(
+        `<path d="${chute}" fill="${WATER}" stroke="${DAM.line}" stroke-width="3" stroke-linejoin="round"/>`
+      )
+      for (const t of [0.2, 0.5, 0.8]) {
+        out.push(
+          `<path d="M${at(t, 4)}L${at(t + (t - 0.5) * 0.24, fall - 3)}" stroke="${WATER_STREAK}" stroke-width="2" stroke-linecap="round"/>`
+        )
+      }
+      // The sluice gates along the crest, and the foam at the foot.
+      for (const t of [0.17, 0.5, 0.83]) {
+        out.push(
+          `<path d="M${at(t - 0.13, -7)}L${at(t + 0.13, -7)}L${at(t + 0.13, 3)}L${at(t - 0.13, 3)}Z" fill="${DAM.gate}"/>`
+        )
+      }
+      for (const [t, r] of [
+        [0.1, 3],
+        [0.5, 4],
+        [0.9, 3],
+      ]) {
+        const [x, y] = at(t, fall).split(',').map(Number)
+        out.push(`<circle cx="${x}" cy="${y}" r="${r}" fill="${SNOW}"/>`)
+      }
+      return
+    }
     const large = drop.fall >= LARGE_FALL
     out.push(`<path d="${face}" fill="${WATER}"/>`)
     const streaks = large ? [0.14, 0.32, 0.5, 0.68, 0.86] : [0.25, 0.5, 0.75]
@@ -647,6 +680,7 @@ export function hexBackdropMarkup(
     if (id) out.push('</g>')
   }
 
+  const damSides = new Set(layout.dams.map(dam => `${dam.tile}|${dam.side}`))
   // A tile's cliff faces: under its three sides toward the viewer, each down
   // to the top of the tile in front of it.
   const drawFaces = (tile: HexLaidTile, theme: RealmTheme) => {
@@ -685,7 +719,7 @@ export function hexBackdropMarkup(
           `<path d="${face(0, drop)}" fill="${LINE}" fill-opacity="${FACE_SHADE}"/>`
         )
       }
-      if (tile.state === 'lake') {
+      if (damSides.has(`${tile.ref}|${k}`)) {
         // The dam that holds a lake back: a wall of pale stone with
         // buttresses down it and a cap along its top.
         out.push(
@@ -895,7 +929,6 @@ export function hexBackdropMarkup(
       tile =>
         !tile.landmark &&
         tile.state !== 'crater' &&
-        tile.state !== 'lake' &&
         // Nothing stands on an escarpment's top to hide its slope.
         !tile.scarp
     )
@@ -943,7 +976,21 @@ export function hexBackdropMarkup(
       fixed: layout.pieces
         .filter(piece => piece.clip.some(ref => refs.has(ref)))
         .flatMap(piece => alongLine(piece.points))
-        .map(([x, y]) => ({ x, y, radius: 0.75 })),
+        .map(([x, y]) => ({ x, y, radius: 0.75 }))
+        // Nor does anything stand in a lake.
+        .concat(
+          layout.lakes
+            .filter(lake => refs.has(lake.tile))
+            .flatMap(lake =>
+              lake.lobes.flatMap(({ x, y, rx, ry }) =>
+                [-0.5, 0, 0.5].map(across => ({
+                  x: x + across * rx,
+                  y,
+                  radius: ry + 0.35,
+                }))
+              )
+            )
+        ),
     }
   }
 
@@ -1067,11 +1114,13 @@ export function hexBackdropMarkup(
       out.push(`<g clip-path="url(#${clip})">`)
       scatterSpots(
         inside,
-        fixed,
+        // A canopy runs on under the logos; a hot spring lies only where the
+        // logos leave it room, or the district reads as crowded.
+        cover === 'forest' ? fixed : [...(pins ?? []), ...fixed],
         extent,
         cover === 'forest'
           ? { spacing: 0.42, minRoom: 0.05, maxRoom: 0.4 }
-          : { spacing: 1.75, minRoom: 0.3, maxRoom: 0.8 }
+          : { spacing: 1.5, minRoom: 0.5, maxRoom: 0.9 }
       )
         .sort((a, b) => a.y - b.y)
         .forEach((spot, n) =>
@@ -1089,7 +1138,7 @@ export function hexBackdropMarkup(
               : sulphurPoolMarkup(
                   spot.x,
                   spot.y,
-                  0.9 + spot.roll * 0.9,
+                  0.75 + spot.room * 0.9,
                   view.squash,
                   g,
                   n,
@@ -1173,29 +1222,34 @@ export function hexBackdropMarkup(
       return
     }
     if (cover === 'oasis') {
-      // Palms along the water and in every gap.
-      scatterSpots(
-        inside,
-        [...logos, ...fixed.map(spot => ({ ...spot, radius: 0.5 }))],
-        extent,
-        {
-          spacing: 0.6,
-          minRoom: 0.16,
-          maxRoom: 0.8,
-        }
-      ).forEach((spot, n) =>
-        stand(
-          spot.y + 0.25,
-          level,
-          palmMarkup(
-            spot.x,
-            spot.y + 0.25,
-            0.7 + spot.roll * 0.4,
-            g,
-            seed * 97 + n
-          )
+      // Palms in twos and threes, the most of them by the water, and open
+      // sand between the clumps.
+      const water = fixed.map(spot => ({ ...spot, radius: 0.5 }))
+      scatterSpots(inside, [...logos, ...water], extent, {
+        spacing: 1.3,
+        minRoom: 0.22,
+        maxRoom: 0.8,
+      }).forEach((spot, n) => {
+        const near = fixed.some(
+          point => Math.hypot(point.x - spot.x, point.y - spot.y) < 1.5
         )
-      )
+        const palms = near ? 3 : spot.roll > 0.3 ? 2 : 1
+        for (let k = 0; k < palms; k++) {
+          const x = spot.x + (k - (palms - 1) / 2) * 0.34
+          const foot = spot.y + 0.25 + (k % 2) * 0.12
+          stand(
+            foot,
+            level,
+            palmMarkup(
+              x,
+              foot,
+              0.7 + ((spot.roll * 7 + k) % 1) * 0.4,
+              g,
+              seed * 97 + n * 3 + k
+            )
+          )
+        }
+      })
       return
     }
     if (cover === 'tropical') {
@@ -1231,11 +1285,10 @@ export function hexBackdropMarkup(
       return
     }
     if (cover === 'thermals') {
-      // Geysers going off, in the gaps among the hot springs that lie under
-      // the logos.
+      // A geyser going off here and there, where there is a good gap.
       scatterSpots(inside, [...logos, ...fixed], extent, {
-        spacing: 1.1,
-        minRoom: 0.22,
+        spacing: 2.2,
+        minRoom: 0.35,
         maxRoom: 0.8,
       }).forEach((spot, n) =>
         stand(
@@ -1427,11 +1480,7 @@ export function hexBackdropMarkup(
     tile.ref !== null &&
     !tile.sunken
   const plateauKey = (tile: HexLaidTile) =>
-    tile.district !== null
-      ? `d:${tile.district}`
-      : tile.state === 'lake'
-        ? `lake:${tile.code}`
-        : `t:${tile.ref}`
+    tile.district !== null ? `d:${tile.district}` : `t:${tile.ref}`
   const grouped = new Map<string, HexLaidTile[]>()
   for (const tile of layout.tiles) {
     if (!solid(tile)) continue
@@ -1497,12 +1546,7 @@ export function hexBackdropMarkup(
       clips.push(
         `<clipPath id="${id}"><path d="${shape}" clip-rule="evenodd"/></clipPath>`
       )
-      // A lake's ground is its water; its rim, drawn below as any
-      // plateau's, is its bank.
-      const lake = plateau.tiles[0].state === 'lake'
-      out.push(
-        `<path d="${shape}" fill="${lake ? WATER : tone}" fill-rule="evenodd"/>`
-      )
+      out.push(`<path d="${shape}" fill="${tone}" fill-rule="evenodd"/>`)
       drawPlots(plateau, tone, id)
       drawRelief(plateau, tone, id)
       for (const tile of plateau.tiles) {
@@ -1580,6 +1624,31 @@ export function hexBackdropMarkup(
     for (const plateau of level) {
       for (const tile of plateau.tiles) drawStrand(tile)
     }
+    // Lakes on this level: every lobe's bank, then every lobe's water, so
+    // that they run together as one lake; cut off at the plateau's edge,
+    // where a dam holds the lake back.
+    level.forEach((plateau, n) => {
+      const id = `hex-plateau-${height}-${n}`.replace('.', '_')
+      for (const lake of layout.lakes) {
+        if (!plateau.tiles.some(tile => tile.ref === lake.tile)) continue
+        const lobe = (
+          { x, y, rx, ry }: (typeof lake.lobes)[number],
+          fill: string,
+          grow: number
+        ) =>
+          `<ellipse cx="${(x * g).toFixed(1)}" cy="${(y * g).toFixed(1)}" rx="${(rx * g + grow).toFixed(1)}" ry="${(ry * g + grow).toFixed(1)}" fill="${fill}"/>`
+        out.push(
+          `<g clip-path="url(#${id})">`,
+          ...lake.lobes.map(part => lobe(part, SHALLOWS, BANK)),
+          ...lake.lobes.map(part => lobe(part, WATER, 0)),
+          ...lake.lobes.map(
+            ({ x, y, rx }) =>
+              `<path d="M${xy([x - rx * 0.45, y - 0.1])}h${(rx * 0.5 * g).toFixed(1)}" stroke="${WATER_STREAK}" stroke-width="3" stroke-linecap="round"/>`
+          ),
+          '</g>'
+        )
+      }
+    })
     // The piers that stand at this height, over the water of their tiles.
     for (const tile of layout.tiles) {
       if (tile.deck?.height !== height) continue
@@ -1596,12 +1665,28 @@ export function hexBackdropMarkup(
       ) === height &&
       (refs.has(piece.tile) || (piece.rampTo ?? []).some(ref => refs.has(ref)))
     drawPieces(
-      // (A river needs no drawing across a lake.)
-      layout.pieces.filter(
-        piece => drawnHere(piece) && tileByRef.get(piece.tile)?.state !== 'lake'
-      ),
+      layout.pieces.filter(drawnHere),
       `hex-path-${height}`.replace('.', '_')
     )
+    level.forEach((plateau, n) => {
+      const id = `hex-plateau-${height}-${n}`.replace('.', '_')
+      for (const lake of layout.lakes) {
+        if (!plateau.tiles.some(tile => tile.ref === lake.tile)) continue
+        // The lake's water again, over the river: no river bank shows in it.
+        out.push(
+          `<g clip-path="url(#${id})">`,
+          ...lake.lobes.map(
+            ({ x, y, rx, ry }) =>
+              `<ellipse cx="${(x * g).toFixed(1)}" cy="${(y * g).toFixed(1)}" rx="${(rx * g).toFixed(1)}" ry="${(ry * g).toFixed(1)}" fill="${WATER}"/>`
+          ),
+          ...lake.lobes.map(
+            ({ x, y, rx }) =>
+              `<path d="M${xy([x - rx * 0.45, y - 0.1])}h${(rx * 0.5 * g).toFixed(1)}" stroke="${WATER_STREAK}" stroke-width="3" stroke-linecap="round"/>`
+          ),
+          '</g>'
+        )
+      }
+    })
     for (const spring of layout.springs) {
       if (!refs.has(spring.tile)) continue
       if (tileByRef.get(spring.tile)?.cover === 'thermals') {
