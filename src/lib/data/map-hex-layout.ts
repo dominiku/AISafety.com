@@ -68,6 +68,13 @@ export interface HexLandmarkArt {
   // a piece of the classic art with something at its foot that belongs by
   // the sea and not inland (the ship under the skull mountain).
   crop?: number
+  // Where a road that comes up to the art ends: the end of a street of
+  // its own, a doorway. A share of the symbol's width and height, as `lit`.
+  // A road that ends on a tile beside the landmark's runs on to it.
+  door?: [number, number]
+  // How wide the road is by the time it gets there (map grid units), where
+  // the art's own street is narrower than the road.
+  doorWidth?: number
 }
 
 export type HexCover =
@@ -1185,7 +1192,52 @@ export function layoutHexMap(
       // of the tile where it starts or ends inland.
       const inSide = above ? sideTo(above) : null
       const outSides: (HexDirection | null)[] = below.map(sideTo)
-      if (below.length === 0) {
+      // A road that ends beside a landmark with a door (on its own ground)
+      // runs on to it: out by the side they share, and over the landmark's
+      // tile to the door.
+      const doorSide =
+        kind === 'road' && below.length === 0
+          ? HEX_DIRECTIONS.find(side => {
+              const next = neighborOf(tile, side)
+              return (
+                !!next &&
+                next.height === tile.height &&
+                !!landmarkOn.get(next.ref)?.door
+              )
+            })
+          : undefined
+      const doorOf = doorSide
+        ? landmarkOn.get(neighborOf(tile, doorSide)!.ref)!
+        : null
+      if (doorSide && doorOf) {
+        outSides.push(doorSide)
+        const host = neighborOf(tile, doorSide)!
+        const from = drawn(tile, hexSideMiddle(tile, doorSide, view.size))
+        const center = drawn(host, flatCenter(host))
+        const door: Point = [
+          doorOf.x + (doorOf.door![0] - 0.5) * doorOf.width,
+          doorOf.y + (doorOf.door![1] - 0.5) * doorOf.height,
+        ]
+        const span = Math.hypot(door[0] - from[0], door[1] - from[1])
+        const inward = Math.hypot(center[0] - from[0], center[1] - from[1])
+        // In over the side square to it, and up to the door from below.
+        const points = course(
+          from,
+          [(center[0] - from[0]) / inward, (center[1] - from[1]) / inward],
+          door,
+          span > 0.5
+            ? [0, 1]
+            : [(from[0] - door[0]) / span, (from[1] - door[1]) / span],
+          0
+        )
+        pieces.push({
+          kind,
+          width: doorOf.doorWidth ?? own,
+          tile: host.ref,
+          clip: [host.ref, tile.ref],
+          points,
+        })
+      } else if (below.length === 0) {
         // The end of a run: out to the sea if it is at the coast, by the
         // side most nearly opposite the one it came in by.
         const turn = (side: HexDirection) =>
@@ -1330,7 +1382,9 @@ export function layoutHexMap(
             ? moat
             : child && child !== keep
               ? widthAt.get(hexKey(child))!
-              : own,
+              : outSide !== null && outSide === doorSide
+                ? (doorOf?.doorWidth ?? own)
+                : own,
           tile: tile.ref,
           clip,
           points,

@@ -571,6 +571,16 @@ export function hexBackdropMarkup(
         out.push(fadingRoad(piece, clip))
         continue
       }
+      const narrows =
+        piece.widthEnd !== undefined && piece.widthEnd !== piece.width
+      if (narrows) {
+        // Narrowing to a street of the art it runs into.
+        const [left, right] = banksOf(piece)
+        out.push(
+          `<path${clip} d="${outline([...left, ...[...right].reverse()])}" fill="${ROAD}"/>`
+        )
+        continue
+      }
       stroke(clip, line(piece.points), ROAD, piece.width * g)
       out.push(`<g${clip}>`)
       alongLine(piece.points).forEach(([x, y], k) => {

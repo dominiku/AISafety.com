@@ -327,6 +327,41 @@ describe('layoutHexMap', () => {
     expect(() => fading([[3, 3]])).toThrow(/no road tile/)
   })
 
+  it("runs a road on to the door of a landmark beside its last tile, narrowing to the art's street", () => {
+    const tiles = SPEC.tiles
+      .replace('..  Bb  Bb  Bb  cv', '..  Bb  Bb= Bb  cv')
+      .replace('..  Bb  Bb  Bb  ..', '..  Bb  Bb= Bb! ..')
+    const landmark = {
+      symbol: 'town',
+      width: 2,
+      height: 2,
+      door: [0.25, 0.5] as [number, number],
+      doorWidth: 0.2,
+    }
+    const layout = layoutHexMap(
+      withTiles(tiles, {
+        districts: [SPEC.districts[0], { ...SPEC.districts[1], landmark }],
+      }),
+      []
+    )
+    const host = at(layout, 3, 3)
+    const stub = layout.pieces.find(piece => piece.tile === host.ref)!
+    const last = stub.points[stub.points.length - 1]
+    expect(last[0]).toBeCloseTo(host.landmark!.x - 0.5)
+    expect(last[1]).toBeCloseTo(host.landmark!.y)
+    expect(stub.width).toBe(0.2)
+    // The piece before it narrows to the street, and ends where the stub
+    // starts: on the side the two tiles share.
+    const before = layout.pieces.find(
+      piece => piece.tile === at(layout, 2, 3).ref
+    )!
+    expect(before.widthEnd).toBe(0.2)
+    const end = before.points[before.points.length - 1]
+    expect(
+      Math.hypot(end[0] - stub.points[0][0], end[1] - stub.points[0][1])
+    ).toBeLessThan(1e-6)
+  })
+
   it('stands a pier where the spec says, or at the end of a road to its shore', () => {
     const beta = (pier: HexMapSpec['districts'][number]['pier']) => [
       SPEC.districts[0],
@@ -541,6 +576,40 @@ describe('layoutHexMap', () => {
         []
       )
     ).toThrow(/no district's tile/)
+  })
+
+  it('lays boats at their moorings, and moves one off the land it was put on', () => {
+    const layout = layoutHexMap(
+      withTiles(SPEC.tiles, {
+        features: [
+          {
+            code: 'cv',
+            kind: 'water',
+            height: 0,
+            moorings: [
+              { at: [4, 2], kind: 'sailboat', size: 0.8 },
+              { at: [4, 2], shift: [-3.6, 0], kind: 'rowboat', size: 0.6 },
+            ],
+          },
+        ],
+        takeAllTiles: true,
+      }),
+      logos('Beta', 4)
+    )
+    expect(layout.moorings.map(boat => boat.kind)).toEqual([
+      'sailboat',
+      'rowboat',
+    ])
+    // Neither has land drawn over her.
+    for (const boat of layout.moorings) {
+      expect(layout.districtAt(boat.at[0], boat.at[1])).toBeNull()
+    }
+    // The first asked for the middle of the water and lies there.
+    const middle = at(layout, 4, 2).center
+    expect(layout.moorings[0].at[0]).toBeCloseTo(middle[0])
+    // The second was put west of the water, on Beta's ground, and has been
+    // moved back east onto the water.
+    expect(layout.moorings[1].at[0]).toBeGreaterThan(middle[0] - 3.6)
   })
 
   it('sends ships out from a water, their wakes angling back to its mouth', () => {

@@ -66,9 +66,9 @@ const TILES = `
   ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..
   ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  Th  ..  ..  ..
   ..  ..  Ne  Ne~ Ne  Fo~ Fo  Fo  Fo  Gr  cv  cv  Go  Go  Th  Th  Th  ..  ..
-  ..  ..  Ne  Ne~ Ne~ Fo~ Fo! Fo  Fr  Gr  cv  Pa  Pa  Go  Th  Th! Lo  Lo  ..
-  ..  ..  Ne~ Ne  Ne  Fo  Fo~ Fo~ Fr  Gr  Pa= Pa  Ma  Ma  Ma  St  Lo  ..  ..
-  ..  In! In  In  Fb  Pp  Pp  Tp  Fr~ Ca~ Ca= Ca  Ma  Ma  St  Co  Co  cr  ..
+  ..  ..  Ne  Ne~ Ne~ Fo~ Fo! Fo  Fr  Gr  cv  Pa  Ma  Go= Th= Th! Lo  Lo  ..
+  ..  ..  Ne~ Ne  Ne  Fo  Fo~ Fo~ Fr  Gr  Pa= Pa  Ma  Ma= Ma  St  Lo  ..  ..
+  ..  In! In  In  Fb  Pp  Pp  Tp  Fr~ Ca~ Ca= Ca= Ma= Ma  St  Co  Co  cr  ..
   ..  hb  hb  In= Fb= Pp= Pp= Tp= Tp= Ca= kp  Ca~ Al  Al  Al  Co  Ip  Ip  ..
   ..  In  hb  In  Fb  Tp  Tp  Tp  Tp  Hu  Ca  Al~ Al~ Al~ Co~ Co  Co  Cp  ..
   ..  ..  In  Tp  Tp  Tp  Tp  Hu  Hu  Gm  Gm  Vc  Vc~ Al  Co  Co! Cp  Cp! ..
@@ -119,12 +119,14 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
     { code: 'To', district: 'Tools, databases and research infrastructure', realm: 'Field infrastructure', height: 1.4, stilts: true, cover: 'huts', ground: '#d98a5a' },
     { code: 'Gm', district: 'Grantmakers and donor advisory', realm: 'Field infrastructure', height: 1, cover: 'dunes', beach: true },
     { code: 'Vc', district: 'Venture capital and incubators', realm: 'Field infrastructure', height: 2, cover: 'oasis', ground: '#ffd9b5' },
-    { code: 'Go', district: 'Governments and multi-stakeholder bodies', realm: 'Policy and strategy', height: 2, building: 'capitol' },
+    { code: 'Go', district: 'Governments and multi-stakeholder bodies', realm: 'Policy and strategy', height: 3, building: 'capitol' },
     // Foothills: the ground rising toward the Range, in low green hills (and
     // no peaks: the mountains are the Range's).
     { code: 'Ma', district: 'Macrostrategy and forecasting', realm: 'Policy and strategy', height: 3.5, cover: 'hills' },
     { code: 'Th', district: 'Policy research and think tanks', realm: 'Policy and strategy', height: 2.5,
-      landmark: { symbol: 'training-town', width: 3, height: 2.54 } },
+      // The road from the castle runs into the west end of the town's own
+      // top street, narrowing to it.
+      landmark: { symbol: 'training-town', width: 3, height: 2.54, door: [0.02, 0.465], doorWidth: 0.12 } },
     { code: 'St', district: 'Standards, assurance and verification', realm: 'Policy and strategy', height: 3 },
     { code: 'Lo', district: 'Policy advocacy and lobbying', realm: 'Policy and strategy', height: 2, pier: true },
     // The Range, from its back corner to its front: the crater on top of the
