@@ -67,7 +67,7 @@ const TILES = `
   ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  Th  ..  ..  ..
   ..  ..  Ne  Ne~ Ne  Fo~ Fo  Fo  Fo  Gr  cv! cv  Go  Go  Th  Th  Th  ..  ..
   ..  ..  Ne  Ne~ Ne~ Fo~ Fo! Fo  Fr  Gr  cv  Pa  Pa  Go  Th  Th! Lo  Lo  ..
-  ..  ..  Ne~ Ne! Ne  Fo  Fo~ Fo~ Fr  Gr  cv  Pa  Ma  Ma  Ma  St  Lo  ..  ..
+  ..  ..  Ne~ Ne  Ne  Fo  Fo~ Fo~ Fr  Gr  cv  Pa  Ma  Ma  Ma  St  Lo  ..  ..
   ..  In! In  In  Fb  Pp  Pp  Tp  Fr~ Ca~ Ca  Ca  Ma  Ma  St  Co  Co  cr  ..
   ..  hb  hb  In= Fb= Pp= Pp= Tp= Tp= Ca= kp  Ca~ Al  Al  Al  Co  Ip  Ip  ..
   ..  In  hb  In  Fb  Tp  Tp  Tp  Tp  Hu  Ca  Al~ Al~ Al~ Co~ Co  Co  Cp  ..
@@ -86,13 +86,13 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
     // Woodland along the river, inland of the delta's coast.
     { code: 'Fo', district: 'Foundational and explanatory', realm: 'Media and discourse', height: 1.5, cover: 'forest',
       landmark: { symbol: 'forest', width: 2.6, height: 2.15 } },
-    // The delta's coast: the river's mouths, the camp on the beach, and a
-    // working estuary shore of reed beds, drawn-up boats and drying nets. It
-    // is a beach, so its sides to the sea are wet sand and not a rim; the
+    // The delta's coast: the river's mouths and a working estuary shore of
+    // reed beds, a fishing village, drying nets and boats out on the water.
+    // It is a beach, so its sides to the sea are wet sand and not a rim; the
     // damp band is mixed from its own mint, and comes out cool, which is
-    // what tells this coast from the tropical sands in the south.
-    { code: 'Ne', district: 'News and commentary', realm: 'Media and discourse', height: 1, beach: true, cover: 'reeds',
-      landmark: { symbol: 'beach-camp', width: 1.9, height: 2.05 } },
+    // what tells this coast from the tropical sands in the south. It has no
+    // landmark: the village is the thing to look at.
+    { code: 'Ne', district: 'News and commentary', realm: 'Media and discourse', height: 1, beach: true, cover: 'reeds' },
     { code: 'Fr', district: 'Forums and online communities', realm: 'Media and discourse', height: 2.5, building: 'forum' },
     { code: 'Gr', district: 'Grassroots campaigns', realm: 'Advocacy and public engagement', height: 1 },
     { code: 'Pa', district: 'Professional advocacy and communication', realm: 'Advocacy and public engagement', height: 1.5, pier: true },
@@ -140,7 +140,9 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
     { code: 'Ip', district: 'Interpretability and model understanding', realm: 'Technical research', height: 6.5, cone: true,
       landmark: { symbol: 'range', width: 2.8, height: 1.98 } },
     { code: 'Cp', district: 'Capabilities research', realm: 'Technical research', height: 6, walled: true,
-      landmark: { symbol: 'skull-mountain', width: 2.6, height: 2.25 } },
+      // The art has a ship at its foot from the days the crag stood by the
+      // sea; it is inland now, so that strip is cut off.
+      landmark: { symbol: 'skull-mountain', width: 2.6, height: 2.25, crop: 0.26 } },
     // The closed orgs: a ships' graveyard on open water off the south-west
     // coast. The gravestones are the original map's own art for them; the
     // wrecks are scattered over the rest of its water.
@@ -185,9 +187,9 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
       ],
     },
   ],
-  // The compass rose, on the open sea in the board's south-east corner,
-  // where no land is painted and nothing else stands.
-  compass: { at: [17, 10], width: 4.6, height: 4.7 },
+  // The compass rose, at the same size the original map draws it. It goes
+  // round the four buttons of map furniture, wherever they stand.
+  compass: { width: 5.2, height: 5.3 },
   river: { width: 0.85, branch: 0.78, headwater: 0.5 },
   road: { width: 0.55 },
   // For now every painted tile is land, so the coast is as smooth as it is

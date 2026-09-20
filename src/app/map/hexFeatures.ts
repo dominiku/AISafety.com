@@ -910,6 +910,51 @@ export function thermalSpringMarkup(
 }
 
 /**
+ * A barn on farming country: face-on and flat, as the map's other buildings
+ * are, wider and lower than a house, with the big doors in its gable end and
+ * a hay hatch above them. `x, y` is the middle of its foot, `size` its width,
+ * in map grid units.
+ */
+export function barnMarkup(
+  x: number,
+  y: number,
+  size: number,
+  g: number
+): string {
+  const [cx, fy, w] = [x * g, y * g, size * g]
+  const [eaves, ridge] = [fy - w * 0.46, fy - w * 0.88]
+  const [left, right] = [cx - w / 2, cx + w / 2]
+  return [
+    `<rect x="${left.toFixed(1)}" y="${eaves.toFixed(1)}" width="${w.toFixed(1)}" height="${(fy - eaves).toFixed(1)}" fill="${BUILT.wall}"/>`,
+    `<path d="M${(left - w * 0.07).toFixed(1)},${eaves.toFixed(1)}L${cx.toFixed(1)},${ridge.toFixed(1)}L${(right + w * 0.07).toFixed(1)},${eaves.toFixed(1)}Z" fill="${BUILT.roof}"/>`,
+    // The hay hatch in the gable, and the big doors below it.
+    `<rect x="${(cx - w * 0.08).toFixed(1)}" y="${(eaves - w * 0.22).toFixed(1)}" width="${(w * 0.16).toFixed(1)}" height="${(w * 0.16).toFixed(1)}" fill="${PLANK_GAP}"/>`,
+    `<rect x="${(cx - w * 0.21).toFixed(1)}" y="${(fy - w * 0.33).toFixed(1)}" width="${(w * 0.42).toFixed(1)}" height="${(w * 0.33).toFixed(1)}" fill="${PLANK_GAP}"/>`,
+    `<path d="M${cx.toFixed(1)},${(fy - w * 0.33).toFixed(1)}V${fy.toFixed(1)}" stroke="${BUILT.wall}" stroke-width="1.4"/>`,
+    // A board along each side of the wall, as the barns of the classic map.
+    `<path d="M${left.toFixed(1)},${(eaves + (fy - eaves) * 0.55).toFixed(1)}H${right.toFixed(1)}" stroke="${BUILT.trim}" stroke-width="${Math.max(1.5, w * 0.05).toFixed(1)}"/>`,
+  ].join('')
+}
+
+/**
+ * A haystack: a round rick with a pointed top, as the classic map's small
+ * things are drawn. `x, y` is its foot, `size` its width, in map grid units.
+ */
+export function haystackMarkup(
+  x: number,
+  y: number,
+  size: number,
+  g: number
+): string {
+  const [cx, fy, w] = [x * g, y * g, size * g]
+  const top = fy - w * 1.05
+  return (
+    `<path d="M${(cx - w / 2).toFixed(1)},${fy.toFixed(1)}Q${(cx - w * 0.42).toFixed(1)},${(fy - w * 0.62).toFixed(1)} ${cx.toFixed(1)},${top.toFixed(1)}Q${(cx + w * 0.42).toFixed(1)},${(fy - w * 0.62).toFixed(1)} ${(cx + w / 2).toFixed(1)},${fy.toFixed(1)}Z" fill="${THATCH.lit}"/>` +
+    `<path d="M${cx.toFixed(1)},${top.toFixed(1)}Q${(cx + w * 0.42).toFixed(1)},${(fy - w * 0.62).toFixed(1)} ${(cx + w / 2).toFixed(1)},${fy.toFixed(1)}L${cx.toFixed(1)},${fy.toFixed(1)}Z" fill="${THATCH.shade}"/>`
+  )
+}
+
+/**
  * A bed of reeds on an estuary's wet ground: one bold clump, its blades
  * fanning out of a low base, about half of them carrying a seed head. `x, y`
  * is the foot of the clump, `size` its width, in map grid units.

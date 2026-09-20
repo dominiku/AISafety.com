@@ -58,8 +58,9 @@ import {
 } from './realmArtBackdrop'
 import { buildingMarkup } from './hexBuildings'
 import {
+  barnMarkup,
   beaconMarkup,
-  canopyMarkup,
+  haystackMarkup,
   netFrameMarkup,
   reedBedMarkup,
   deckMarkup,
@@ -1277,32 +1278,6 @@ export function hexBackdropMarkup(
       })
       out.push('</g>')
     }
-    if (cover === 'forest' && pins) {
-      // A forest's canopy, seen from above, over all its ground.
-      const { inside, fixed } = canvasOf(plateau)
-      const extent = { width: width / g, height: height / g }
-      out.push(`<g clip-path="url(#${clip})">`)
-      scatterSpots(inside, fixed, extent, {
-        spacing: 0.42,
-        minRoom: 0.05,
-        maxRoom: 0.4,
-      })
-        .sort((a, b) => a.y - b.y)
-        .forEach(spot =>
-          out.push(
-            canopyMarkup(
-              spot.x,
-              spot.y,
-              0.5 + spot.roll * 0.25,
-              view.squash,
-              g,
-              mixHex(tone, FOREST.lit, 0.8),
-              FOREST.shade
-            )
-          )
-        )
-      out.push('</g>')
-    }
   }
 
   // What stands on a plateau: its district's cover where the spec gives one
@@ -1465,76 +1440,150 @@ export function hexBackdropMarkup(
       return
     }
     if (cover === 'fields') {
-      // Farming country: a farmstead here and there among the plots, a house
-      // with an outbuilding beside it and a tree by some of them. Sparse, and
-      // standing whatever logos are over it, so the fields still read as
-      // fields and not as a village.
+      // Farming country: a farmstead here and there among the plots, no two
+      // of them the same — a house on its own, a house with its barn, a barn
+      // and a rick, a pair of cottages. Well spread out, and standing
+      // whatever logos are over it, so the fields still read as fields.
+      const farm = (n: number) => {
+        const value = Math.sin(n * 12.9898) * 43758.5453
+        return value - Math.floor(value)
+      }
       scatterSpots(inside, fixed, extent, {
-        spacing: 2.4,
-        minRoom: 0.7,
+        spacing: 2.3,
+        minRoom: 0.55,
         maxRoom: 1.2,
-      }).forEach(spot => {
+      }).forEach((spot, n) => {
         const foot = spot.y + 0.2
-        const cottage = spot.roll > 0.5
-        stand(
-          foot,
-          level,
-          (spot.roll < 0.35
-            ? stamp('tree', spot.x - 0.64, foot, 0.34, 0.68)
-            : '') +
-            stamp(cottage ? 'cottage' : 'house', spot.x, foot, 0.92, 1.2) +
-            (spot.room > 0.85
-              ? stamp(
-                  cottage ? 'house' : 'cottage',
-                  spot.x + 0.76,
-                  foot - 0.04,
-                  0.6,
-                  0.78
-                )
-              : '')
-        )
+        const kind = Math.floor(farm(seed * 31 + n) * 5)
+        const away = 0.7 + farm(seed * 53 + n) * 0.5
+        const side = farm(seed * 71 + n) > 0.5 ? 1 : -1
+        const parts =
+          kind === 0
+            ? // A house on its own, a tree at its shoulder.
+              stamp('tree', spot.x - 0.66 * side, foot, 0.34, 0.68) +
+              stamp('house', spot.x, foot, 0.92, 1.2)
+            : kind === 1
+              ? // A house and its barn.
+                stamp('house', spot.x, foot, 0.88, 1.15) +
+                barnMarkup(spot.x + away * side, foot + 0.06, 0.86, g)
+              : kind === 2
+                ? // A barn and a rick beside it.
+                  barnMarkup(spot.x, foot, 0.95, g) +
+                  haystackMarkup(spot.x + away * side, foot + 0.04, 0.46, g)
+                : kind === 3
+                  ? // A cottage with a small shed behind it.
+                    stamp(
+                      'house',
+                      spot.x + away * side * 0.7,
+                      foot - 0.22,
+                      0.56,
+                      0.73
+                    ) + stamp('cottage', spot.x, foot, 0.9, 1.17)
+                  : // Two cottages, a little apart.
+                    stamp('cottage', spot.x, foot, 0.85, 1.11) +
+                    stamp(
+                      'cottage',
+                      spot.x + away * side * 1.15,
+                      foot + 0.1,
+                      0.7,
+                      0.91
+                    )
+        stand(foot, level, parts)
       })
       return
     }
     if (cover === 'reeds') {
-      // An estuary's shore: big beds of reed standing in the wet ground, and
-      // down on the strand itself a boat drawn up or a net hung out to dry.
-      // Few and large, as everything else on the board is.
-      const strand = plateau.tiles.flatMap(tile =>
-        tile.coast.flatMap((coast, k) =>
-          coast
-            ? [
-                [
-                  (tile.top[k][0] + tile.top[(k + 1) % 6][0]) / 2,
-                  (tile.top[k][1] + tile.top[(k + 1) % 6][1]) / 2,
-                ] as Point,
-              ]
-            : []
-        )
+      // An estuary's shore. Reeds stand in the wet ground, smaller than the
+      // trees of the country round about; on the strand there is a fishing
+      // village, a net hung out to dry and a boat drawn up; and out on the
+      // water off the coast a few boats are working.
+      const shoreRoll = (n: number) => {
+        const value = Math.sin(n * 12.9898) * 43758.5453
+        return value - Math.floor(value)
+      }
+      const edges = plateau.tiles.flatMap(tile =>
+        tile.coast.flatMap((coast, k) => (coast ? [{ tile, k }] : []))
       )
+      const strand = edges.map(
+        ({ tile, k }) =>
+          [
+            (tile.top[k][0] + tile.top[(k + 1) % 6][0]) / 2,
+            (tile.top[k][1] + tile.top[(k + 1) % 6][1]) / 2,
+          ] as Point
+      )
+      // Boats out on the water: off about half the stretches of coast, pushed
+      // out from the shore and dropped to sea level, a ripple under each.
+      edges.forEach(({ tile }, n) => {
+        if (shoreRoll(seed * 13 + n) > 0.5) return
+        const [mx, my] = strand[n]
+        const [dx, dy] = [mx - tile.center[0], my - tile.center[1]]
+        const reach = Math.hypot(dx, dy) || 1
+        const x = mx + (dx / reach) * 1.15
+        const y = my + (dy / reach) * 1.15 + level * view.lift
+        stand(
+          y,
+          0,
+          `<path d="M${((x - 0.55) * g).toFixed(1)},${((y + 0.2) * g).toFixed(1)}q${(0.55 * g).toFixed(1)},${(0.12 * g).toFixed(1)} ${(1.1 * g).toFixed(1)},0" fill="none" stroke="${WATER_STREAK}" stroke-opacity="0.5" stroke-width="2" stroke-linecap="round"/>` +
+            stamp('rowboat', x, y + 0.18, 0.78, 0.35)
+        )
+      })
       const reed = mixHex(tone, FOREST.shade, 0.72)
-      // Whatever logos stand there: this coast is crowded, and the beds are
+      const spots = scatterSpots(inside, fixed, extent, {
+        spacing: 0.72,
+        minRoom: 0.24,
+        maxRoom: 1,
+      })
+      // The fishing village stands on the roomiest place on the strand.
+      const onStrand = (spot: (typeof spots)[number]) =>
+        strand.some(([x, y]) => Math.hypot(x - spot.x, y - spot.y) < 1.15)
+      const village = spots
+        .filter(spot => onStrand(spot) && spot.room > 0.42)
+        .sort((a, b) => b.room - a.room)[0]
+      // Whatever logos stand there: this coast is crowded, and the reeds are
       // its country, as the dunes are the dunes' (the logos are drawn over
       // them).
-      scatterSpots(inside, fixed, extent, {
-        spacing: 0.8,
-        minRoom: 0.26,
-        maxRoom: 1,
-      }).forEach((spot, n) => {
+      spots.forEach((spot, n) => {
         const foot = spot.y + 0.2
-        const shore = strand.some(
-          ([x, y]) => Math.hypot(x - spot.x, y - spot.y) < 1.15
-        )
+        if (spot === village) {
+          // Four small houses in a huddle, the way a fishing village sits.
+          stand(
+            foot,
+            level,
+            (
+              [
+                ['cottage', -0.72, -0.24, 0.52],
+                ['house', 0.02, -0.18, 0.5],
+                ['house', -0.4, 0.06, 0.6],
+                ['cottage', 0.42, 0.1, 0.58],
+              ] as [string, number, number, number][]
+            )
+              // No house of it may straddle the sea: one whose ground is not
+              // the district's is left out.
+              .filter(([, dx, dy]) => inside(spot.x + dx, foot + dy))
+              .map(([symbol, dx, dy, scale]) =>
+                stamp(
+                  symbol,
+                  spot.x + dx,
+                  foot + dy,
+                  scale * 0.95,
+                  scale * 1.24
+                )
+              )
+              .join('')
+          )
+          return
+        }
+        const shore = onStrand(spot)
         stand(
           foot,
           level,
-          shore && spot.roll > 0.45
-            ? stamp('rowboat', spot.x, foot, 0.92, 0.41)
-            : shore
+          shore && spot.roll > 0.5
+            ? stamp('rowboat', spot.x, foot, 0.72, 0.32)
+            : shore && spot.roll > 0.2
               ? netFrameMarkup(
                   spot.x,
                   foot,
-                  0.78,
+                  0.62,
                   g,
                   mixHex(tone, '#ffffff', 0.62),
                   seed * 97 + n
@@ -1542,7 +1591,7 @@ export function hexBackdropMarkup(
               : reedBedMarkup(
                   spot.x,
                   foot,
-                  0.52 + spot.roll * 0.24,
+                  0.3 + spot.roll * 0.14,
                   g,
                   reed,
                   PLANK,
@@ -2136,7 +2185,15 @@ export function hexBackdropMarkup(
     ) => {
       const [w, h] = [mark.width * scale * g, mark.height * scale * g]
       const [cx, cy] = [(mark.x + dx) * g, (mark.y + dy) * g]
-      return `<use href="#${symbol}" x="${(cx - w / 2).toFixed(1)}" y="${(cy - h / 2).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}"${tilt ? ` transform="rotate(${tilt} ${cx.toFixed(1)} ${cy.toFixed(1)})" opacity="0.8"` : ''}/>`
+      const art = `<use href="#${symbol}" x="${(cx - w / 2).toFixed(1)}" y="${(cy - h / 2).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}"${tilt ? ` transform="rotate(${tilt} ${cx.toFixed(1)} ${cy.toFixed(1)})" opacity="0.8"` : ''}/>`
+      if (!mark.crop) return art
+      // Keep the top of the art and drop it by what was cut, so that what is
+      // left still stands on the same ground.
+      const id = `hex-crop-${tile.col}-${tile.row}`
+      clips.push(
+        `<clipPath id="${id}"><rect x="${(cx - w / 2).toFixed(1)}" y="${(cy - h / 2).toFixed(1)}" width="${w.toFixed(1)}" height="${(h * (1 - mark.crop)).toFixed(1)}"/></clipPath>`
+      )
+      return `<g transform="translate(0 ${(h * mark.crop).toFixed(1)})"><g clip-path="url(#${id})">${art}</g></g>`
     }
     // A lit landmark throws its light at the ship coming in, picking it out
     // of the dark water; without a ship it only glows.
@@ -2192,11 +2249,16 @@ export function hexBackdropMarkup(
       stand(y, 0, arrivalShipMarkup(x, y, 1.9, g))
     }
   }
-  // The compass rose, on the open sea where the spec puts it.
-  if (pins && layout.compass) {
+  // The compass rose, round the four buttons of map furniture that stand at
+  // its points (Merch, Suggest entry and the rest), as the original map
+  // draws it.
+  const furniture = (pins ?? []).filter(pin => pin.furniture)
+  if (layout.compass && furniture.length > 0) {
     const rose = layout.compass
+    const x = furniture.reduce((sum, pin) => sum + pin.x, 0) / furniture.length
+    const y = furniture.reduce((sum, pin) => sum + pin.y, 0) / furniture.length
     out.push(
-      `<use href="#compass" x="${((rose.x - rose.width / 2) * g).toFixed(1)}" y="${((rose.y - rose.height / 2) * g).toFixed(1)}" width="${(rose.width * g).toFixed(1)}" height="${(rose.height * g).toFixed(1)}"/>`
+      `<use href="#compass" x="${((x - rose.width / 2) * g).toFixed(1)}" y="${((y - rose.height / 2) * g).toFixed(1)}" width="${(rose.width * g).toFixed(1)}" height="${(rose.height * g).toFixed(1)}"/>`
     )
   }
   // Footpaths, over the ground of every level; then the districts' buildings

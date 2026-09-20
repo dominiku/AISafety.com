@@ -63,6 +63,11 @@ export interface HexLandmarkArt {
   // A light that burns in the art (a lighthouse's lantern): where it sits
   // inside the symbol's box, as a share of its width and its height.
   lit?: [number, number]
+  // This share of the symbol's height is cut off the bottom of the art, and
+  // what is left is dropped so that it still stands on the same ground. For
+  // a piece of the classic art with something at its foot that belongs by
+  // the sea and not inland (the ship under the skull mountain).
+  crop?: number
 }
 
 export type HexCover =
@@ -162,9 +167,11 @@ export interface HexMapSpec {
   // source down to the first lake it runs into (a stream, not yet a river).
   river: { width: number; branch: number; headwater?: number }
   road: { width: number }
-  // The compass rose, as the original map draws it: on the open sea at the
-  // middle of a tile of the board that no land is painted on.
-  compass?: { at: [number, number]; width: number; height: number }
+  // The compass rose, as the original map draws it: round the four buttons
+  // of map furniture (Merch, Suggest entry and the rest), which stand at its
+  // four points. Only how large it is belongs here; where it goes follows
+  // those buttons, so the backdrop places it.
+  compass?: { width: number; height: number }
   // Lakes on a district's ground (a reservoir): each lies over part of each
   // of its cells (column, row), a lobe to a cell, all run together; the
   // district's logos stand round it. `dam` names the sides of cells (toward
@@ -376,8 +383,8 @@ export interface HexLayout {
   // Where a ship is coming in (see HexFeatureSpec.arrival): the middle of
   // its waterline, in the middle of the harbor's water.
   arrivals: Point[]
-  // Where the compass rose stands, and how large (see HexMapSpec.compass).
-  compass: { x: number; y: number; width: number; height: number } | null
+  // How large the compass rose is drawn (see HexMapSpec.compass).
+  compass: { width: number; height: number } | null
   // Footpaths from a building to another district's landmark.
   paths: { points: Point[]; width: number }[]
   districtAt: (x: number, y: number) => string | null
@@ -1932,23 +1939,7 @@ export function layoutHexMap(
           ] as Point,
         ]
       }),
-    compass: spec.compass
-      ? (([x, y]) => ({
-          x,
-          y,
-          width: spec.compass!.width,
-          height: spec.compass!.height,
-        }))(
-          projectPoint(
-            view,
-            hexCenter(
-              { col: spec.compass.at[0], row: spec.compass.at[1] },
-              view.size
-            ),
-            0
-          )
-        )
-      : null,
+    compass: spec.compass ?? null,
     lakes,
     dams: [...damSides].map(key => {
       const [cell, side] = key.split('|')
