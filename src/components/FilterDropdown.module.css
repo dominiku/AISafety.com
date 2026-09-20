@@ -40,12 +40,43 @@
 .popover {
   position: fixed;
   z-index: 10;
+  display: flex;
+  flex-direction: column;
   width: max-content;
   border-radius: 16px;
   padding: 20px;
 }
 
+/* The options scroll inside a popover that has hit its max-height (set in
+   FilterDropdown.tsx to the room under the pill); the footer stays put. */
+.options {
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--teal-700) transparent;
+}
+
+/* Taller rows for a long list (with the Clear / Done footer). */
+.roomy .option {
+  min-height: 38px;
+}
+
+.footer {
+  display: flex;
+  flex: none;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 16px;
+  margin-top: 12px;
+  border-top: 1px solid var(--teal-700);
+}
+
 /* Keep each option on one line so the popover hugs the widest one. */
 .option {
   white-space: nowrap;
+}
+
+/* A single-choice popover: the shared checkbox, round. */
+.radio {
+  border-radius: 50%;
 }

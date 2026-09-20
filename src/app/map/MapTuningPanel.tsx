@@ -152,8 +152,6 @@ interface MapTuningPanelProps {
   className: string
   config: ZoomTierConfig
   onChange: (config: ZoomTierConfig) => void
-  showAreaCounts: boolean
-  onShowAreaCounts: (show: boolean) => void
   /** The map writes the current zoom, pin count and overlaps in here. */
   readoutRef: RefObject<HTMLParagraphElement | null>
 }
@@ -162,8 +160,6 @@ export default function MapTuningPanel({
   className,
   config,
   onChange,
-  showAreaCounts,
-  onShowAreaCounts,
   readoutRef,
 }: MapTuningPanelProps) {
   const [open, setOpen] = useState(false)
@@ -193,10 +189,7 @@ export default function MapTuningPanel({
           <button
             type="button"
             className="button-primary"
-            onClick={() => {
-              onChange(DEFAULT_ZOOM_TIER_CONFIG)
-              onShowAreaCounts(true)
-            }}
+            onClick={() => onChange(DEFAULT_ZOOM_TIER_CONFIG)}
           >
             Reset to recommended
           </button>
@@ -257,16 +250,6 @@ export default function MapTuningPanel({
             }
           />
           Keep pins from overlapping (slide, then hold back)
-        </label>
-
-        <label className="flex items-center gap-8px paragraph-xs color-white">
-          <input
-            type="checkbox"
-            className="checkbox"
-            checked={showAreaCounts}
-            onChange={e => onShowAreaCounts(e.target.checked)}
-          />
-          Show org counts on area labels
         </label>
 
         <p className={`${styles.settings} paragraph-xs color-teal-300`}>
