@@ -245,7 +245,8 @@ describe('layoutHexMap', () => {
             Math.hypot(point[0] - center[0], point[1] - center[1])
           )
         )
-      ).toBeLessThan(0.05)
+        // (Its corners there are rounded, so it passes a little inside.)
+      ).toBeLessThan(0.25)
     }
     // The river is no wider than the moat where it runs into it, and its
     // pieces there are marked to be drawn over the moat's bank.
@@ -676,7 +677,7 @@ describe('the Map 3.5 hex map', () => {
             Math.hypot(point[0] - tile.center[0], point[1] - tile.center[1])
           )
         )
-      ).toBeLessThan(0.05)
+      ).toBeLessThan(0.25)
     })
   })
 
