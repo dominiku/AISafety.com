@@ -24,7 +24,7 @@
 // highest tile) tile by tile through the middle of the sides they share. It
 // may part, and then runs narrower; it must never run uphill (that throws);
 // where it reaches the coast it has a mouth. Round the keep it runs as a
-// moat, a hexagon with rounded corners at the middles of the six tiles about it. Where it steps down a side the viewer can see
+// moat, a hexagon with rounded corners, through the middles of the six tiles about it. Where it steps down a side the viewer can see
 // it falls; where the side faces away, it goes over the far lip. The road is
 // joined up the same way, from the keep outward.
 //
@@ -423,7 +423,7 @@ const MOAT_WIDTH = 0.8
 // Points to each corner and each straight reach of the moat, and the share of
 // a reach each rounded corner takes up at either end.
 const MOAT_POINTS = 6
-const MOAT_CORNER = 0.2
+const MOAT_CORNER = 0.28
 
 // From a to b, leaving a along `ha` and arriving at b against `hb` (both of
 // length 1), swaying by `sway` map units on the way: a smooth curve, as
@@ -1078,15 +1078,18 @@ export function layoutHexMap(
             width: own * MOAT_WIDTH,
             tile: front && ring.includes(front) ? front.ref : tile.ref,
             clip: [tile.ref, ...ring.map(neighbor => neighbor.ref)],
-            // A hexagon whose corners are the middles of the six tiles
-            // about the keep, rounded, so that it runs through the middle of
-            // each of them and lies close round the castle; its straight
-            // reaches cross the sides those tiles share.
+            // A hexagon the way the keep's own tile lies: on each of the six
+            // tiles about the keep a straight reach, parallel to the side of
+            // the keep it lies along, runs through the tile's middle; where
+            // the moat passes from one of those tiles to the next it bends,
+            // in a wide curve that keeps it close round the castle.
             points: Array.from({ length: 6 }, (_, n) => n).flatMap(n => {
               const corner = (k: number): Point => {
-                // (The six tiles lie at 30, 90, 150... degrees.)
-                const angle = ((k + 0.5) / 6) * Math.PI * 2
-                const reach = Math.sqrt(3) * view.size
+                // (Twice a tile's size out: its sides then pass through the
+                // middles of the six tiles, which lie at 30, 90, 150...
+                // degrees.)
+                const angle = (k / 6) * Math.PI * 2
+                const reach = 2 * view.size
                 return [
                   middle[0] + reach * Math.cos(angle),
                   middle[1] + reach * Math.sin(angle),
