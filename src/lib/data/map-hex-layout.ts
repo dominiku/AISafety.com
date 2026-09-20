@@ -2158,34 +2158,88 @@ export function layoutHexMap(
       }),
     moorings: spec.features
       .filter(feature => feature.moorings)
-      .flatMap(feature =>
-        feature.moorings!.map(boat => {
+      .flatMap(feature => {
+        const water = tiles.filter(tile => tile.code === feature.code)
+        return feature.moorings!.map(boat => {
           const size = boat.size ?? 1
+          // Where she may lie: on her water, whole, with no nearer land
+          // drawn over her, and off any pier. A tile of water is not enough
+          // on its own: higher ground in front of it is drawn over its lower
+          // half, which is why districtAt has the last word.
+          const pools = water.map(tile =>
+            tile.top.map((corner, k): Point => {
+              const reach = Math.hypot(
+                corner[0] - tile.center[0],
+                corner[1] - tile.center[1]
+              )
+              return [
+                corner[0] + ((tile.center[0] - corner[0]) / reach) * 0.12,
+                corner[1] + ((tile.center[1] - corner[1]) / reach) * 0.12,
+              ]
+            })
+          )
+          const clear = size * 0.6 + 0.4
+          // What has to be on the water is her HULL, which sits along the
+          // bottom of her art; a mast may overhang the shore as a tree does.
+          const deep = size * (boat.kind === 'rowboat' ? 0.44 : 0.82)
+          const afloat = (spot: Point) => {
+            const hull: Point[] = [
+              [spot[0] - size * 0.45, spot[1] + deep * 0.62],
+              [spot[0], spot[1] + deep * 0.62],
+              [spot[0] + size * 0.45, spot[1] + deep * 0.62],
+              [spot[0] - size * 0.45, spot[1] + deep * 0.15],
+              [spot[0] + size * 0.45, spot[1] + deep * 0.15],
+            ]
+            return (
+              hull.every(
+                point =>
+                  pools.some(pool => insideConvex(point, pool)) &&
+                  districtAt(point[0], point[1]) === null
+              ) &&
+              pierPlanks.every(
+                plank =>
+                  Math.hypot(spot[0] - plank[0], spot[1] - plank[1]) >= clear
+              )
+            )
+          }
           const [x, y] = projectPoint(
             view,
             hexCenter({ col: boat.at[0], row: boat.at[1] }, view.size),
             0
           )
-          let at: Point = [
+          const spot: Point = [
             x + (boat.shift?.[0] ?? 0),
             y + (boat.shift?.[1] ?? 0),
           ]
-          // Nothing lies over a pier: a boat too near one is pushed off it,
-          // straight away from the nearest plank.
-          const clear = size * 0.6 + 0.4
-          for (const plank of pierPlanks) {
-            const [dx, dy] = [at[0] - plank[0], at[1] - plank[1]]
-            const gap = Math.hypot(dx, dy)
-            if (gap >= clear) continue
-            const push = gap === 0 ? ([1, 0] as Point) : [dx / gap, dy / gap]
-            at = [
-              plank[0] + push[0] * clear,
-              plank[1] + push[1] * clear,
-            ] as Point
+          let at = spot
+          if (!afloat(at)) {
+            // The pier has moved, or the water has: put her at the nearest
+            // place that is still water and still clear of it.
+            const found = (() => {
+              for (let ring = 1; ring <= 14; ring++) {
+                for (let k = 0; k < 16; k++) {
+                  const angle = (k / 16) * Math.PI * 2
+                  const near: Point = [
+                    at[0] + Math.cos(angle) * ring * 0.18,
+                    at[1] + Math.sin(angle) * ring * 0.18 * view.squash,
+                  ]
+                  if (afloat(near)) return near
+                }
+              }
+              return null
+            })()
+            if (found) at = found
+            else {
+              // Never silently put a boat on the land: say so and leave her
+              // where the spec asked for her.
+              console.warn(
+                `Hex map: no water clear of a pier for the mooring at ${boat.at.join(',')} in "${feature.code}"`
+              )
+            }
           }
           return { at, kind: boat.kind ?? 'sailboat', size }
         })
-      ),
+      }),
     departures: spec.features
       .filter(feature => feature.departs)
       .flatMap(feature => {
