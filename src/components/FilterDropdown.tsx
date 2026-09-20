@@ -1,7 +1,7 @@
 'use client'
 
 import Icon from './Icon'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { trackFilterApply } from '@/lib/analytics'
 import { trackedFilterGroup, trackedFilterValue } from '@/lib/filter-tracking'
 import styles from './FilterDropdown.module.css'
@@ -19,6 +19,19 @@ interface FilterDropdownProps {
    *  Renamed titles and options keep logging their original names via
    *  lib/filter-tracking, so history stays in one line. */
   trackingPage?: string
+  /** Label an active pill "Category · 2" (how many are ticked) instead of
+   *  naming the first tick. For a narrow row where the pill must stay short. */
+  countLabel?: boolean
+  /** One choice at a time: the options are radio buttons, picking one takes
+   *  the place of the last (the parent's onToggle decides that), picking the
+   *  chosen one again clears it, and the pill reads "Category: Blog". */
+  single?: boolean
+  /** A second name for an option, shown between it and its count
+   *  ("Advocacy · Advocacy Anchorage · 26"): the map's place for a category. */
+  optionNote?: (option: string) => string | null
+  /** When given, the popover ends with "Clear" (this) and "Done" (closes it),
+   *  and its rows are taller: for a long list picked from at leisure. */
+  onClear?: () => void
 }
 
 // A single pill-shaped filter that opens a checkbox popover. Used in the
@@ -31,8 +44,13 @@ export default function FilterDropdown({
   onToggle,
   icon,
   trackingPage,
+  countLabel = false,
+  single = false,
+  optionNote,
+  onClear,
 }: FilterDropdownProps) {
   const [open, setOpen] = useState(false)
+  const popoverId = useId()
   const [pos, setPos] = useState({ top: 0, left: 0 })
   const ref = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
@@ -59,11 +77,20 @@ export default function FilterDropdown({
         setOpen(false)
       }
     }
+    // Esc closes the popover and hands focus back to the pill.
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      e.stopPropagation()
+      setOpen(false)
+      buttonRef.current?.focus()
+    }
     document.addEventListener('mousedown', handleClick)
+    document.addEventListener('keydown', handleKey, true)
     window.addEventListener('scroll', position, true)
     window.addEventListener('resize', position)
     return () => {
       document.removeEventListener('mousedown', handleClick)
+      document.removeEventListener('keydown', handleKey, true)
       window.removeEventListener('scroll', position, true)
       window.removeEventListener('resize', position)
     }
@@ -72,15 +99,19 @@ export default function FilterDropdown({
   const label =
     selected.length === 0
       ? title
-      : selected.length === 1
-        ? `${title}: ${selected[0]}`
-        : `${title}: ${selected[0]} +${selected.length - 1}`
+      : countLabel
+        ? `${title} · ${selected.length}`
+        : selected.length === 1
+          ? `${title}: ${selected[0]}`
+          : `${title}: ${selected[0]} +${selected.length - 1}`
 
   return (
     <div ref={ref} style={{ position: 'relative' }}>
       <button
         ref={buttonRef}
         type="button"
+        aria-expanded={open}
+        aria-controls={open ? popoverId : undefined}
         className={`${styles.pill} border-plus-fill paragraph-xs-bold${selected.length > 0 ? ` ${styles.pillActive}` : ''}${
           open ? ` ${styles.pillOpen}` : ''
         }`}
@@ -106,18 +137,37 @@ export default function FilterDropdown({
       {open && (
         <div
           ref={popoverRef}
+          id={popoverId}
+          role={single ? 'radiogroup' : 'group'}
+          aria-label={title}
           className={`${styles.popover} border-plus-fill drop-shadow-extra-dark`}
-          style={{ top: pos.top, left: pos.left }}
+          // Never taller than the room under the pill: a long list scrolls
+          // inside the popover instead of running off the page.
+          style={{
+            top: pos.top,
+            left: pos.left,
+            maxHeight: `calc(100dvh - ${pos.top}px - 24px)`,
+          }}
         >
-          <div className="flex flex-col gap-16px">
+          <div
+            className={`flex flex-col ${onClear ? styles.roomy : 'gap-16px'} ${styles.options}`}
+          >
             {options.map(option => (
               <label
                 key={option}
                 className={`flex items-center cursor-pointer ${styles.option}`}
               >
                 <input
-                  type="checkbox"
+                  type={single ? 'radio' : 'checkbox'}
+                  name={single ? popoverId : undefined}
                   checked={selected.includes(option)}
+                  // A radio button that is already on gets no change event:
+                  // its click is what clears a single choice.
+                  onClick={
+                    single && selected.includes(option)
+                      ? () => onToggle(option)
+                      : undefined
+                  }
                   onChange={() => {
                     if (trackingPage && !selected.includes(option)) {
                       const group = trackedFilterGroup(trackingPage, title)
@@ -129,18 +179,42 @@ export default function FilterDropdown({
                     }
                     onToggle(option)
                   }}
-                  className="checkbox"
+                  className={`checkbox${single ? ` ${styles.radio}` : ''}`}
                 />
                 <span className="paragraph-small color-white">
                   {option}
                   <span className="paragraph-xs color-teal-300 margin-left-4px">
                     {' '}
-                    ({counts[option] || 0})
+                    {optionNote?.(option)
+                      ? `· ${optionNote(option)} · ${counts[option] || 0}`
+                      : `(${counts[option] || 0})`}
                   </span>
                 </span>
               </label>
             ))}
           </div>
+          {onClear && (
+            <div className={styles.footer}>
+              <button
+                type="button"
+                className="button-secondary"
+                disabled={selected.length === 0}
+                onClick={onClear}
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                className="button-primary"
+                onClick={() => {
+                  setOpen(false)
+                  buttonRef.current?.focus()
+                }}
+              >
+                Done
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

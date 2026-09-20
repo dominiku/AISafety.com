@@ -1,0 +1,25 @@
+/* PROTOTYPE panel: goes when the zoom values are settled. Spacing, type,
+   buttons and checkboxes come from globals.css; what is left here is what
+   the utilities can't do. Colors and corner radius follow the map tooltip. */
+.panel {
+  width: 280px;
+  max-width: calc(100vw - 48px);
+}
+
+.body {
+  background-color: var(--teal-850);
+  border: 1px solid var(--teal-700);
+  border-radius: 8px;
+  max-height: calc(100vh - 220px);
+  overflow-y: auto;
+}
+
+/* `hidden` loses to the .flex utility's display without this. */
+.body[hidden] {
+  display: none;
+}
+
+.settings {
+  user-select: all;
+  word-break: break-all;
+}

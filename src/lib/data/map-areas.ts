@@ -25,6 +25,228 @@ export const MAP_AREA_BY_CATEGORY: Record<string, string> = {
   'No longer active': 'Gone Graveyard',
 }
 
+export interface MapArea {
+  label: string
+  // The area this one sits inside, if any. Areas form a tree: 'Research
+  // Range' holds the three research areas today, and a future 'Media' area
+  // could hold podcasts, newsletters and forums the same way. An org belongs
+  // to the area of its first category and, through it, to every area above.
+  parent?: string
+  // A quiet area is not filled out on the zoomed-out map: the Gone Graveyard
+  // should not put closed orgs on the front page just because it has room.
+  quiet?: boolean
+  // Where the label is drawn, in map grid units (the same units as a pin's
+  // x and y). It marks the label only: an area has no outline of its own.
+  x: number
+  y: number
+}
+
+// Every area label drawn on /map. 'Research Range' has no category of its
+// own: it is the parent of the three research areas.
+export const MAP_AREAS: MapArea[] = [
+  { label: 'Conceptual Cliffs', parent: 'Research Range', x: 46, y: 5.5 },
+  { label: 'Resource Rock', x: 3.5, y: 8 },
+  { label: 'Support Shoreline', x: 13, y: 6.7 },
+  { label: 'Newsletter Nook', x: 15.8, y: 14.5 },
+  { label: 'Video Vista', x: 23, y: 5.6 },
+  { label: 'Funding Forest', x: 29.2, y: 7 },
+  { label: 'Governance Grove', x: 37.7, y: 5.5 },
+  { label: 'Strategy Summit', x: 34.8, y: 19 },
+  { label: 'Research Range', x: 45.3, y: 15.9 },
+  { label: 'Training Town', x: 22.2, y: 17.2 },
+  { label: 'Empirical Escarpment', parent: 'Research Range', x: 53.5, y: 16 },
+  { label: 'Podcast Port', x: 9.5, y: 20.5 },
+  { label: 'Blog Beach', x: 15, y: 25.8 },
+  { label: 'Forecasting Falls', x: 39.2, y: 23.8 },
+  { label: 'Career Castle', x: 30.5, y: 29.4 },
+  { label: 'Advocacy Anchorage', x: 8, y: 31 },
+  { label: 'Capabilities Cove', parent: 'Research Range', x: 45, y: 27.1 },
+  { label: 'Gone Graveyard', quiet: true, x: 56, y: 30 },
+]
+
+// A set of areas and the rule placing orgs in them. The live map has one,
+// CLASSIC_MAP_SCHEME; the Map 3.5 prototype builds another from its realms and
+// districts (map-realms.ts). Every function below takes the scheme last and
+// defaults to the classic one, so callers off the map page are unaffected.
+export interface MapAreaScheme {
+  areas: MapArea[]
+  // Which area an org is drawn in, keyed by its placing category (classic:
+  // its first Category; Map 3.5: its District).
+  areaByCategory: Record<string, string>
+}
+
+export const CLASSIC_MAP_SCHEME: MapAreaScheme = {
+  areas: MAP_AREAS,
+  areaByCategory: MAP_AREA_BY_CATEGORY,
+}
+
+/** The one category whose pins are drawn in an area, or null for an umbrella
+ *  area, which has none of its own. */
+export function categoryForMapArea(
+  label: string,
+  scheme: MapAreaScheme = CLASSIC_MAP_SCHEME
+): string | null {
+  for (const [category, area] of Object.entries(scheme.areaByCategory)) {
+    if (area === label) return category
+  }
+  return null
+}
+
+/** Every category whose pins count as inside an area: its own, and those of
+ *  every area inside it. A parent's listings are its children's, and a search
+ *  pick frames them all together. */
+export function categoriesForMapArea(
+  label: string,
+  scheme: MapAreaScheme = CLASSIC_MAP_SCHEME
+): string[] {
+  const own = categoryForMapArea(label, scheme)
+  const inside = scheme.areas
+    .filter(area => area.parent === label)
+    .flatMap(area => categoriesForMapArea(area.label, scheme))
+  return own ? [own, ...inside] : inside
+}
+
+function mapAreaNamed(label: string, scheme: MapAreaScheme): MapArea {
+  const area = scheme.areas.find(a => a.label === label)
+  if (!area) throw new Error(`[map-areas] No area named "${label}"`)
+  return area
+}
+
+/** How deep an area sits in the tree: 0 for a top-level area. */
+export function mapAreaDepth(
+  label: string,
+  scheme: MapAreaScheme = CLASSIC_MAP_SCHEME
+): number {
+  const { parent } = mapAreaNamed(label, scheme)
+  return parent ? mapAreaDepth(parent, scheme) + 1 : 0
+}
+
+/** Whether other areas sit inside this one. */
+export function mapAreaHasChildren(
+  label: string,
+  scheme: MapAreaScheme = CLASSIC_MAP_SCHEME
+): boolean {
+  return scheme.areas.some(area => area.parent === label)
+}
+
+/** The areas an org of this category belongs to, outermost first:
+ *  'Conceptual research' is in ['Research Range', 'Conceptual Cliffs'].
+ *  Empty for a category with no area. */
+export function mapAreaPath(
+  category: string,
+  scheme: MapAreaScheme = CLASSIC_MAP_SCHEME
+): string[] {
+  const label = scheme.areaByCategory[category]
+  if (!label) return []
+  const path: string[] = []
+  for (
+    let area: MapArea | null = mapAreaNamed(label, scheme);
+    area;
+    area = area.parent ? mapAreaNamed(area.parent, scheme) : null
+  ) {
+    path.unshift(area.label)
+  }
+  return path
+}
+
+/** Whether an org of this category sits in a quiet area, at any depth. */
+export function isInQuietMapArea(
+  category: string,
+  scheme: MapAreaScheme = CLASSIC_MAP_SCHEME
+): boolean {
+  return mapAreaPath(category, scheme).some(
+    label => mapAreaNamed(label, scheme).quiet === true
+  )
+}
+
+// Words people type for an area that neither its name nor its category holds.
+// They rank with the category.
+const EXTRA_SEARCH_WORDS: Record<string, string[]> = {
+  'Gone Graveyard': ['Inactive'],
+}
+
+/**
+ * Areas matching a map search, best first. An area is found by its name
+ * ("blog" → Blog Beach) and by its category ("research support" → Support
+ * Shoreline, whose name shares no word with it). As with listings, a field
+ * starting with the query outranks a mid-word match; within each, a match on
+ * the name (what is printed on the map) outranks one on the category.
+ */
+export function searchMapAreas(
+  query: string,
+  scheme: MapAreaScheme = CLASSIC_MAP_SCHEME
+): MapArea[] {
+  const q = query.trim().toLowerCase()
+  if (!q) return []
+  const ranked: MapArea[][] = [[], [], [], []]
+  for (const area of scheme.areas) {
+    const name = area.label.toLowerCase()
+    const others = [
+      categoryForMapArea(area.label, scheme) ?? '',
+      ...(EXTRA_SEARCH_WORDS[area.label] ?? []),
+    ].map(f => f.toLowerCase())
+    if (name.startsWith(q)) ranked[0].push(area)
+    else if (others.some(f => f.startsWith(q))) ranked[1].push(area)
+    else if (name.includes(q)) ranked[2].push(area)
+    else if (others.some(f => f.includes(q))) ranked[3].push(area)
+  }
+  return ranked.flat()
+}
+
+export interface MapBounds {
+  minX: number
+  minY: number
+  maxX: number
+  maxY: number
+}
+
+// A pin further from the area's middle than this many times the typical
+// distance is left out of the frame.
+const STRAY_PIN_FACTOR = 3
+
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
+}
+
+/**
+ * Which pins sit far from the rest of their area on purpose: further from
+ * the area's middle than STRAY_PIN_FACTOR times the typical distance. True
+ * marks a stray. Works in any unit.
+ */
+export function strayPins(pins: { x: number; y: number }[]): boolean[] {
+  if (pins.length === 0) return []
+  const cx = median(pins.map(p => p.x))
+  const cy = median(pins.map(p => p.y))
+  const distances = pins.map(p => Math.hypot(p.x - cx, p.y - cy))
+  const limit = median(distances) * STRAY_PIN_FACTOR
+  return distances.map(d => d > limit)
+}
+
+/**
+ * The box a search pick frames for an area, in grid units: the area's label
+ * plus its pins (the ones whose FIRST category places them there). A few pins
+ * sit far from their area on purpose; those strays are left out so one of
+ * them can't stretch the frame across half the map. With no pins the box is
+ * just the label point.
+ */
+export function mapAreaBounds(
+  area: MapArea,
+  pins: { x: number; y: number }[]
+): MapBounds {
+  const stray = strayPins(pins)
+  const kept = pins.filter((_, i) => !stray[i])
+  const xs = [area.x, ...kept.map(p => p.x)]
+  const ys = [area.y, ...kept.map(p => p.y)]
+  return {
+    minX: Math.min(...xs),
+    minY: Math.min(...ys),
+    maxX: Math.max(...xs),
+    maxY: Math.max(...ys),
+  }
+}
+
 /** First entry of an org's comma-joined category list, or null. */
 export function primaryCategory(category: string): string | null {
   const first = category.split(',')[0]?.trim()

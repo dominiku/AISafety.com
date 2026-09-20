@@ -7,13 +7,20 @@ import FilterGroup from '@/components/FilterGroup'
 import FilterSidebar from '@/components/FilterSidebar'
 import ContributeButtons from '@/components/ContributeButtons'
 import RelativeDate from '@/components/RelativeDate'
+import ModeToggle from '@/components/ModeToggle'
 import MapOrgCard from './MapOrgCard'
+import MapExplorer from './MapExplorer'
 import SearchBar from '@/components/SearchBar'
 import { trackCardsButtonClick } from '@/lib/analytics'
 import CardsViewTracker from '@/components/CardsViewTracker'
 import { placementsById } from '@/lib/placements'
 import { filterItems, optionCounts } from '@/lib/filter-counts'
 import { isPlacedOnMap } from '@/lib/map-images'
+import { CLASSIC_MAP_SCHEME } from '@/lib/data/map-areas'
+import { buildRealmScheme, QUIET_REALM } from '@/lib/data/map-realms'
+import { layoutRealmMap, type LayoutPin } from '@/lib/data/map-realm-layout'
+import { MAP_35_GRAVEYARD_MOVE, MAP_35_SPEC } from '@/lib/data/map-realm-spec'
+import type { MapOrg } from '@/lib/data/map'
 import { SITE_PAGES } from '@/lib/site-pages'
 import styles from './page.module.css'
 
@@ -52,36 +59,35 @@ const categories = [
   'Video',
 ]
 
-interface MapOrg {
-  id: string
-  title: string
-  tooltipTitle: string
-  shortName: string | null
-  description: string
-  category: string
-  status: string
-  logo: string | null
-  mapLogo: string | null
-  link: string
-  x: number | null
-  y: number | null
-  scale: string | null
-  isMagic: boolean
-}
-
-interface MapClientProps {
+interface MapDataset {
   orgs: MapOrg[]
-  lastUpdatedIso: string | null
   suggestEntryLink: string
   suggestCorrectionLink: string
 }
 
+interface MapClientProps {
+  // The site's real data — what everyone but the two people prototyping the
+  // map actually sees.
+  production: MapDataset
+  // A collaborator's forked Airtable base, for experimenting with the map's
+  // structure without touching production. Null when AIRTABLE_IA_FORK_TOKEN/
+  // BASE_ID aren't configured in this environment — the toggle below just
+  // doesn't render, and the page behaves exactly like the single-dataset map.
+  iaWork: MapDataset | null
+  lastUpdatedIso: string | null
+}
+
 export default function MapClient({
-  orgs,
+  production,
+  iaWork,
   lastUpdatedIso,
-  suggestEntryLink,
-  suggestCorrectionLink,
 }: MapClientProps) {
+  const [dataSource, setDataSource] = useState<'production' | 'ia'>(
+    'production'
+  )
+  const { orgs, suggestEntryLink, suggestCorrectionLink } =
+    dataSource === 'ia' && iaWork ? iaWork : production
+
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedCategories, setSelectedCategories] = useState<string[]>([])
   const [showActive, setShowActive] = useState(true)
@@ -176,6 +182,70 @@ export default function MapClient({
   // the logos drawn here.
   const mapOrgs = useMemo(() => orgs.filter(isPlacedOnMap), [orgs])
 
+  // PROTOTYPE Map 3.5: on IA_work the map places each org by its District, in
+  // an area tree built from the Realm and District fields, and works out the
+  // land, the regions and every position itself (map-realm-layout.ts) from
+  // the rough draft positions in NewX/NewY. Map furniture stays where the
+  // draft has it, off the land, and so do closed orgs, moved as one group. An org with no realm, district or
+  // draft position yet keeps its classic spot. The cards below the map are
+  // unchanged.
+  const isIaWork = dataSource === 'ia' && iaWork !== null
+  const realmMap = useMemo(() => {
+    if (!isIaWork) return null
+    const placed: LayoutPin[] = []
+    const fixed: { x: number; y: number }[] = []
+    // Closed orgs keep their draft arrangement but move as one, out of the
+    // island's way (see MAP_35_GRAVEYARD_MOVE).
+    const moved = (org: MapOrg) => {
+      const quiet = org.draft?.realm === QUIET_REALM
+      return {
+        x:
+          (org.draft?.x ?? null) === null
+            ? null
+            : org.draft!.x! + (quiet ? MAP_35_GRAVEYARD_MOVE[0] : 0),
+        y:
+          (org.draft?.y ?? null) === null
+            ? null
+            : org.draft!.y! + (quiet ? MAP_35_GRAVEYARD_MOVE[1] : 0),
+      }
+    }
+    for (const org of mapOrgs) {
+      const { realm, district } = org.draft ?? {}
+      const { x, y } = moved(org)
+      if (x === null || y === null) continue
+      if (org.isMagic || !realm || !district || realm === QUIET_REALM) {
+        fixed.push({ x, y })
+      } else {
+        placed.push({ id: org.id, realm, district, x, y, scale: org.scale })
+      }
+    }
+    const layout = layoutRealmMap(placed, fixed, MAP_35_SPEC)
+    const orgs = mapOrgs.map(org => {
+      const at = layout.positions.get(org.id)
+      return {
+        ...org,
+        category: org.draft?.district ?? org.category,
+        x: at?.x ?? moved(org).x ?? org.x,
+        y: at?.y ?? moved(org).y ?? org.y,
+      }
+    })
+    const scheme = buildRealmScheme(
+      orgs
+        .filter(org => !org.isMagic)
+        .map(org => ({
+          realm: org.draft?.realm ?? null,
+          district: org.draft?.district ?? null,
+          x: org.x,
+          y: org.y,
+        }))
+    )
+    return {
+      orgs,
+      scheme,
+      backdrop: layout,
+    }
+  }, [isIaWork, mapOrgs])
+
   const categoryCounts = useMemo(
     () =>
       optionCounts(
@@ -214,6 +284,42 @@ export default function MapClient({
     }
   }, [filteredOrgs])
 
+  const dataToggle = iaWork && (
+    <div className={styles['map-data-toggle']}>
+      <ModeToggle
+        mode={dataSource}
+        onChange={setDataSource}
+        ariaLabel="Map data source"
+        tabs={[
+          {
+            value: 'production',
+            icon: '/images/icons/map.svg',
+            label: 'UI work',
+          },
+          {
+            value: 'ia',
+            icon: '/images/icons/table.svg',
+            label: 'IA work',
+          },
+        ]}
+      />
+    </div>
+  )
+
+  // UI work: the explorer (a column of search, filters and cards beside the
+  // map). IA work keeps the plain map-over-cards layout below, untouched.
+  if (!isIaWork) {
+    return (
+      <MapExplorer
+        orgs={orgs}
+        lastUpdatedIso={lastUpdatedIso}
+        suggestEntryLink={suggestEntryLink}
+        suggestCorrectionLink={suggestCorrectionLink}
+        dataToggle={dataToggle}
+      />
+    )
+  }
+
   return (
     <>
       {/* The map is the page, so its heading is for screen readers and
@@ -221,7 +327,16 @@ export default function MapClient({
       <h1 className="visually-hidden">{SITE_PAGES.map.title}</h1>
       <div className="padding-bottom-24px">
         <div ref={mapWrapperRef} className={styles['map-wrapper']}>
-          <D3Map orgs={mapOrgs} suggestEntryUrl={suggestEntryLink} />
+          <D3Map
+            // A fresh map per data source: the view and the tuning panel
+            // start over, since the two layouts share neither.
+            key={dataSource}
+            orgs={realmMap?.orgs ?? mapOrgs}
+            scheme={realmMap?.scheme ?? CLASSIC_MAP_SCHEME}
+            realmBackdrop={realmMap?.backdrop}
+            suggestEntryUrl={suggestEntryLink}
+          />
+          {dataToggle}
           <button
             onClick={() => {
               trackCardsButtonClick('Map', 'View cards')
