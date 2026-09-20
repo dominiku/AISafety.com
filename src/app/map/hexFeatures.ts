@@ -1099,13 +1099,12 @@ export function beaconMarkup(at: Point, toward: Point, g: number): string {
 
 /**
  * A ship standing out to sea: the classic sailboat with a pennant at its
- * masthead, and the wake angling back to `from`, the mouth it came out of.
+ * masthead, and its wake curving back to `from`, the mouth it came out of.
  * The art has one broadside and cannot be turned to point out of a bay, so
  * the hull stays sideways-on and the wake is what says where the ship has
- * come from: it reads as having cleared the headland and borne away along
- * the coast. The ship must therefore lie east of its mouth, with the wake
- * astern of it. `x, y` is the middle of its waterline, `size` its width, in
- * map grid units.
+ * come from: it runs straight out of the mouth and then turns along the
+ * coast, so the ship must lie to the east of its mouth and above it. `x, y`
+ * is the middle of its waterline, `size` its width, in map grid units.
  */
 export function departingShipMarkup(
   x: number,
@@ -1116,25 +1115,44 @@ export function departingShipMarkup(
 ): string {
   const [cx, cy, w] = [x * g, y * g, size * g]
   const h = w * 0.82
-  const [bx, by] = [from[0] * g - cx, from[1] * g - cy]
-  const astern = Math.hypot(bx, by)
-  if (astern === 0) return ''
-  const [ux, uy] = [bx / astern, by / astern]
-  // Across the wake, to open it out.
-  const [px, py] = [-uy, ux]
-  const at = (along: number, across: number) =>
-    `${(cx + ux * along + px * across).toFixed(1)},${(cy + uy * along + py * across).toFixed(1)}`
+  const [mx, my] = [from[0] * g, from[1] * g]
+  // The stern, and how far the mouth lies astern of it and below it.
+  const [sx, sy] = [cx - w * 0.42, cy]
+  const [back, down] = [sx - mx, my - sy]
+  if (Math.hypot(back, down) === 0) return ''
+  // The track the ship has come along, read backwards from its stern: astern
+  // a while, then a bend down into the mouth, which it leaves going straight
+  // out of the bay. The two control points are what make that corner.
+  const hold: Point = [sx - back * 0.5, sy + down * 0.06]
+  const turn: Point = [mx + back * 0.14, my - down * 0.62]
+  // The track does not stop at the mouth: it carries on down into the bay,
+  // where she lay, so that she reads as having come out of it however near
+  // the mouth she still is.
+  const tail: Point = [mx, my + w * 0.8]
+  const onTrack = (t: number): Point => {
+    const u = 1 - t
+    const mix = (a: number, b: number, c: number, d: number) =>
+      u * u * u * a + 3 * u * u * t * b + 3 * u * t * t * c + t * t * t * d
+    return [
+      mix(sx, hold[0], turn[0], tail[0]),
+      mix(sy, hold[1], turn[1], tail[1]),
+    ]
+  }
+  const xy = ([px, py]: Point) => `${px.toFixed(1)},${py.toFixed(1)}`
   const markup: string[] = []
-  // The wake: two lines opening out astern, and the churned water between.
+  // The wake opens out astern: at the stern its width shows across the track,
+  // at the mouth, where the track runs straight up, it shows to either side.
   for (const side of [-1, 1]) {
     markup.push(
-      `<path d="M${at(w * 0.3, side * 2)}Q${at(w * 1.15, side * w * 0.13)} ${at(w * 1.95, side * w * 0.4)}" fill="none" stroke="${WATER_STREAK}" stroke-opacity="0.8" stroke-width="2.4" stroke-linecap="round"/>`,
-      `<path d="M${at(w * 0.5, side * 1)}Q${at(w * 0.95, side * w * 0.05)} ${at(w * 1.3, side * w * 0.17)}" fill="none" stroke="${WATER_STREAK}" stroke-opacity="0.5" stroke-width="2" stroke-linecap="round"/>`
+      `<path d="M${xy([sx, sy + side * 2])}C${xy([hold[0], hold[1] + side * w * 0.1])} ${xy([turn[0] + side * w * 0.3, turn[1]])} ${xy([tail[0] + side * w * 0.36, tail[1]])}" fill="none" stroke="${WATER_STREAK}" stroke-opacity="0.75" stroke-width="2.4" stroke-linecap="round"/>`,
+      // A fainter line inside it, fading out before the mouth.
+      `<path d="M${xy([sx - w * 0.12, sy + side * 1])}Q${xy([hold[0], hold[1] + side * w * 0.05])} ${xy(onTrack(0.55))}" fill="none" stroke="${WATER_STREAK}" stroke-opacity="0.45" stroke-width="2" stroke-linecap="round"/>`
     )
   }
-  for (const along of [0.8, 1.15, 1.5]) {
+  // The churned water along the track, just astern of her.
+  for (const t of [0.12, 0.24, 0.36]) {
     markup.push(
-      `<path d="M${at(w * along, 0)}L${at(w * (along + 0.16), 0)}" stroke="${WATER_STREAK}" stroke-opacity="0.6" stroke-width="2" stroke-linecap="round"/>`
+      `<path d="M${xy(onTrack(t))}L${xy(onTrack(t + 0.05))}" stroke="${WATER_STREAK}" stroke-opacity="0.6" stroke-width="2" stroke-linecap="round"/>`
     )
   }
   markup.push(
