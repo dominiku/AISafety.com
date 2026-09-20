@@ -70,6 +70,7 @@ export type HexCover =
   | 'vineyard'
   | 'hamlet'
   | 'dunes'
+  | 'hills'
   | 'meadow'
   | 'tropical'
   | 'oasis'

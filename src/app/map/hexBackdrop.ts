@@ -61,6 +61,7 @@ import {
   canopyMarkup,
   deckMarkup,
   duneMarkup,
+  hillMarkup,
   geyserMarkup,
   palmMarkup,
   parasolMarkup,
@@ -119,6 +120,9 @@ const DAM = {
 const FIELD_RIPE = '#ffd1bc'
 // DESIGN REVIEW (Melissa): an oasis's grass, from the classic trees' greens.
 const OASIS = { grass: '#9ccf8f', lush: '#00ae85' }
+// DESIGN REVIEW (Melissa): the foothills' greens, from the oasis's grass and
+// the forest's shade.
+const HILL = { lit: '#9ccf8f', shade: '#008969' }
 const FOREST = { lit: '#00ae85', shade: '#008969' }
 const VINE = '#2f5650'
 // The peaks that wall a forbidding district in.
@@ -1228,6 +1232,31 @@ export function hexBackdropMarkup(
             mixHex(tone, '#ffffff', 0.38),
             mixHex(tone, LINE, 0.3),
             VINE,
+            seed * 97 + n
+          )
+        )
+      )
+      return
+    }
+    if (cover === 'hills') {
+      // Low green hills, in ones and twos, all over the district's ground
+      // whatever logos stand there (the logos are drawn over them), each
+      // whole on its own ground as the dunes are.
+      scatterSpots(inside, fixed, extent, {
+        spacing: 1,
+        minRoom: 0.5,
+        maxRoom: 1.2,
+      }).forEach((spot, n) =>
+        stand(
+          spot.y + 0.2,
+          level,
+          hillMarkup(
+            spot.x,
+            spot.y + 0.2,
+            0.95 + spot.roll * 0.4,
+            g,
+            mixHex(tone, HILL.lit, 0.6),
+            mixHex(tone, HILL.shade, 0.55),
             seed * 97 + n
           )
         )

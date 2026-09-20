@@ -67,7 +67,7 @@ const TILES = `
   ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  Th  ..  ..  ..
   ..  ..  Ne  Ne~ Ne  Fo~ Fo  Fo  Fo  Gr  cv! cv  Go  Go  Th  Th  Th  ..  ..
   ..  ..  Ne  Ne~ Ne~ Fo~ Fo! Fo  Fr  Gr  cv  Pa  Pa  Go  Th  Th! Lo  Lo  ..
-  ..  ..  Ne~ Ne! Ne  Fo  Fo~ Fo~ Fr  Gr  cv  Pa  Ma  Ma  Ma! St  Lo  ..  ..
+  ..  ..  Ne~ Ne! Ne  Fo  Fo~ Fo~ Fr  Gr  cv  Pa  Ma  Ma  Ma  St  Lo  ..  ..
   ..  In! In  In  Fb  Pp  Pp  Tp  Fr~ Ca~ Ca  Ca  Ma  Ma  St  Co  Co  cr  ..
   ..  hb  hb  In= Fb= Pp= Pp= Tp= Tp= Ca= kp  Ca~ Al~ Al  Al  Co  Ip  Ip  ..
   ..  In  hb  In  Fb  Tp  Tp  Tp  Tp  Hu  Ca  Al  Al~ Al~ Co~ Co  Co  Cp  ..
@@ -116,8 +116,9 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
     { code: 'Gm', district: 'Grantmakers and donor advisory', realm: 'Field infrastructure', height: 1, cover: 'dunes', beach: true },
     { code: 'Vc', district: 'Venture capital and incubators', realm: 'Field infrastructure', height: 2, cover: 'oasis', ground: '#ffd9b5' },
     { code: 'Go', district: 'Governments and multi-stakeholder bodies', realm: 'Policy and strategy', height: 2, building: 'capitol' },
-    { code: 'Ma', district: 'Macrostrategy and forecasting', realm: 'Policy and strategy', height: 3.5,
-      landmark: { symbol: 'summit', width: 3, height: 1.9 } },
+    // Foothills: the ground rising toward the Range, in low green hills (and
+    // no peaks: the mountains are the Range's).
+    { code: 'Ma', district: 'Macrostrategy and forecasting', realm: 'Policy and strategy', height: 3.5, cover: 'hills' },
     { code: 'Th', district: 'Policy research and think tanks', realm: 'Policy and strategy', height: 2.5,
       landmark: { symbol: 'training-town', width: 3, height: 2.54 } },
     { code: 'St', district: 'Standards, assurance and verification', realm: 'Policy and strategy', height: 3 },

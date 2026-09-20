@@ -239,6 +239,39 @@ export function duneMarkup(
   return markup.join('')
 }
 
+/** A low rounded hill of grass, lit from the left, now and then with a
+ *  smaller one at its shoulder. */
+export function hillMarkup(
+  x: number,
+  y: number,
+  size: number,
+  g: number,
+  lit: string,
+  shade: string,
+  seed: number
+): string {
+  const mound = (cx: number, cy: number, w: number) => {
+    const h = w * 0.4
+    const p = (dx: number, dy: number) =>
+      `${(cx + dx * w).toFixed(1)},${(cy - dy * h).toFixed(1)}`
+    const dome = `C${p(-0.36, 0.72)} ${p(-0.16, 1)} ${p(0.02, 1)}C${p(0.2, 1)} ${p(0.38, 0.7)} ${p(0.5, 0)}`
+    return [
+      // The whole hill in shade, then its lit side over that.
+      `<path d="M${p(-0.5, 0)}${dome}Q${p(0, -0.16)} ${p(-0.5, 0)}Z" fill="${shade}"/>`,
+      `<path d="M${p(-0.5, 0)}C${p(-0.36, 0.72)} ${p(-0.16, 1)} ${p(0.02, 1)}Q${p(0.2, 0.5)} ${p(0.12, -0.1)}Q${p(-0.2, -0.14)} ${p(-0.5, 0)}Z" fill="${lit}"/>`,
+      // The lie of the grass on the lit side.
+      `<path d="M${p(-0.28, 0.3)}Q${p(-0.16, 0.5)} ${p(-0.02, 0.42)}" fill="none" stroke="${shade}" stroke-opacity="0.45" stroke-width="1.6" stroke-linecap="round"/>`,
+    ].join('')
+  }
+  const [cx, cy, w] = [x * g, y * g, size * g]
+  const side = roll(seed + 3) > 0.5 ? 1 : -1
+  return (
+    (roll(seed) > 0.45
+      ? mound(cx + side * w * 0.34, cy - w * 0.07, w * 0.58)
+      : '') + mound(cx, cy, w)
+  )
+}
+
 /** A tuft of meadow grass, with a flower in it now and then. */
 export function tuftMarkup(
   x: number,
