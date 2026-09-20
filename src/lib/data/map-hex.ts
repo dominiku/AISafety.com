@@ -173,6 +173,9 @@ export type HexMark =
   | 'landmark'
   // "+": a deck of planks on posts over the water: a tile of a pier.
   | 'deck'
+  // "^": an escarpment: the tile's sides toward the viewer lean out as
+  // slopes of bare rock.
+  | 'scarp'
   | null
 
 const MARKS: Record<string, HexMark> = {
@@ -180,6 +183,7 @@ const MARKS: Record<string, HexMark> = {
   '=': 'road',
   '!': 'landmark',
   '+': 'deck',
+  '^': 'scarp',
 }
 
 export interface HexGridTile extends HexCell {
@@ -194,7 +198,7 @@ const SEA_TOKEN = '..'
 /**
  * Reads the tile map: one token per tile, in rows of the same length. A token
  * is ".." for open sea, or two letters (the district or feature), with one of
- * the signs ~ = ! + after them where the tile is marked. Lines starting with
+ * the signs ~ = ! + ^ after them where the tile is marked. Lines starting with
  * # are notes. Anything malformed throws, so a slip of the hand is caught
  * when the map is built.
  */
@@ -217,10 +221,10 @@ export function parseHexGrid(tiles: string): HexGridTile[] {
         grid.push({ col, row, code: null, mark: null })
         return
       }
-      const match = /^([A-Za-z]{2})([~=!+]?)$/.exec(token)
+      const match = /^([A-Za-z]{2})([~=!+^]?)$/.exec(token)
       if (!match) {
         throw new Error(
-          `Hex map: "${token}" at column ${col}, row ${row} is neither ".." nor two letters with an optional ~ = ! or +`
+          `Hex map: "${token}" at column ${col}, row ${row} is neither ".." nor two letters with an optional ~ = ! + or ^`
         )
       }
       grid.push({ col, row, code: match[1], mark: MARKS[match[2]] ?? null })

@@ -105,6 +105,8 @@ const TURNED_SATURATION = 0.8
 // the classic map's sands, oranges and dark greens.
 const DAM = { stone: '#ffd1bc', cap: '#f6fbff', line: '#972f00' }
 const FIELD_RIPE = '#ffd1bc'
+// DESIGN REVIEW (Melissa): an oasis's grass, from the classic trees' greens.
+const OASIS = { grass: '#9ccf8f', lush: '#00ae85' }
 const FOREST = { lit: '#00ae85', shade: '#008969' }
 const VINE = '#2f5650'
 // The peaks that wall a forbidding district in.
@@ -683,6 +685,35 @@ export function hexBackdropMarkup(
           `<path d="${face(0, drop)}" fill="${LINE}" fill-opacity="${FACE_SHADE}"/>`
         )
       }
+      if (tile.state === 'lake') {
+        // The dam that holds a lake back: a wall of pale stone with
+        // buttresses down it and a cap along its top.
+        out.push(
+          `<path d="${face(0, drop)}" fill="${DAM.stone}" stroke="${DAM.line}" stroke-width="2" stroke-linejoin="round"/>`
+        )
+        for (let n = 1; n < 6; n++) {
+          const x = a[0] + ((b[0] - a[0]) * n) / 6
+          const y = a[1] + ((b[1] - a[1]) * n) / 6
+          out.push(
+            `<path d="M${xy([x - 0.05, y])}L${xy([x + 0.05, y])}L${xy([x + 0.1, y + drop])}L${xy([x - 0.1, y + drop])}Z" fill="${DAM.line}" fill-opacity="0.5"/>`
+          )
+        }
+        shade()
+        out.push(
+          `<path d="M${xy(a)}L${xy(b)}" stroke="${DAM.cap}" stroke-width="6" stroke-linecap="round"/>`
+        )
+        return
+      }
+      if (tile.state === 'crater') {
+        // A volcano's flanks run on down its tile's sides: one slope, in the
+        // flank's own tones, with no lip between them.
+        const tones = [theme.cliff.foot, theme.cliff.face, theme.cliff.lip]
+        out.push(
+          `<path d="${face(-0.02, drop)}" fill="${theme.cliff.face}" stroke="${theme.cliff.face}" stroke-width="1" stroke-linejoin="bevel"/>`,
+          `<path d="${face(-0.02, drop)}" fill="${tones[k]}" fill-opacity="${k === 1 ? 0 : 0.55}"/>`
+        )
+        return
+      }
       if (tile.stilts) {
         // A village on stilts: no cliff under its edge but the shadow under
         // the deck, the posts it stands on, and the deck's own edge beam.
@@ -861,7 +892,12 @@ export function hexBackdropMarkup(
   // and from ground a taller tile in front covers; clear of river and road.
   const canvasOf = (plateau: { tiles: HexLaidTile[] }) => {
     const open = plateau.tiles.filter(
-      tile => !tile.landmark && tile.state !== 'crater' && !tile.scarp
+      tile =>
+        !tile.landmark &&
+        tile.state !== 'crater' &&
+        tile.state !== 'lake' &&
+        // Nothing stands on an escarpment's top to hide its slope.
+        !tile.scarp
     )
     const grounds = open.map(tile =>
       insetConvex(
@@ -974,6 +1010,32 @@ export function hexBackdropMarkup(
     clip: string
   ) => {
     const cover = plateau.tiles[0].cover
+    if (cover === 'oasis') {
+      // Green banks along the water, under the river itself.
+      const refs = new Set(plateau.tiles.map(tile => tile.ref))
+      out.push(`<g clip-path="url(#${clip})">`)
+      for (const piece of layout.pieces) {
+        if (piece.kind !== 'river' || !refs.has(piece.tile)) continue
+        const d = `M${piece.points.map(xy).join('L')}`
+        out.push(
+          `<path d="${d}" fill="none" stroke="${OASIS.grass}" stroke-width="${((piece.width + 1.5) * g).toFixed(1)}" stroke-linecap="round" stroke-linejoin="round"/>`,
+          `<path d="${d}" fill="none" stroke="${OASIS.lush}" stroke-width="${((piece.width + 0.7) * g).toFixed(1)}" stroke-linecap="round" stroke-linejoin="round"/>`
+        )
+      }
+      // Where the stream ends, the oasis's pool, in its ring of green.
+      for (const piece of layout.pieces) {
+        if (piece.kind !== 'river' || !refs.has(piece.tile)) continue
+        const [x, y] = piece.points[piece.points.length - 1]
+        const pool = (rx: number, fill: string, extra = '') =>
+          `<ellipse cx="${(x * g).toFixed(1)}" cy="${(y * g).toFixed(1)}" rx="${(rx * g).toFixed(1)}" ry="${(rx * view.squash * g).toFixed(1)}" fill="${fill}"${extra}/>`
+        out.push(
+          pool(1.35, OASIS.grass),
+          pool(1.1, OASIS.lush),
+          pool(0.85, WATER, ` stroke="${SHALLOWS}" stroke-width="${BANK}"`)
+        )
+      }
+      out.push('</g>')
+    }
     if (plateau.tiles[0].stilts) {
       // Boards across the whole deck, on one grid for the whole board, their
       // ends staggered from one board to the next.
@@ -1108,6 +1170,32 @@ export function hexBackdropMarkup(
           thatchHouseMarkup(spot.x, foot, 0.98, g, kind, false)
         )
       })
+      return
+    }
+    if (cover === 'oasis') {
+      // Palms along the water and in every gap.
+      scatterSpots(
+        inside,
+        [...logos, ...fixed.map(spot => ({ ...spot, radius: 0.5 }))],
+        extent,
+        {
+          spacing: 0.6,
+          minRoom: 0.16,
+          maxRoom: 0.8,
+        }
+      ).forEach((spot, n) =>
+        stand(
+          spot.y + 0.25,
+          level,
+          palmMarkup(
+            spot.x,
+            spot.y + 0.25,
+            0.7 + spot.roll * 0.4,
+            g,
+            seed * 97 + n
+          )
+        )
+      )
       return
     }
     if (cover === 'tropical') {
@@ -1339,7 +1427,11 @@ export function hexBackdropMarkup(
     tile.ref !== null &&
     !tile.sunken
   const plateauKey = (tile: HexLaidTile) =>
-    tile.district !== null ? `d:${tile.district}` : `t:${tile.ref}`
+    tile.district !== null
+      ? `d:${tile.district}`
+      : tile.state === 'lake'
+        ? `lake:${tile.code}`
+        : `t:${tile.ref}`
   const grouped = new Map<string, HexLaidTile[]>()
   for (const tile of layout.tiles) {
     if (!solid(tile)) continue
@@ -1405,7 +1497,12 @@ export function hexBackdropMarkup(
       clips.push(
         `<clipPath id="${id}"><path d="${shape}" clip-rule="evenodd"/></clipPath>`
       )
-      out.push(`<path d="${shape}" fill="${tone}" fill-rule="evenodd"/>`)
+      // A lake's ground is its water; its rim, drawn below as any
+      // plateau's, is its bank.
+      const lake = plateau.tiles[0].state === 'lake'
+      out.push(
+        `<path d="${shape}" fill="${lake ? WATER : tone}" fill-rule="evenodd"/>`
+      )
       drawPlots(plateau, tone, id)
       drawRelief(plateau, tone, id)
       for (const tile of plateau.tiles) {
@@ -1499,7 +1596,10 @@ export function hexBackdropMarkup(
       ) === height &&
       (refs.has(piece.tile) || (piece.rampTo ?? []).some(ref => refs.has(ref)))
     drawPieces(
-      layout.pieces.filter(drawnHere),
+      // (A river needs no drawing across a lake.)
+      layout.pieces.filter(
+        piece => drawnHere(piece) && tileByRef.get(piece.tile)?.state !== 'lake'
+      ),
       `hex-path-${height}`.replace('.', '_')
     )
     for (const spring of layout.springs) {

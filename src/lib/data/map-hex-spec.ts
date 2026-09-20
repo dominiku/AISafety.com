@@ -26,6 +26,9 @@
 //         the river runs out to sea. It may never run uphill.
 //   Gm=   the ROAD runs through the tile, joined up the same way.
 //   Gm!   the district's LANDMARK stands here, and no logos.
+//   Al^   an ESCARPMENT: the tile's sides toward the viewer lean out as
+//         slopes of bare rock. A district with no tiles of its own may have
+//         its logos on those slopes (onSlopesOf).
 //   Gm+   a DECK: the tile is water with a pier's planks over it. A pier runs
 //         straight out from a tile of its district's solid ground.
 // River, road and landmark tiles are always land.
@@ -62,15 +65,15 @@ const TILES = `
 # 0   1   2   3   4   5   6   7   8   9   10  11  12  13  14  15  16  17  18
   ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..
   ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..
-  ..  ..  Ne  Ne~ Ne  Fo~ Fo  Fo  Fo  Gr  cv! cv  Go  Go  Th  Th  Th  Lo  ..
-  ..  ..  Ne  Ne~ Ne~ Fo~ Fo! Fo  Fr  Gr  cv  Pa  Pa  Go  Th  Th! Th  Lo  ..
+  ..  ..  Ne  Ne~ Ne  Fo~ Fo  Fo  Fo  Gr  cv! cv  Go  Go  Th  Th  Th  ..  ..
+  ..  ..  Ne  Ne~ Ne~ Fo~ Fo! Fo  Fr  Gr  cv  Pa  Pa  Go  Th  Th! Lo  Lo  ..
   ..  ..  Ne~ Ne! Ne  Fo  Fo~ Fo~ Fr  Gr  cv  Pa  Ma  Ma  Ma! St  Lo  ..  ..
   ..  In! In  In  Fb  Pp  Pp  Pp  Fr~ Ca~ Ca  Ca  Ma  Ma  St  Co  Co  cr  ..
   ..  hb  hb  In= Fb= Pp= Pp= Tp= Tp= Ca= kp  Ca~ Al~ Al  Al  Co  Ip  Ip  ..
-  ..  In  hb  In  Fb  Tp  Tp  Tp  Tp  Hu  Ca  Al  Al~ Al~ Co~ Co  Co  Cp  ..
-  ..  ..  In  Tp  Tp  Tp  Tp  Hu  Hu  Gm  Gm  Al  Vc  Ev  Ev  Co! Cp  Cp! ..
-  Gy! Gy  ..  ..  Op  Op  Op  Op  To  Gm  Gm  Vc  Vc  Ev  Ev  Gm  Cp  ..  ..
-  Gy  Gy  Gy  ..  ..  ..  ..  To  To  To  Gm  Gm  Gm  Gm  Gm  ..  ..  ..  ..
+  ..  In  hb  In  Fb  Tp  Tp  Tp  Tp  Hu  Ca  rs  rs~ Al~ Co~ Co  Co  Cp  ..
+  ..  ..  In  Tp  Tp  Tp  Tp  Hu  Hu  Gm  Gm  rs  Vc~ Al  Al  Co! Cp  Cp! ..
+  Gy! Gy  ..  ..  Op  Op  Op  Op  To  Gm  Gm  Vc  Vc  Al^ Al^ Gm  Cp  ..  ..
+  Gy  Gy  Gy  ..  ..  ..  ..  To  To  Gm  Gm  Gm  Gm  Gm  Gm  ..  ..  ..  ..
   ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..
 `
 
@@ -111,8 +114,8 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
     { code: 'Hu', district: 'Hubs and coworking', realm: 'Field infrastructure', height: 1, cover: 'hamlet' },
     { code: 'To', district: 'Tools, databases and research infrastructure', realm: 'Field infrastructure', height: 1.4, stilts: true, cover: 'huts', ground: '#d98a5a' },
     { code: 'Gm', district: 'Grantmakers and donor advisory', realm: 'Field infrastructure', height: 1, cover: 'dunes', beach: true },
-    { code: 'Vc', district: 'Venture capital and incubators', realm: 'Field infrastructure', height: 2, cover: 'tropical' },
-    { code: 'Go', district: 'Governments and multi-stakeholder bodies', realm: 'Policy and strategy', height: 2, building: 'capitol', pathTo: 'Th' },
+    { code: 'Vc', district: 'Venture capital and incubators', realm: 'Field infrastructure', height: 2, cover: 'oasis', ground: '#ffd9b5' },
+    { code: 'Go', district: 'Governments and multi-stakeholder bodies', realm: 'Policy and strategy', height: 2, building: 'capitol' },
     { code: 'Ma', district: 'Macrostrategy and forecasting', realm: 'Policy and strategy', height: 3.5,
       landmark: { symbol: 'summit', width: 3, height: 1.9 } },
     { code: 'Th', district: 'Policy research and think tanks', realm: 'Policy and strategy', height: 2.5,
@@ -125,8 +128,8 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
     // river rises in; the Control Dam's basin, which the river falls into and
     // leaves for the castle over a dam; and along the front, over the
     // beach, the escarpment: one long leaning slope of banded rock.
-    { code: 'Al', district: 'Alignment and control', realm: 'Technical research', height: 4, dam: true },
-    { code: 'Ev', district: 'Evaluations and threat research', realm: 'Technical research', height: 4.5, scarp: true },
+    { code: 'Al', district: 'Alignment and control', realm: 'Technical research', height: 4 },
+    { code: 'Ev', district: 'Evaluations and threat research', realm: 'Technical research', height: 4, onSlopesOf: 'Al' },
     { code: 'Co', district: 'Conceptual and foundations research', realm: 'Technical research', height: 5, cover: 'thermals',
       landmark: { symbol: 'cave', width: 1.7, height: 1.63 } },
     { code: 'Ip', district: 'Interpretability and model understanding', realm: 'Technical research', height: 6.5, cone: true,
@@ -144,6 +147,10 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
       landmark: { symbol: 'boats', width: 3.4, height: 1.26, shift: [1.5, 0.7] } },
     // The harbor the road starts from: a bay between the arms of the landing.
     { code: 'hb', kind: 'water', height: 0 },
+    // The Control Dam's reservoir: the river runs into it from the Thermals,
+    // and out of it two ways: on to the castle, and over the dam (the side
+    // toward the valley below) and down Venture Valley to the sea.
+    { code: 'rs', kind: 'lake', realm: 'Technical research', height: 4 },
     // The top of the volcano, in the Range's back corner, with only sea
     // behind it to hide.
     { code: 'cr', kind: 'crater', realm: 'Technical research', height: 7.5 },

@@ -386,23 +386,47 @@ describe('layoutHexMap', () => {
     expect(platform.building).toBe(null)
   })
 
-  it('marks the tiles of an escarpment, and lays a crater as land of its own', () => {
+  it('leans an escarpment’s sides out, stands another district’s logos on them, and lays a crater as land of its own', () => {
+    // Alpha's middle tile is an escarpment over Beta; Gamma has no tiles, and
+    // stands on its slopes.
     const layout = layoutHexMap(
-      withTiles(SPEC.tiles.replace('Bb  Bb  Bb  cv', 'Bb  Bb  Bb  cr'), {
-        districts: [{ ...SPEC.districts[0], scarp: true }, SPEC.districts[1]],
-        features: [{ code: 'cr', kind: 'crater', realm: 'South', height: 4 }],
-        takeAllTiles: true,
-      }),
-      [...logos('Alpha', 1), ...logos('Beta', 1)]
+      withTiles(
+        SPEC.tiles
+          .replace('Aa  Aa  Aa', 'Aa  Aa^ Aa')
+          .replace('Bb  Bb  Bb  cv', 'Bb  Bb  Bb  cr'),
+        {
+          districts: [
+            ...SPEC.districts,
+            {
+              code: 'Cc',
+              district: 'Gamma',
+              realm: 'North',
+              height: 3,
+              onSlopesOf: 'Aa',
+            },
+          ],
+          features: [{ code: 'cr', kind: 'crater', realm: 'South', height: 4 }],
+          takeAllTiles: true,
+        }
+      ),
+      [...logos('Alpha', 1), ...logos('Beta', 1), ...logos('Gamma', 2, 0.2)]
     )
-    expect(at(layout, 1, 1).scarp).toBe(true)
-    expect(at(layout, 1, 2).scarp).toBe(false)
+    expect(at(layout, 2, 1).scarp).toBe(true)
+    expect(at(layout, 1, 1).scarp).toBe(false)
     // An escarpment's sides lean out, a crater's too; ordinary land is sheer.
-    expect(at(layout, 1, 1).slope).toBeGreaterThan(0)
+    expect(at(layout, 2, 1).slope).toBeGreaterThan(0)
     expect(at(layout, 4, 2).slope).toBeGreaterThan(0)
     expect(at(layout, 1, 2).slope).toBe(0)
     expect(at(layout, 4, 2).state).toBe('crater')
     expect(at(layout, 4, 2).height).toBe(4)
+    // Gamma's logos stand below the escarpment's lip, and count as Gamma's.
+    expect(layout.unplaced).toEqual([])
+    const lip = Math.max(...at(layout, 2, 1).top.map(point => point[1]))
+    for (const id of ['Gamma-0', 'Gamma-1']) {
+      const spot = layout.positions.get(id)!
+      expect(spot.y).toBeGreaterThan(lip - 1.2)
+      expect(layout.districtAt(spot.x, spot.y)).toBe('Gamma')
+    }
   })
 
   it('takes up the tiles a district is told to, however few its logos', () => {

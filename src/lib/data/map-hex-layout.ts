@@ -72,6 +72,7 @@ export type HexCover =
   | 'dunes'
   | 'meadow'
   | 'tropical'
+  | 'oasis'
   | 'huts'
   | 'thermals'
 
@@ -99,9 +100,9 @@ export interface HexDistrictSpec {
   overWater?: boolean
   // Ringed by a wall of dark peaks along its edge (a forbidding country).
   walled?: boolean
-  // An escarpment: its cliffs toward the viewer are not sheer but lean out,
-  // a steep slope of bare banded rock down onto the land in front.
-  scarp?: boolean
+  // It has no tiles of its own: its logos stand on the slopes of the
+  // escarpment (the tiles marked "^") of the district with this code.
+  onSlopesOf?: string
   // A village on stilts: its ground is a deck of planks, and what shows
   // under its edges toward the viewer is not cliff but the posts it stands on.
   stilts?: boolean
@@ -131,7 +132,7 @@ export interface HexDistrictSpec {
 // ends at.
 export interface HexFeatureSpec {
   code: string
-  kind: 'water' | 'scenery' | 'crater' | 'keep'
+  kind: 'water' | 'scenery' | 'crater' | 'lake' | 'keep'
   realm?: string
   // Levels above the sea; 0 for water.
   height: number
@@ -188,6 +189,8 @@ export type HexTileState =
   | 'water'
   | 'scenery'
   | 'crater'
+  // A lake on high ground (a reservoir): land, under water.
+  | 'lake'
   | 'keep'
 
 export interface HexLaidTile extends HexGridTile {
@@ -200,7 +203,8 @@ export interface HexLaidTile extends HexGridTile {
   sunken: boolean
   // Its district is ringed by peaks (see HexDistrictSpec.walled).
   walled: boolean
-  // Its district is an escarpment (see HexDistrictSpec.scarp).
+  // An escarpment (marked "^"): its sides toward the viewer lean out as
+  // slopes of bare banded rock down onto the land in front.
   scarp: boolean
   // Its district is a village on stilts (see HexDistrictSpec.stilts).
   stilts: boolean
@@ -424,8 +428,11 @@ const SIDES: HexDirection[] = ['SE', 'S', 'SW', 'NW', 'N', 'NE']
 
 // How far a slope leans out for each level it drops (map grid units on the
 // ground): an escarpment's, and a volcano's.
-const SCARP_RUN = 0.3
+const SCARP_RUN = 0.45
 const CONE_RUN = 0.35
+
+// How far a logo keeps in from the edge of a slope it stands on.
+const SLOPE_MARGIN = 0.1
 
 // How wide a district's building stands, and a footpath (map grid units).
 const BUILDING_WIDTH = { capitol: 1.7, school: 1.7, forum: 1.1 }
@@ -663,7 +670,7 @@ export function layoutHexMap(
   const kindOf = (tile: PlannedTile) => featureByCode.get(tile.code!)?.kind
   const slopeOf = (tile: PlannedTile) => {
     const district = districtByCode.get(tile.code!)
-    if (district?.scarp) return SCARP_RUN
+    if (tile.mark === 'scarp') return SCARP_RUN
     return district?.cone || kindOf(tile) === 'crater' ? CONE_RUN : 0
   }
   // Sea as the tile map paints it: open sea or a cove.
@@ -918,7 +925,9 @@ export function layoutHexMap(
             const next = neighborOf(tile, side)
             return !!next && next.mark === 'river' && byKeep(next)
           })
-        if (!out && kind === 'river' && !intoMoat) {
+        // (Or it ends in the pool of an oasis.)
+        const intoOasis = districtByCode.get(tile.code!)?.cover === 'oasis'
+        if (!out && kind === 'river' && !intoMoat && !intoOasis) {
           throw new Error(
             `Hex map: the river tile "${tile.ref}" at ${where(tile)} is a dead end inland: an arm of the river leads there and nowhere on. Mark the tiles on to the coast, or take its mark away`
           )
@@ -1077,7 +1086,10 @@ export function layoutHexMap(
           b: drawn(high, along(0.5 + share)),
           fall: (high.height - low.height) * view.lift,
           visible: SOUTH_FACING.includes(face),
-          ...(SOUTH_FACING.includes(face) && districtByCode.get(high.code!)?.dam
+          // A lake on high ground is held back by a dam wherever it has
+          // lower ground toward the viewer.
+          ...(SOUTH_FACING.includes(face) &&
+          (districtByCode.get(high.code!)?.dam || kindOf(high) === 'lake')
             ? { dam: true }
             : {}),
         })
@@ -1290,6 +1302,75 @@ export function layoutHexMap(
       ],
     }
   }
+  // The slopes of a district's escarpment, as they are drawn: each side of a
+  // tile marked "^" that looks toward the viewer over lower land leans out
+  // from its lip to its foot on that land. Another district's logos may
+  // stand on them.
+  const SLOPE_OUT: Point[] = [
+    [0.866, 0.5],
+    [0, 1],
+    [-0.866, 0.5],
+  ]
+  const slopesOf = (code: string): Point[][] =>
+    (tilesOf.get(code) ?? [])
+      .filter(tile => tile.mark === 'scarp')
+      .flatMap(tile => {
+        const top = topOf(tile)
+        return (['SE', 'S', 'SW'] as const).flatMap((side, k) => {
+          const front = neighborOf(tile, side)
+          const ground =
+            front && kindOf(front) !== 'water' && !deckOn.has(front.ref)
+              ? front.height
+              : 0
+          if (ground <= 0 || ground >= tile.height) return []
+          const run = SCARP_RUN * (tile.height - ground)
+          const reach: Point = [
+            SLOPE_OUT[k][0] * run,
+            SLOPE_OUT[k][1] * run * view.squash +
+              (tile.height - ground) * view.lift,
+          ]
+          const [a, b] = [top[k], top[k + 1]]
+          return [
+            [
+              a,
+              b,
+              [b[0] + reach[0], b[1] + reach[1]],
+              [a[0] + reach[0], a[1] + reach[1]],
+            ] as Point[],
+          ]
+        })
+      })
+  const slopeGround = new Map<string, Point[][]>()
+  for (const { code, district, onSlopesOf } of spec.districts) {
+    if (!onSlopesOf) continue
+    const slopes = slopesOf(onSlopesOf)
+    if (slopes.length === 0) {
+      throw new Error(
+        `Hex map: district "${code}" is to stand on the slopes of "${onSlopesOf}", which has no tile marked "^" with lower land in front`
+      )
+    }
+    slopeGround.set(district, slopes)
+    slopeGround.set(code, slopes)
+  }
+  const slopePlateau = (slopes: Point[][]): Plateau => ({
+    tiles: slopes.map(slope => ({
+      top: slope,
+      center: [
+        slope.reduce((sum, point) => sum + point[0], 0) / slope.length,
+        slope.reduce((sum, point) => sum + point[1], 0) / slope.length,
+      ],
+    })),
+    edge: slopes.flatMap(slope =>
+      slope.map((a, n) => ({
+        a,
+        b: slope[(n + 1) % slope.length],
+        clear: SLOPE_MARGIN,
+      }))
+    ),
+    lines: [],
+    areas: [],
+  })
+
   const packDistrict = ({
     code,
     district,
@@ -1330,8 +1411,11 @@ export function layoutHexMap(
       count++
     ) {
       taken = count
+      const slopes = slopeGround.get(code)
       const plateau = plateauSpots(
-        plateauOf(plateauTiles(count), overWater),
+        slopes
+          ? slopePlateau(slopes)
+          : plateauOf(plateauTiles(count), overWater),
         packing
       )
       const depth =
@@ -1473,7 +1557,7 @@ export function layoutHexMap(
       walled: district?.walled === true && state !== 'sea',
       stilts: district?.stilts === true && state !== 'sea',
       building: state === 'sea' ? null : (district?.building ?? null),
-      scarp: district?.scarp === true && state !== 'sea',
+      scarp: plan?.mark === 'scarp' && state !== 'sea',
       beach: district?.beach === true && state !== 'sea',
       slope: state === 'sea' || !plan ? 0 : slopeOf(plan),
       deck: state === 'sea' ? null : (deckOn.get(laid.ref) ?? null),
@@ -1522,6 +1606,12 @@ export function layoutHexMap(
   // The nearest tile is looked at first: it covers the ones behind it.
   const frontToBack = [...tiles].reverse()
   const districtAt = (x: number, y: number) => {
+    // A slope lies in front of everything it leans over.
+    for (const { district, onSlopesOf } of spec.districts) {
+      if (!onSlopesOf) continue
+      const on = slopeGround.get(district) ?? []
+      if (on.some(slope => insideConvex([x, y], slope))) return district
+    }
     for (const tile of frontToBack) {
       if (tile.state === 'sea') continue
       if (insideConvex([x, y], tile.deck?.shape ?? tile.top)) {
