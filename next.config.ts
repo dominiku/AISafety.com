@@ -66,7 +66,23 @@ const nextConfig: NextConfig = {
         destination: '/media-channels',
         permanent: true,
       },
-      { source: '/media', destination: '/media-channels', permanent: true },
+      // /media used to redirect to /media-channels (a Webflow-era alias). It
+      // is the press and media page since September 2026; /press is its
+      // alias. Browsers that cached the old permanent redirect keep following
+      // it until that cache expires.
+      { source: '/press', destination: '/media', permanent: true },
+      // /donate is the short address for giving to AISafety.com itself (the
+      // footer's Donate link goes to the same Every.org page). Temporary on
+      // purpose: if the site ever gets its own support page, the address can
+      // move there without browsers remembering the old target. Not to be
+      // confused with /donating, which is the guide to funding AI safety
+      // organizations.
+      {
+        source: '/donate',
+        destination:
+          'https://www.every.org/aisafetycom?donateTo=aisafetycom#/donate/card',
+        permanent: false,
+      },
     ]
   },
 }
