@@ -69,8 +69,8 @@ const TILES = `
   ..  ..  Ne  Ne~ Ne~ Fo~ Fo! Fo  Fr  Gr  cv  Pa  Pa  Go  Th  Th! Lo  Lo  ..
   ..  ..  Ne~ Ne! Ne  Fo  Fo~ Fo~ Fr  Gr  cv  Pa  Ma  Ma  Ma  St  Lo  ..  ..
   ..  In! In  In  Fb  Pp  Pp  Tp  Fr~ Ca~ Ca  Ca  Ma  Ma  St  Co  Co  cr  ..
-  ..  hb  hb  In= Fb= Pp= Pp= Tp= Tp= Ca= kp  Ca~ Al~ Al  Al  Co  Ip  Ip  ..
-  ..  In  hb  In  Fb  Tp  Tp  Tp  Tp  Hu  Ca  Al  Al~ Al~ Co~ Co  Co  Cp  ..
+  ..  hb  hb  In= Fb= Pp= Pp= Tp= Tp= Ca= kp  Ca~ Al  Al  Al  Co  Ip  Ip  ..
+  ..  In  hb  In  Fb  Tp  Tp  Tp  Tp  Hu  Ca  Al~ Al~ Al~ Co~ Co  Co  Cp  ..
   ..  ..  In  Tp  Tp  Tp  Tp  Hu  Hu  Gm  Gm  Vc  Vc~ Al  Co  Co! Cp  Cp! ..
   Gy! Gy  ..  ..  Op  Op  Op  Op  Gm  Gm  Gm  Gm  Vc  Al^ Al^ Gm  Cp  ..  ..
   Gy  Gy  Gy  ..  ..  ..  ..  To  To  To  Gm  Gm  Gm  Gm  Gm  ..  ..  ..  ..
@@ -159,24 +159,30 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
       landmark: { symbol: 'castle', width: 5, height: 3.12 } },
   ],
   // The Control Dam's reservoir, on the Dam's own ground at the head of
-  // Venture Valley: the river runs into it from the Thermals, and out of it
-  // two ways: on to the castle, and over the dam's spillway into the valley
-  // below, where it ends in the oasis's pool.
+  // Venture Valley (after Robert's sketch): a stream from the great hot pond
+  // of the Thermals falls into it, and it empties two ways: north to the
+  // castle's moat, and over the dam's spillway, at the top edge of the
+  // valley, into the oasis's pool.
   lakes: [
     {
+      // Two rough ovals run together: the larger under the stream's fall,
+      // the smaller behind the dam.
       cells: [
-        [12, 6],
-        [11, 7],
         [12, 7],
+        [11, 7],
+      ],
+      ovals: [
+        { shift: [-0.3, 0], size: [0.9, 0.66] },
+        { shift: [0.16, -0.06], size: [0.78, 0.6] },
       ],
       dam: [
         [12, 7, 'S'],
-        [12, 7, 'SW'],
         [11, 7, 'SE'],
+        [11, 7, 'S'],
       ],
     },
   ],
-  river: { width: 0.85, branch: 0.78 },
+  river: { width: 0.85, branch: 0.78, headwater: 0.5 },
   road: { width: 0.55 },
   // For now every painted tile is land, so the coast is as smooth as it is
   // painted. To give a district room to grow, paint more tiles for it.

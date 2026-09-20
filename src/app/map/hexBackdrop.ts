@@ -1072,7 +1072,8 @@ export function hexBackdropMarkup(
     return thermalSpringMarkup(
       spring.at,
       toward,
-      spring.width * 2.7,
+      // A great pond, whatever the width of the stream that leaves it.
+      Math.max(3.6, spring.width * 2.7),
       view.squash,
       g,
       layer

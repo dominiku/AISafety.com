@@ -154,7 +154,9 @@ export interface HexMapSpec {
   features: HexFeatureSpec[]
   // Widths as drawn, in map grid units. Where the river parts, each arm is
   // `branch` times as wide as the stream above.
-  river: { width: number; branch: number }
+  // `headwater`: how wide the river is, as a share of its width, from its
+  // source down to the first lake it runs into (a stream, not yet a river).
+  river: { width: number; branch: number; headwater?: number }
   road: { width: number }
   // Lakes on a district's ground (a reservoir): each lies over part of each
   // of its cells (column, row), a lobe to a cell, all run together; the
@@ -164,6 +166,10 @@ export interface HexMapSpec {
   // a spillway.
   lakes?: {
     cells: [number, number][]
+    // The lake's oval on each cell, for a lake shaped by hand: how far its
+    // middle lies from the cell's (across, down) and how large it is (across,
+    // deep), in tile sizes. Without it a cell's oval is worked out.
+    ovals?: { shift: [number, number]; size: [number, number] }[]
     dam: [number, number, HexDirection][]
   }[]
   // Every painted tile is land, needed or not: the coast is exactly as it is
@@ -822,6 +828,9 @@ export function layoutHexMap(
   // Lakes: a lobe over part of each cell, drawn toward the middle of the
   // lake, or toward a dam where the cell has one.
   const damSides = new Set<string>()
+  const lakeCells = new Set<string>()
+  // The tile below each dam, and the lake tile whose water comes down to it.
+  const damFed = new Map<string, string>()
   const lakes: HexLayout['lakes'] = []
   const lakeAreas = new Map<string, HexLayout['lakes'][number]['lobes']>()
   for (const lake of spec.lakes ?? []) {
@@ -839,6 +848,8 @@ export function layoutHexMap(
     }
     for (const [col, row, side] of lake.dam) {
       damSides.add(`${hexKey({ col, row })}|${side}`)
+      const below = hexKey(hexNeighbor({ col, row }, side))
+      if (!damFed.has(below)) damFed.set(below, hexKey({ col, row }))
     }
     const centers = cells.map(tile => drawn(tile, flatCenter(tile)))
     const heart: Point = [
@@ -846,6 +857,15 @@ export function layoutHexMap(
       centers.reduce((sum, point) => sum + point[1], 0) / centers.length,
     ]
     const lobes = cells.map((tile, n) => {
+      const oval = lake.ovals?.[n]
+      if (oval) {
+        return {
+          x: centers[n][0] + oval.shift[0] * view.size,
+          y: centers[n][1] + oval.shift[1] * view.size * view.squash,
+          rx: oval.size[0] * view.size,
+          ry: oval.size[1] * view.size * view.squash,
+        }
+      }
       const dammed = lake.dam.filter(
         ([col, row]) => col === tile.col && row === tile.row
       )
@@ -876,6 +896,7 @@ export function layoutHexMap(
         ry: rx * view.squash * 0.95,
       }
     })
+    cells.forEach(tile => lakeCells.add(hexKey(tile)))
     lakes.push({ tile: cells[0].ref, height: cells[0].height, lobes })
     lakeAreas.set(cells[0].code!, [
       ...(lakeAreas.get(cells[0].code!) ?? []),
@@ -920,7 +941,17 @@ export function layoutHexMap(
           )[0]
 
     const parent = new Map<string, PlannedTile | null>([[hexKey(root), null]])
-    const widthAt = new Map<string, number>([[hexKey(root), width]])
+    // The river's source is a stream, where the spec says so, down to the
+    // first lake.
+    const headwaters = new Set<string>()
+    const stream =
+      kind === 'river' &&
+      spec.river.headwater !== undefined &&
+      !lakeCells.has(hexKey(root))
+    if (stream) headwaters.add(hexKey(root))
+    const widthAt = new Map<string, number>([
+      [hexKey(root), stream ? width * spec.river.headwater! : width],
+    ])
     const children = new Map<string, PlannedTile[]>()
     const queue = [root]
     while (queue.length > 0) {
@@ -928,6 +959,12 @@ export function layoutHexMap(
       const next = touching(tile)
         .map(side => neighborOf(tile, side)!)
         .filter(neighbor => !parent.has(hexKey(neighbor)))
+        // Water below a dam comes over that dam, and from nowhere else.
+        .filter(
+          neighbor =>
+            kind !== 'river' ||
+            (damFed.get(hexKey(neighbor)) ?? hexKey(tile)) === hexKey(tile)
+        )
       children.set(hexKey(tile), next)
       for (const child of next) {
         if (kind === 'river' && child.height > tile.height) {
@@ -936,12 +973,18 @@ export function layoutHexMap(
           )
         }
         parent.set(hexKey(child), tile)
+        // A stream above the first lake; the full river from the lake on.
+        const stream =
+          headwaters.has(hexKey(tile)) && !lakeCells.has(hexKey(child))
+        if (stream) headwaters.add(hexKey(child))
         widthAt.set(
           hexKey(child),
-          widthAt.get(hexKey(tile))! *
-            (kind === 'river' && next.length > 1 && tile !== keep
-              ? spec.river.branch
-              : 1)
+          headwaters.has(hexKey(tile)) && !stream
+            ? width
+            : widthAt.get(hexKey(tile))! *
+                (kind === 'river' && next.length > 1 && tile !== keep
+                  ? spec.river.branch
+                  : 1)
         )
         queue.push(child)
       }
