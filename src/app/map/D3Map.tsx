@@ -863,7 +863,10 @@ export default function D3Map({
       if (!layout) return
       const config = tierConfigRef.current
       const z = zoomOf(k)
-      const s = pinMapScale(z, config)
+      // On the hex board every pin has a spot worked out for its true size,
+      // among buildings and scenery: it keeps that size at every zoom, or it
+      // would cover what stands beside it.
+      const s = hexBackdrop ? 1 : pinMapScale(z, config)
       const labelScale = labelMapScale(z, config, labelCap)
       for (const pill of areaPills.values()) {
         pill.group

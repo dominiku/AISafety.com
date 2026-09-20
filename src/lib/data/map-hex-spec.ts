@@ -71,9 +71,9 @@ const TILES = `
   ..  In! In  In  Fb  Pp  Pp  Pp  Fr~ Ca~ Ca  Ca  Ma  Ma  St  Co  Co  cr  ..
   ..  hb  hb  In= Fb= Pp= Pp= Tp= Tp= Ca= kp  Ca~ Al~ Al  Al  Co  Ip  Ip  ..
   ..  In  hb  In  Fb  Tp  Tp  Tp  Tp  Hu  Ca  rs  rs~ Al~ Co~ Co  Co  Cp  ..
-  ..  ..  In  Tp  Tp  Tp  Tp  Hu  Hu  Gm  Gm  rs  Vc~ Al  Al  Co! Cp  Cp! ..
+  ..  ..  In  Tp  Tp  Tp  Tp  Hu  Hu  Gm  Gm  Vc  Vc~ Al  Co  Co! Cp  Cp! ..
   Gy! Gy  ..  ..  Op  Op  Op  Op  To  Gm  Gm  Vc  Vc  Al^ Al^ Gm  Cp  ..  ..
-  Gy  Gy  Gy  ..  ..  ..  ..  To  To  Gm  Gm  Gm  Gm  Gm  Gm  ..  ..  ..  ..
+  Gy  Gy  Gy  ..  ..  ..  ..  To  To  To  Gm  Gm  Gm  Gm  Gm  ..  ..  ..  ..
   ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..
 `
 
@@ -147,9 +147,11 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
       landmark: { symbol: 'boats', width: 3.4, height: 1.26, shift: [1.5, 0.7] } },
     // The harbor the road starts from: a bay between the arms of the landing.
     { code: 'hb', kind: 'water', height: 0 },
-    // The Control Dam's reservoir: the river runs into it from the Thermals,
-    // and out of it two ways: on to the castle, and over the dam (the side
-    // toward the valley below) and down Venture Valley to the sea.
+    // The Control Dam's reservoir, across the head of Venture Valley: the
+    // river runs into it from the Thermals, and out of it two ways: on to the
+    // castle, and over the dam's spillway into the valley below, where it
+    // ends in the oasis's pool. The dam is the reservoir's sides toward the
+    // valley.
     { code: 'rs', kind: 'lake', realm: 'Technical research', height: 4 },
     // The top of the volcano, in the Range's back corner, with only sea
     // behind it to hide.
