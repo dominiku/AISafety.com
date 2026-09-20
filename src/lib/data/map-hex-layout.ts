@@ -75,6 +75,10 @@ export interface HexLandmarkArt {
   // How wide the road is by the time it gets there (map grid units), where
   // the art's own street is narrower than the road.
   doorWidth?: number
+  // Which way the road comes to the door: up to it from below (a doorway
+  // that faces the viewer; the default), or down to it from above (a main
+  // street running down through a town to its far end).
+  doorFrom?: 'above' | 'below'
 }
 
 export type HexCover =
@@ -194,7 +198,13 @@ export interface HexMapSpec {
   river: { width: number; branch: number; headwater?: number }
   // `fades`: tiles [column, row] a road ends on by fading away, going on to
   // nowhere in particular, where it would otherwise stop short.
-  road: { width: number; fades?: [number, number][] }
+  // `apart`: pairs of road tiles [column, row] that touch but are not joined:
+  // the road does not cut the corner from one to the other.
+  road: {
+    width: number
+    fades?: [number, number][]
+    apart?: [[number, number], [number, number]][]
+  }
   // The compass rose, as the original map draws it: round the four buttons
   // of map furniture (Merch, Suggest entry and the rest), which stand at its
   // four points. Only how large it is belongs here; where it goes follows
@@ -1027,7 +1037,10 @@ export function layoutHexMap(
       ? {}
       : { deck: tile.height * view.lift }
   const joinUp = (kind: 'road' | 'river', width: number) => {
-    const marked = [...planned.values()].filter(tile => tile.mark === kind)
+    // (A crossing is a tile of both.)
+    const marked = [...planned.values()].filter(
+      tile => tile.mark === kind || tile.mark === 'crossing'
+    )
     if (marked.length === 0) return
     const nodes = new Set(marked.map(tile => hexKey(tile)))
     if (
@@ -1036,8 +1049,20 @@ export function layoutHexMap(
     ) {
       nodes.add(hexKey(keep))
     }
+    const apart = new Set(
+      (kind === 'road' ? (spec.road.apart ?? []) : []).flatMap(([a, b]) => {
+        const [ka, kb] = [
+          hexKey({ col: a[0], row: a[1] }),
+          hexKey({ col: b[0], row: b[1] }),
+        ]
+        return [`${ka}|${kb}`, `${kb}|${ka}`]
+      })
+    )
     const touching = (tile: PlannedTile) =>
-      HEX_DIRECTIONS.filter(side => nodes.has(hexKey(hexNeighbor(tile, side))))
+      HEX_DIRECTIONS.filter(side => {
+        const next = hexKey(hexNeighbor(tile, side))
+        return nodes.has(next) && !apart.has(`${hexKey(tile)}|${next}`)
+      })
     // The river starts at its highest tile (of those, one at the end of a
     // run); the road at the keep, or at one end (not the end it fades at).
     const candidates = [...nodes].map(key => planned.get(key)!)
@@ -1220,13 +1245,13 @@ export function layoutHexMap(
         ]
         const span = Math.hypot(door[0] - from[0], door[1] - from[1])
         const inward = Math.hypot(center[0] - from[0], center[1] - from[1])
-        // In over the side square to it, and up to the door from below.
+        // In over the side square to it, and up (or down) to the door.
         const points = course(
           from,
           [(center[0] - from[0]) / inward, (center[1] - from[1]) / inward],
           door,
           span > 0.5
-            ? [0, 1]
+            ? [0, doorOf.doorFrom === 'above' ? -1 : 1]
             : [(from[0] - door[0]) / span, (from[1] - door[1]) / span],
           0
         )
@@ -1263,7 +1288,11 @@ export function layoutHexMap(
           byKeep(tile) ||
           HEX_DIRECTIONS.some(side => {
             const next = neighborOf(tile, side)
-            return !!next && next.mark === 'river' && byKeep(next)
+            return (
+              !!next &&
+              (next.mark === 'river' || next.mark === 'crossing') &&
+              byKeep(next)
+            )
           })
         // (Or it ends in the pool of an oasis.)
         const intoOasis = districtByCode.get(tile.code!)?.cover === 'oasis'
@@ -1465,8 +1494,69 @@ export function layoutHexMap(
   }
   joinUp('river', spec.river.width)
   joinUp('road', spec.road.width)
+  // A crossing: planks where the road's line meets the river's, along the
+  // road, long enough to span the water.
+  for (const tile of planned.values()) {
+    if (tile.mark !== 'crossing') continue
+    const on = (kind: 'road' | 'river') =>
+      pieces.filter(
+        piece => piece.kind === kind && piece.tile === tile.ref && !piece.closed
+      )
+    let met: { at: Point; along: Point; water: number; road: number } | null =
+      null
+    for (const road of on('road')) {
+      for (const river of on('river')) {
+        for (let i = 0; i + 1 < road.points.length && !met; i++) {
+          for (let k = 0; k + 1 < river.points.length && !met; k++) {
+            const [p, p2] = [road.points[i], road.points[i + 1]]
+            const [q, q2] = [river.points[k], river.points[k + 1]]
+            const [rx, ry] = [p2[0] - p[0], p2[1] - p[1]]
+            const [sx, sy] = [q2[0] - q[0], q2[1] - q[1]]
+            const cross = rx * sy - ry * sx
+            if (Math.abs(cross) < 1e-12) continue
+            const t = ((q[0] - p[0]) * sy - (q[1] - p[1]) * sx) / cross
+            const u = ((q[0] - p[0]) * ry - (q[1] - p[1]) * rx) / cross
+            if (t < 0 || t > 1 || u < 0 || u > 1) continue
+            const length = Math.hypot(rx, ry) || 1
+            met = {
+              at: [p[0] + rx * t, p[1] + ry * t],
+              along: [rx / length, ry / length],
+              water: Math.max(river.width, river.widthEnd ?? river.width),
+              road: road.width,
+            }
+          }
+        }
+      }
+    }
+    if (!met) {
+      throw new Error(
+        `Hex map: the crossing "${tile.ref}" at ${where(tile)} is marked #, but the road and the river do not meet on it: both must run through the tile`
+      )
+    }
+    // Over a lake the bridge runs the whole way across the tile's water.
+    const over = lakeCells.has(hexKey(tile)) ? on('road') : []
+    if (over.length > 0) {
+      for (const road of over) {
+        bridges.push({
+          tile: tile.ref,
+          width: road.width,
+          a: road.points[0],
+          b: road.points[road.points.length - 1],
+        })
+      }
+      continue
+    }
+    const reach = met.water * 0.5 + 0.3
+    bridges.push({
+      tile: tile.ref,
+      width: met.road,
+      a: [met.at[0] - met.along[0] * reach, met.at[1] - met.along[1] * reach],
+      b: [met.at[0] + met.along[0] * reach, met.at[1] + met.along[1] * reach],
+    })
+  }
   for (const [col, row] of spec.road.fades ?? []) {
-    if (planned.get(hexKey({ col, row }))?.mark !== 'road') {
+    const mark = planned.get(hexKey({ col, row }))?.mark
+    if (mark !== 'road' && mark !== 'crossing') {
       throw new Error(
         `Hex map: the road is to fade away at column ${col}, row ${row}, but no road tile (=) is marked there`
       )

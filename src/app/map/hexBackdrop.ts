@@ -565,8 +565,8 @@ export function hexBackdropMarkup(
           `<path d="${outline(ramp)}" fill="${ROAD_PEBBLE}" stroke="${ROAD_PEBBLE}" stroke-width="${(piece.width * g * 0.9).toFixed(1)}" stroke-linejoin="round"/>`
         )
       }
-      // The classic brown road, but a worn one: its edge comes and goes, and
-      // dark pebbles lie on it.
+      // The classic brown road, with dark pebbles lying on it. (Its edge is
+      // clean: bulges along it read as knobs sticking out of the road.)
       if (piece.fade) {
         out.push(fadingRoad(piece, clip))
         continue
@@ -591,11 +591,6 @@ export function hexBackdropMarkup(
         if (k % 2 === 0) {
           out.push(
             `<circle cx="${(x * g + side * 0.55).toFixed(1)}" cy="${(y * g + side * 0.33).toFixed(1)}" r="${k % 3 === 0 ? 3 : 2}" fill="${ROAD_PEBBLE}"/>`
-          )
-        } else if (chance < 0.3 || chance > 0.7) {
-          // A bulge of the road's own brown at its edge.
-          out.push(
-            `<ellipse cx="${(x * g + Math.sign(side) * piece.width * g * 0.42).toFixed(1)}" cy="${(y * g + Math.sign(side) * piece.width * g * 0.25).toFixed(1)}" rx="${(piece.width * g * (0.22 + chance * 0.2)).toFixed(1)}" ry="${(piece.width * g * 0.16).toFixed(1)}" fill="${ROAD}"/>`
           )
         }
       })

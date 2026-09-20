@@ -362,6 +362,57 @@ describe('layoutHexMap', () => {
     ).toBeLessThan(1e-6)
   })
 
+  it('does not cut the corner between two road tiles the spec keeps apart', () => {
+    // Three road tiles that all touch one another.
+    const tiles = SPEC.tiles
+      .replace('..  Bb  Bb  Bb  cv', '..  Bb= Bb= Bb  cv')
+      .replace('..  Bb  Bb  Bb  ..', '..  Bb  Bb= Bb  ..')
+    const roadOf = (road: HexMapSpec['road']) =>
+      layoutHexMap(withTiles(tiles, { road }), []).pieces.filter(
+        piece => piece.kind === 'road'
+      )
+    // Left to itself the road forks where it starts; kept apart, it is one
+    // line through the three tiles.
+    expect(roadOf({ width: 0.6 })).toHaveLength(4)
+    const apart: HexMapSpec['road']['apart'] = [
+      [
+        [1, 2],
+        [2, 3],
+      ],
+    ]
+    expect(roadOf({ width: 0.6, apart })).toHaveLength(3)
+  })
+
+  it('bridges the road over the river on a tile marked as a crossing', () => {
+    const layout = layoutHexMap(
+      withTiles(`
+        ..  ..  ..  ..  ..  ..
+        ..  Aa  Aa~ Aa  ..  ..
+        ..  Bb= Bb# Bb= cv  ..
+        ..  Bb  Bb~ Bb  ..  ..
+        ..  ..  ..  ..  ..  ..
+      `),
+      []
+    )
+    const crossing = at(layout, 2, 2)
+    const kinds = layout.pieces
+      .filter(piece => piece.tile === crossing.ref)
+      .map(piece => piece.kind)
+    expect(kinds).toContain('road')
+    expect(kinds).toContain('river')
+    expect(layout.bridges).toHaveLength(1)
+    const [bridge] = layout.bridges
+    expect(bridge.tile).toBe(crossing.ref)
+    // The planks lie on the tile, about where the two lines meet.
+    const middle = [
+      (bridge.a[0] + bridge.b[0]) / 2,
+      (bridge.a[1] + bridge.b[1]) / 2,
+    ]
+    expect(
+      Math.hypot(middle[0] - crossing.center[0], middle[1] - crossing.center[1])
+    ).toBeLessThan(1.5)
+  })
+
   it('stands a pier where the spec says, or at the end of a road to its shore', () => {
     const beta = (pier: HexMapSpec['districts'][number]['pier']) => [
       SPEC.districts[0],

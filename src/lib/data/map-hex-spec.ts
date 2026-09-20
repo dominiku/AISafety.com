@@ -29,6 +29,8 @@
 //   Al^   an ESCARPMENT: the tile's sides toward the viewer lean out as
 //         slopes of bare rock. A district with no tiles of its own may have
 //         its logos on those slopes (onSlopesOf).
+//   Al#   a CROSSING: the river and the road both run through the tile, and
+//         the road goes over the river by a plank bridge.
 //   Gm+   a DECK: the tile is water with a pier's planks over it. A pier runs
 //         straight out from a tile of its district's solid ground.
 // River, road and landmark tiles are always land.
@@ -65,13 +67,13 @@ const TILES = `
 # 0   1   2   3   4   5   6   7   8   9   10  11  12  13  14  15  16  17  18
   ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..
   ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  Th  ..  ..  ..
-  ..  ..  Ne  Ne~ Ne  Fo~ Fo  Fo  Fo  Gr  cv  cv  Go  Go  Th  Th  Th  ..  ..
+  ..  ..  Ne  Ne~ Ne  Fo~ Fo  Fo  Fo  Gr  cv  cv  Go  Go  Th  Th= Th  ..  ..
   ..  ..  Ne  Ne~ Ne~ Fo~ Fo! Fo  Fr  Gr  cv  Pa  Ma  Go= Th= Th! Lo  Lo  ..
-  ..  ..  Ne~ Ne  Ne  Fo  Fo~ Fo~ Fr  Gr  Pa= Pa  Ma  Ma= Ma  St  Lo  ..  ..
-  ..  In! In  In  Fb  Pp  Pp  Tp  Fr~ Ca~ Ca= Ca= Ma= Ma  St  Co  Co  cr  ..
-  ..  hb  hb  In= Fb= Pp= Pp= Tp= Tp= Ca= kp  Ca~ Al  Al  Al  Co  Ip  Ip  ..
-  ..  In  hb  In  Fb  Tp  Tp  Tp  Tp  Hu  Ca  Al~ Al~ Al~ Co~ Co  Co  Cp  ..
-  ..  ..  In  Tp  Tp  Tp  Tp  Hu  Hu  Gm  Gm  Vc  Vc~ Al  Co  Co! Cp  Cp! ..
+  ..  ..  Ne~ Ne  Ne  Fo  Fo~ Fo~ Fr  Gr  Pa= Pa= Ma  Ma= Ma  St  Lo  ..  ..
+  ..  In! In  In  Fb  Pp  Pp  Tp  Fr~ Ca~ Ca  Ca= Ma= Ma  St  Co  Co  cr  ..
+  ..  hb  hb  In= Fb= Pp= Pp= Tp= Tp= Ca= kp  Ca~ Al= Al= Al  Co  Ip  Ip  ..
+  ..  In  hb  In  Fb  Tp  Tp  Tp  Tp  Hu  Ca  Al~ Al~ Al# Co~ Co  Co  Cp  ..
+  ..  ..  In  Tp  Tp  Tp  Tp  Hu  Hu  Gm  Gm  Vc  Vc~ Al= Co= Co! Cp  Cp! ..
   Gy  Gy  ..  ..  Op  Op  Op  Op  Gm  Gm  Gm  Gm  Vc  Al^ Al^ Gm  Cp  ..  ..
   Gy  Gy! Gy  ..  ..  ..  ..  To  To  To  Gm  Gm  Gm  Gm  Gm  ..  ..  ..  ..
   ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..
@@ -95,7 +97,7 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
     { code: 'Ne', district: 'News and commentary', realm: 'Media and discourse', height: 1, beach: true, cover: 'reeds' },
     { code: 'Fr', district: 'Forums and online communities', realm: 'Media and discourse', height: 2.5, building: 'forum' },
     { code: 'Gr', district: 'Grassroots campaigns', realm: 'Advocacy and public engagement', height: 1 },
-    { code: 'Pa', district: 'Professional advocacy and communication', realm: 'Advocacy and public engagement', height: 1.5, pier: true },
+    { code: 'Pa', district: 'Professional advocacy and communication', realm: 'Advocacy and public engagement', height: 2.5, pier: true },
     // The landing: the arms of a sheltered harbor, where the road starts.
     { code: 'In', district: 'Introductory learning', realm: 'Talent pipeline', height: 0.5,
       landmark: { symbol: 'lighthouse', width: 1, height: 1.8, lit: [0.48, 0.13] } },
@@ -124,9 +126,11 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
     // no peaks: the mountains are the Range's).
     { code: 'Ma', district: 'Macrostrategy and forecasting', realm: 'Policy and strategy', height: 3.5, cover: 'hills' },
     { code: 'Th', district: 'Policy research and think tanks', realm: 'Policy and strategy', height: 2.5,
-      // The road from the castle runs into the west end of the town's own
-      // top street, narrowing to it.
-      landmark: { symbol: 'training-town', width: 3, height: 2.54, door: [0.02, 0.465], doorWidth: 0.12 } },
+      // The road from the castle is the town's main street, as on the classic
+      // map: it comes in from the north and runs down the gap between the
+      // church and the house east of it, and the art's own two streets come
+      // off it to either side.
+      landmark: { symbol: 'training-town', width: 3, height: 2.54, shift: [-0.45, 0], door: [0.65, 0.78], doorFrom: 'above' } },
     { code: 'St', district: 'Standards, assurance and verification', realm: 'Policy and strategy', height: 3 },
     { code: 'Lo', district: 'Policy advocacy and lobbying', realm: 'Policy and strategy', height: 2, pier: true },
     // The Range, from its back corner to its front: the crater on top of the
@@ -137,8 +141,9 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
     // beach, the escarpment: one long leaning slope of banded rock.
     { code: 'Al', district: 'Alignment and control', realm: 'Technical research', height: 4 },
     { code: 'Ev', district: 'Evaluations and threat research', realm: 'Technical research', height: 4, onSlopesOf: 'Al' },
-    { code: 'Co', district: 'Conceptual and foundations research', realm: 'Technical research', height: 5, cover: 'thermals', scenery: 3,
-      landmark: { symbol: 'cave', width: 1.7, height: 1.63 } },
+    { code: 'Co', district: 'Conceptual and foundations research', realm: 'Technical research', height: 5, cover: 'thermals', scenery: 2,
+      // The road from the castle ends at the cave's mouth.
+      landmark: { symbol: 'cave', width: 1.7, height: 1.63, door: [0.61, 0.6] } },
     { code: 'Ip', district: 'Interpretability and model understanding', realm: 'Technical research', height: 6.5, cone: true,
       landmark: { symbol: 'range', width: 2.8, height: 1.98 } },
     { code: 'Cp', district: 'Capabilities research', realm: 'Technical research', height: 6, walled: true,
@@ -208,7 +213,17 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
   // round the four buttons of map furniture, wherever they stand.
   compass: { width: 5.2, height: 5.3 },
   river: { width: 0.85, branch: 0.78, headwater: 0.5 },
-  road: { width: 0.4 },
+  // The road to the cave crosses the stream beside the reservoir, runs on
+  // south and only then turns east: it does not cut the corner.
+  road: {
+    width: 0.4,
+    apart: [
+      [
+        [13, 7],
+        [14, 8],
+      ],
+    ],
+  },
   // For now every painted tile is land, so the coast is as smooth as it is
   // painted. To give a district room to grow, paint more tiles for it.
   takeAllTiles: true,
