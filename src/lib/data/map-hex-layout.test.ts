@@ -383,6 +383,18 @@ describe('layoutHexMap', () => {
     expect(roadOf({ width: 0.6, apart })).toHaveLength(3)
   })
 
+  it('runs the road over a tile the spec names as well as the marked ones', () => {
+    const tiles = SPEC.tiles.replace('..  Bb  Bb  Bb  cv', '..  Bb= Bb  Bb  cv')
+    const layout = layoutHexMap(
+      withTiles(tiles, { road: { width: 0.6, over: [[2, 2]] } }),
+      []
+    )
+    const road = layout.pieces.filter(piece => piece.kind === 'road')
+    expect(road.map(piece => piece.tile).sort()).toEqual(
+      [at(layout, 1, 2).ref, at(layout, 2, 2).ref].sort()
+    )
+  })
+
   it('bridges the road over the river on a tile marked as a crossing', () => {
     const layout = layoutHexMap(
       withTiles(`

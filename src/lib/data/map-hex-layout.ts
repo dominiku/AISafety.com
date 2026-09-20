@@ -204,6 +204,9 @@ export interface HexMapSpec {
     width: number
     fades?: [number, number][]
     apart?: [[number, number], [number, number]][]
+    // Tiles [column, row] with another mark of their own (an escarpment's
+    // "^", say) that the road runs over as well.
+    over?: [number, number][]
   }
   // The compass rose, as the original map draws it: round the four buttons
   // of map furniture (Merch, Suggest entry and the rest), which stand at its
@@ -1039,7 +1042,13 @@ export function layoutHexMap(
   const joinUp = (kind: 'road' | 'river', width: number) => {
     // (A crossing is a tile of both.)
     const marked = [...planned.values()].filter(
-      tile => tile.mark === kind || tile.mark === 'crossing'
+      tile =>
+        tile.mark === kind ||
+        tile.mark === 'crossing' ||
+        (kind === 'road' &&
+          (spec.road.over ?? []).some(
+            ([col, row]) => col === tile.col && row === tile.row
+          ))
     )
     if (marked.length === 0) return
     const nodes = new Set(marked.map(tile => hexKey(tile)))

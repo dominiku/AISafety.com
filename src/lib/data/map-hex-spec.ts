@@ -213,13 +213,20 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
   // round the four buttons of map furniture, wherever they stand.
   compass: { width: 5.2, height: 5.3 },
   river: { width: 0.85, branch: 0.78, headwater: 0.5 },
-  // The road to the cave crosses the stream beside the reservoir, runs on
-  // south and only then turns east: it does not cut the corner.
+  // The road to the cave crosses the stream beside the reservoir and runs on
+  // south onto the top of the escarpment (a tile marked ^, which it runs
+  // over as well) before it turns north and climbs to the cave's plateau: it
+  // cuts no corners on the way.
   road: {
     width: 0.4,
+    over: [[14, 9]],
     apart: [
       [
         [13, 7],
+        [14, 8],
+      ],
+      [
+        [13, 8],
         [14, 8],
       ],
     ],
