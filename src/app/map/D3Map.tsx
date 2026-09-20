@@ -2277,7 +2277,14 @@ export default function D3Map({
         d3.select(container).select('svg').remove()
       }
     }
-  }, [orgs, scheme, realmBackdrop, realmBackdropStyle, hexBackdrop, hasExplorer])
+  }, [
+    orgs,
+    scheme,
+    realmBackdrop,
+    realmBackdropStyle,
+    hexBackdrop,
+    hasExplorer,
+  ])
 
   return (
     <>
@@ -2310,9 +2317,11 @@ export default function D3Map({
         onReset={() => controlsRef.current.reset()}
       />
 
-      {/* The Hex work view keeps the zoom tiers at their recommended
-          settings, with no panel to adjust them. */}
-      {tuning && !hexBackdrop && (
+      {/* The prototype's views (IA work, Art work, Hex work) keep the zoom
+          tiers at their recommended settings, with no panel to adjust them:
+          the zoom prototype is set aside for now, not removed. The classic map
+          still shows it with ?tuning=1. */}
+      {tuning && !realmBackdrop && !hexBackdrop && (
         <MapTuningPanel
           className={styles['map-tuning']}
           config={tierConfig}
