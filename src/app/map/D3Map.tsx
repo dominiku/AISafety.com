@@ -219,6 +219,10 @@ const LABEL_NUDGE_GAP = 8
 const LABEL_NUDGE_MAX = 140
 const FIT_SIDE_ROOM = 48
 const FIT_BOTTOM_ROOM = 112
+// The zoom prototype's tuning panel (MapTuningPanel) is set aside for now, not
+// removed: the zoom tiers keep their recommended settings on every view. Flip
+// this to bring the panel back on the classic map behind ?tuning=1.
+const ZOOM_TUNING_PANEL = false as boolean
 
 export default function D3Map({
   orgs,
@@ -2317,11 +2321,10 @@ export default function D3Map({
         onReset={() => controlsRef.current.reset()}
       />
 
-      {/* The prototype's views (IA work, Art work, Hex work) keep the zoom
-          tiers at their recommended settings, with no panel to adjust them:
-          the zoom prototype is set aside for now, not removed. The classic map
-          still shows it with ?tuning=1. */}
-      {tuning && !realmBackdrop && !hexBackdrop && (
+      {/* See ZOOM_TUNING_PANEL. When it is back, the prototype's views (IA
+          work, Art work, Hex work) still keep the zoom tiers at their
+          recommended settings, with no panel to adjust them. */}
+      {ZOOM_TUNING_PANEL && tuning && !realmBackdrop && !hexBackdrop && (
         <MapTuningPanel
           className={styles['map-tuning']}
           config={tierConfig}
