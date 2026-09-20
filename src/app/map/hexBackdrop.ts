@@ -60,6 +60,8 @@ import { buildingMarkup } from './hexBuildings'
 import {
   beaconMarkup,
   canopyMarkup,
+  netFrameMarkup,
+  reedBedMarkup,
   deckMarkup,
   duneMarkup,
   hillMarkup,
@@ -110,13 +112,13 @@ const POLICY_PLAINS: Partial<RealmTheme> = {
 const TURNED_SATURATION = 0.8
 // DESIGN REVIEW (Melissa): the dam's stone, ripe crops and vines, all from
 // the classic map's sands, oranges and dark greens.
-// DESIGN REVIEW (Melissa): a dam is masonry, not the Range's rock: a cool
-// pale stone, so that it reads as built.
+// A dam is masonry: the warm cream stone of the castle and the map's other
+// buildings, with their dark brown for its buttresses and sluice gates.
 const DAM = {
-  stone: '#d9e2df',
+  stone: '#ffd1bc',
   cap: '#f6fbff',
-  line: '#5f7370',
-  gate: '#2f5650',
+  line: '#972f00',
+  gate: '#571f02',
 }
 const FIELD_RIPE = '#ffd1bc'
 // DESIGN REVIEW (Melissa): an oasis's grass, from the classic trees' greens.
@@ -128,6 +130,10 @@ const HILL = { lit: '#9ccf8f', shade: '#008969' }
 // middle of its tile it lies (map grid units). How near a dam a lake's shore
 // has to come to be drawn on to it.
 const DAM_REACH = 1.6
+// A river's mouth into a lake: how many of its piece's points back the
+// widening starts, and half the width it opens to (map grid units).
+const MOUTH_BACK = 9
+const MOUTH_WIDTH = 1.05
 const FOREST = { lit: '#00ae85', shade: '#008969' }
 const VINE = '#2f5650'
 // The peaks that wall a forbidding district in.
@@ -144,8 +150,9 @@ const RIM_WIDTH = 0.24
 // where it meets the sea.
 const FACE_LIP = 0.08
 const FACE_FOOT = 0.12
-// Pixels of darker bank either side of the water.
-const BANK = 3
+// Pixels of darker bank either side of the water: none. (Robert, 20
+// September 2026: water has no dark outline, as on the classic map.)
+const BANK = 0
 // Map grid units a river piece runs on past its ends, under the next piece.
 // A tile's side lies at a slant on the screen while a piece ends square to
 // its own line, so it has to reach well past the side, or a sliver of ground
@@ -1092,7 +1099,8 @@ export function hexBackdropMarkup(
         pond.rx * 2,
         view.squash,
         g,
-        layer
+        layer,
+        Math.hypot(spring.at[0] - pond.x, spring.at[1] - pond.y)
       ) +
       '</g>'
     )
@@ -1407,6 +1415,63 @@ export function hexBackdropMarkup(
                     g,
                     seed * 97 + n
                   )
+        )
+      })
+      return
+    }
+    if (cover === 'reeds') {
+      // An estuary's shore: big beds of reed standing in the wet ground, and
+      // down on the strand itself a boat drawn up or a net hung out to dry.
+      // Few and large, as everything else on the board is.
+      const strand = plateau.tiles.flatMap(tile =>
+        tile.coast.flatMap((coast, k) =>
+          coast
+            ? [
+                [
+                  (tile.top[k][0] + tile.top[(k + 1) % 6][0]) / 2,
+                  (tile.top[k][1] + tile.top[(k + 1) % 6][1]) / 2,
+                ] as Point,
+              ]
+            : []
+        )
+      )
+      const reed = mixHex(tone, FOREST.shade, 0.72)
+      // Whatever logos stand there: this coast is crowded, and the beds are
+      // its country, as the dunes are the dunes' (the logos are drawn over
+      // them).
+      scatterSpots(inside, fixed, extent, {
+        spacing: 1.35,
+        minRoom: 0.45,
+        maxRoom: 1.2,
+      }).forEach((spot, n) => {
+        const foot = spot.y + 0.2
+        const shore = strand.some(
+          ([x, y]) => Math.hypot(x - spot.x, y - spot.y) < 1.15
+        )
+        stand(
+          foot,
+          level,
+          shore && spot.roll > 0.55
+            ? stamp('rowboat', spot.x, foot, 1.3, 0.58)
+            : shore
+              ? netFrameMarkup(
+                  spot.x,
+                  foot,
+                  1.15,
+                  g,
+                  mixHex(tone, '#ffffff', 0.5),
+                  seed * 97 + n
+                )
+              : reedBedMarkup(
+                  spot.x,
+                  foot,
+                  1.05 + spot.roll * 0.4,
+                  g,
+                  reed,
+                  PLANK,
+                  mixHex(tone, SHALLOWS, 0.45),
+                  seed * 97 + n
+                )
         )
       })
       return
@@ -1814,6 +1879,65 @@ export function hexBackdropMarkup(
       layout.pieces.filter(drawnHere),
       `hex-path-${height}`.replace('.', '_')
     )
+    // Where the river meets a lake that fills its tiles, on the lake's own
+    // level, it does not run square into the tile's side: it widens into the
+    // lake, its banks curving apart.
+    level.forEach((plateau, n) => {
+      const id = `hex-plateau-${height}-${n}`.replace('.', '_')
+      const refs = new Set(plateau.tiles.map(tile => tile.ref))
+      const sides = plateau.tiles
+        .filter(tile => drowned.has(tile.ref ?? ''))
+        .flatMap(tile =>
+          tile.top.map((a, k): [Point, Point] => [a, tile.top[(k + 1) % 6]])
+        )
+      if (sides.length === 0) return
+      const onShore = (point: Point) =>
+        sides.some(([a, b]) => {
+          const [wx, wy] = [b[0] - a[0], b[1] - a[1]]
+          const along =
+            ((point[0] - a[0]) * wx + (point[1] - a[1]) * wy) /
+            (wx * wx + wy * wy)
+          return (
+            along > 0.05 &&
+            along < 0.95 &&
+            Math.hypot(
+              point[0] - (a[0] + wx * along),
+              point[1] - (a[1] + wy * along)
+            ) < 0.02
+          )
+        })
+      for (const piece of layout.pieces) {
+        if (
+          piece.kind !== 'river' ||
+          piece.closed ||
+          !refs.has(piece.tile) ||
+          drowned.has(piece.tile)
+        ) {
+          continue
+        }
+        for (const points of [piece.points, [...piece.points].reverse()]) {
+          const mouth = points[points.length - 1]
+          if (!onShore(mouth)) continue
+          // A little way back up the stream, and the way it runs there.
+          const back = points[Math.max(0, points.length - 1 - MOUTH_BACK)]
+          const [dx, dy] = [mouth[0] - back[0], mouth[1] - back[1]]
+          const length = Math.hypot(dx, dy) || 1
+          const [nx, ny] = [-dy / length, dx / length]
+          const narrow = piece.width / 2
+          const at = (from: Point, aside: number): Point => [
+            from[0] + nx * aside,
+            from[1] + ny * aside,
+          ]
+          const bend: Point = [
+            back[0] + (mouth[0] - back[0]) * 0.6,
+            back[1] + (mouth[1] - back[1]) * 0.6,
+          ]
+          out.push(
+            `<path clip-path="url(#${id})" d="M${xy(at(back, narrow))}Q${xy(at(bend, narrow * 1.15))} ${xy(at(mouth, MOUTH_WIDTH))}L${xy(at(mouth, -MOUTH_WIDTH))}Q${xy(at(bend, -narrow * 1.15))} ${xy(at(back, -narrow))}Z" fill="${WATER}"/>`
+          )
+        }
+      }
+    })
     level.forEach((plateau, n) => {
       const id = `hex-plateau-${height}-${n}`.replace('.', '_')
       for (const lake of layout.lakes) {

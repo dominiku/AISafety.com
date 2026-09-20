@@ -868,7 +868,9 @@ export function thermalSpringMarkup(
   size: number,
   squash: number,
   g: number,
-  layer: 'bed' | 'water'
+  layer: 'bed' | 'water',
+  // How far from the pool's middle the river starts: its tongue reaches there.
+  reach = size * 0.375
 ): string {
   const [dx, dy] = [toward[0] - at[0], toward[1] - at[1]]
   const length = Math.hypot(dx, dy) || 1
@@ -885,9 +887,9 @@ export function thermalSpringMarkup(
       },
       // The tongue of water the river leaves by.
       {
-        x: at[0] + ux * r * 0.75,
-        y: at[1] + uy * r * 0.75,
-        rx: r * 0.6,
+        x: at[0] + ux * Math.max(r * 0.75, reach - r * 0.2),
+        y: at[1] + uy * Math.max(r * 0.75, reach - r * 0.2),
+        rx: Math.max(r * 0.6, reach * 0.55),
         ry: r * 0.42 * squash + 0.12,
       },
     ],
@@ -907,16 +909,97 @@ export function thermalSpringMarkup(
   )
 }
 
+/**
+ * A bed of reeds on an estuary's wet ground: one bold clump, its blades
+ * fanning out of a low base, about half of them carrying a seed head. `x, y`
+ * is the foot of the clump, `size` its width, in map grid units.
+ */
+export function reedBedMarkup(
+  x: number,
+  y: number,
+  size: number,
+  g: number,
+  blade: string,
+  head: string,
+  wet: string,
+  seed: number
+): string {
+  const [cx, cy, w] = [x * g, y * g, size * g]
+  const markup = [
+    // The wet ground it stands in.
+    `<ellipse cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" rx="${(w * 0.46).toFixed(1)}" ry="${(w * 0.11).toFixed(1)}" fill="${wet}" fill-opacity="0.5"/>`,
+  ]
+  const blades = 9 + Math.floor(roll(seed) * 4)
+  for (let n = 0; n < blades; n++) {
+    const lean = n / (blades - 1) - 0.5
+    const tall = w * (0.95 + roll(seed * 3 + n) * 0.55)
+    const [footX, tipX] = [cx + lean * w * 0.6, cx + lean * w * 1.5]
+    const tip = cy - tall
+    markup.push(
+      `<path d="M${footX.toFixed(1)},${cy.toFixed(1)}Q${(footX + (tipX - footX) * 0.35).toFixed(1)},${(cy - tall * 0.62).toFixed(1)} ${tipX.toFixed(1)},${tip.toFixed(1)}" fill="none" stroke="${blade}" stroke-width="${Math.max(1.6, w * 0.055).toFixed(1)}" stroke-linecap="round"/>`
+    )
+    if (roll(seed * 7 + n) > 0.5) {
+      // A seed head, lying along the way its blade leans.
+      const tilt = (Math.atan2(tipX - footX, tall) * 180) / Math.PI
+      const [hx, hy] = [tipX, tip + w * 0.11]
+      markup.push(
+        `<ellipse cx="${hx.toFixed(1)}" cy="${hy.toFixed(1)}" rx="${(w * 0.055).toFixed(1)}" ry="${(w * 0.14).toFixed(1)}" fill="${head}" transform="rotate(${tilt.toFixed(1)} ${hx.toFixed(1)} ${hy.toFixed(1)})"/>`
+      )
+    }
+  }
+  return markup.join('')
+}
+
+/**
+ * A fisherman's net hung out to dry: two leaning poles, the spar they carry
+ * and the net sagging from it. `x, y` is the foot of the frame, `size` its
+ * width, in map grid units.
+ */
+export function netFrameMarkup(
+  x: number,
+  y: number,
+  size: number,
+  g: number,
+  net: string,
+  seed: number
+): string {
+  const [cx, cy, w] = [x * g, y * g, size * g]
+  const h = w * 0.92
+  const [left, right] = [cx - w * 0.46, cx + w * 0.46]
+  const [topLeft, topRight] = [cx - w * 0.34, cx + w * 0.34]
+  const top = cy - h
+  const belly = cy - h * (0.34 - roll(seed) * 0.12)
+  const pole = Math.max(2.4, w * 0.075).toFixed(1)
+  const markup = [
+    `<path d="M${topLeft.toFixed(1)},${top.toFixed(1)}Q${cx.toFixed(1)},${belly.toFixed(1)} ${topRight.toFixed(1)},${top.toFixed(1)}Z" fill="${net}" fill-opacity="0.55"/>`,
+  ]
+  // The mesh: a few threads hanging to the net's own belly.
+  for (let n = 1; n < 4; n++) {
+    const t = n / 4
+    const sx = topLeft + (topRight - topLeft) * t
+    const dip = top + (belly - top) * (1 - Math.abs(t - 0.5) * 2)
+    markup.push(
+      `<path d="M${sx.toFixed(1)},${top.toFixed(1)}L${sx.toFixed(1)},${dip.toFixed(1)}" stroke="${net}" stroke-width="1.6" stroke-opacity="0.9"/>`
+    )
+  }
+  markup.push(
+    `<path d="M${left.toFixed(1)},${cy.toFixed(1)}L${topLeft.toFixed(1)},${(top - h * 0.1).toFixed(1)}" stroke="${PLANK_GAP}" stroke-width="${pole}" stroke-linecap="round"/>`,
+    `<path d="M${right.toFixed(1)},${cy.toFixed(1)}L${topRight.toFixed(1)},${(top - h * 0.1).toFixed(1)}" stroke="${PLANK_GAP}" stroke-width="${pole}" stroke-linecap="round"/>`,
+    `<path d="M${(topLeft - w * 0.08).toFixed(1)},${top.toFixed(1)}L${(topRight + w * 0.08).toFixed(1)},${top.toFixed(1)}" stroke="${PLANK}" stroke-width="${pole}" stroke-linecap="round"/>`
+  )
+  return markup.join('')
+}
+
 // The light a lighthouse burns, in the classic map's warm yellows.
 // DESIGN REVIEW (Melissa): both tones are picked to match the lava and
 // sulphur already on the board.
 const BEACON = { light: '#fbe9a6', core: '#f2c84b' }
 
 /**
- * A lighthouse's beacon, lit: a fan of light thrown from the lantern at `at`
- * across the water to `toward`, and the lantern's own glow. Flat wedges
- * rather than a gradient, to sit with the rest of the art. Both points are
- * in map grid units.
+ * A lighthouse's beacon, lit: a cone of light thrown from the lantern at `at`
+ * across the water to `toward`, and the lantern's own glow. The cone's sides
+ * bow out and it fades away along its length, so that it ends in light and
+ * not in an edge. Both points are in map grid units.
  */
 export function beaconMarkup(at: Point, toward: Point, g: number): string {
   const [dx, dy] = [toward[0] - at[0], toward[1] - at[1]]
@@ -925,16 +1008,31 @@ export function beaconMarkup(at: Point, toward: Point, g: number): string {
   const [ux, uy] = [dx / reach, dy / reach]
   // Across the beam, to spread its far end.
   const [px, py] = [-uy, ux]
-  const xy = (along: number, across: number) =>
-    `${((at[0] + ux * along + px * across) * g).toFixed(1)},${((at[1] + uy * along + py * across) * g).toFixed(1)}`
-  // Three wedges: the widest and faintest thrown past the ship, the
-  // brightest a narrow shaft down the middle.
-  const wedge = (throwTo: number, spread: number, fill: string, at_: number) =>
-    `<path d="M${xy(0, -0.07)}L${xy(throwTo, -spread)}L${xy(throwTo, spread)}L${xy(0, 0.07)}Z" fill="${fill}" fill-opacity="${at_}"/>`
+  const point = (along: number, across: number): Point => [
+    at[0] + ux * along + px * across,
+    at[1] + uy * along + py * across,
+  ]
+  const xy = (along: number, across: number) => {
+    const [x, y] = point(along, across)
+    return `${(x * g).toFixed(1)},${(y * g).toFixed(1)}`
+  }
+  // One gradient for both cones: bright at the lantern, gone by the end.
+  const id = `hex-beacon-${at[0].toFixed(2)}-${at[1].toFixed(2)}`.replace(
+    /\./g,
+    '_'
+  )
+  const [tipX, tipY] = point(reach * 1.3, 0)
+  const cone = (throwTo: number, spread: number, opacity: number) =>
+    // Down one bowed side, round the far end, back up the other.
+    `<path d="M${xy(0, -0.06)}Q${xy(throwTo * 0.5, -spread * 0.42)} ${xy(throwTo, -spread)}Q${xy(throwTo * 1.14, 0)} ${xy(throwTo, spread)}Q${xy(throwTo * 0.5, spread * 0.42)} ${xy(0, 0.06)}Z" fill="url(#${id})" fill-opacity="${opacity}"/>`
   return (
-    wedge(reach * 1.3, reach * 0.22, BEACON.light, 0.11) +
-    wedge(reach * 1.12, reach * 0.14, BEACON.light, 0.2) +
-    wedge(reach * 0.95, reach * 0.07, BEACON.core, 0.28) +
+    `<defs><linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="${(at[0] * g).toFixed(1)}" y1="${(at[1] * g).toFixed(1)}" x2="${(tipX * g).toFixed(1)}" y2="${(tipY * g).toFixed(1)}">` +
+    `<stop offset="0" stop-color="${BEACON.core}" stop-opacity="0.85"/>` +
+    `<stop offset="0.3" stop-color="${BEACON.light}" stop-opacity="0.5"/>` +
+    `<stop offset="1" stop-color="${BEACON.light}" stop-opacity="0"/>` +
+    `</linearGradient></defs>` +
+    cone(reach * 1.3, reach * 0.24, 0.5) +
+    cone(reach * 1.1, reach * 0.1, 0.55) +
     // The lantern: a soft halo round a bright eye.
     `<circle cx="${(at[0] * g).toFixed(1)}" cy="${(at[1] * g).toFixed(1)}" r="${(0.42 * g).toFixed(1)}" fill="${BEACON.light}" fill-opacity="0.3"/>` +
     `<circle cx="${(at[0] * g).toFixed(1)}" cy="${(at[1] * g).toFixed(1)}" r="${(0.24 * g).toFixed(1)}" fill="${BEACON.light}" fill-opacity="0.55"/>` +

@@ -86,8 +86,12 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
     // Woodland along the river, inland of the delta's coast.
     { code: 'Fo', district: 'Foundational and explanatory', realm: 'Media and discourse', height: 1.5, cover: 'forest',
       landmark: { symbol: 'forest', width: 2.6, height: 2.15 } },
-    // The delta's coast: the river's mouths, and the camp on the beach.
-    { code: 'Ne', district: 'News and commentary', realm: 'Media and discourse', height: 1,
+    // The delta's coast: the river's mouths, the camp on the beach, and a
+    // working estuary shore of reed beds, drawn-up boats and drying nets. It
+    // is a beach, so its sides to the sea are wet sand and not a rim; the
+    // damp band is mixed from its own mint, and comes out cool, which is
+    // what tells this coast from the tropical sands in the south.
+    { code: 'Ne', district: 'News and commentary', realm: 'Media and discourse', height: 1, beach: true, cover: 'reeds',
       landmark: { symbol: 'beach-camp', width: 1.9, height: 2.05 } },
     { code: 'Fr', district: 'Forums and online communities', realm: 'Media and discourse', height: 2.5, building: 'forum' },
     { code: 'Gr', district: 'Grassroots campaigns', realm: 'Advocacy and public engagement', height: 1 },
@@ -175,6 +179,7 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
         [12, 7, 'S'],
         [11, 7, 'SE'],
         [11, 7, 'S'],
+        [11, 7, 'SW'],
       ],
     },
   ],

@@ -75,6 +75,7 @@ export type HexCover =
   | 'dunes'
   | 'hills'
   | 'meadow'
+  | 'reeds'
   | 'tropical'
   | 'oasis'
   | 'huts'
@@ -486,7 +487,7 @@ const CONE_RUN = 0.35
 // The great pond a river rises from: how wide, and how far back from the
 // middle of its tile (map grid units).
 const POND_SIZE = 3
-const POND_BACK = 1
+const POND_BACK = 1.55
 const POND_CLEAR = 0.72
 
 // The clear ground a piece of scenery needs, and how far apart pieces keep
@@ -1594,7 +1595,7 @@ export function layoutHexMap(
     const length = Math.hypot(dx, dy) || 1
     spring.pond = {
       x: spring.at[0] - (dx / length) * POND_BACK,
-      y: spring.at[1] - (dy / length) * POND_BACK * 0.35 + 0.32,
+      y: spring.at[1] - (dy / length) * POND_BACK * 0.35 + 0.6,
       rx: POND_SIZE / 2,
       ry: (POND_SIZE / 2) * view.squash,
     }
