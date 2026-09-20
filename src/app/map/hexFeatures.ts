@@ -896,13 +896,49 @@ export function thermalSpringMarkup(
   const ring = (scale: number, fill: string) =>
     `<path d="${smoothClosedPath(scaledAbout(shore, scale), g)}" fill="${fill}"/>`
   if (layer === 'water') {
-    return ring(0.8, WATER) + ring(0.42, WATER_STREAK)
+    // (A little over the bed's water, to take in the stream's banks.)
+    return ring(0.87, WATER) + ring(0.42, WATER_STREAK)
   }
   return (
     ring(1.2, SULPHUR.crust) +
     ring(1.03, SULPHUR.pale) +
     ring(0.8, WATER) +
     steamMarkup(at[0] * g, (at[1] - r * 0.2) * g, r * 0.8 * g, 0.55)
+  )
+}
+
+// The light a lighthouse burns, in the classic map's warm yellows.
+// DESIGN REVIEW (Melissa): both tones are picked to match the lava and
+// sulphur already on the board.
+const BEACON = { light: '#fbe9a6', core: '#f2c84b' }
+
+/**
+ * A lighthouse's beacon, lit: a fan of light thrown from the lantern at `at`
+ * across the water to `toward`, and the lantern's own glow. Flat wedges
+ * rather than a gradient, to sit with the rest of the art. Both points are
+ * in map grid units.
+ */
+export function beaconMarkup(at: Point, toward: Point, g: number): string {
+  const [dx, dy] = [toward[0] - at[0], toward[1] - at[1]]
+  const reach = Math.hypot(dx, dy)
+  if (reach === 0) return ''
+  const [ux, uy] = [dx / reach, dy / reach]
+  // Across the beam, to spread its far end.
+  const [px, py] = [-uy, ux]
+  const xy = (along: number, across: number) =>
+    `${((at[0] + ux * along + px * across) * g).toFixed(1)},${((at[1] + uy * along + py * across) * g).toFixed(1)}`
+  // Three wedges: the widest and faintest thrown past the ship, the
+  // brightest a narrow shaft down the middle.
+  const wedge = (throwTo: number, spread: number, fill: string, at_: number) =>
+    `<path d="M${xy(0, -0.07)}L${xy(throwTo, -spread)}L${xy(throwTo, spread)}L${xy(0, 0.07)}Z" fill="${fill}" fill-opacity="${at_}"/>`
+  return (
+    wedge(reach * 1.3, reach * 0.22, BEACON.light, 0.11) +
+    wedge(reach * 1.12, reach * 0.14, BEACON.light, 0.2) +
+    wedge(reach * 0.95, reach * 0.07, BEACON.core, 0.28) +
+    // The lantern: a soft halo round a bright eye.
+    `<circle cx="${(at[0] * g).toFixed(1)}" cy="${(at[1] * g).toFixed(1)}" r="${(0.42 * g).toFixed(1)}" fill="${BEACON.light}" fill-opacity="0.3"/>` +
+    `<circle cx="${(at[0] * g).toFixed(1)}" cy="${(at[1] * g).toFixed(1)}" r="${(0.24 * g).toFixed(1)}" fill="${BEACON.light}" fill-opacity="0.55"/>` +
+    `<circle cx="${(at[0] * g).toFixed(1)}" cy="${(at[1] * g).toFixed(1)}" r="${(0.12 * g).toFixed(1)}" fill="${BEACON.core}"/>`
   )
 }
 
@@ -922,13 +958,15 @@ export function arrivalShipMarkup(
   const h = w * 0.82
   const markup: string[] = []
   // The wake: two lines opening out astern, and the churned water between.
+  // It runs far enough back to leave the harbor by its mouth, so the ship
+  // reads as having come in off the open sea.
   for (const side of [-1, 1]) {
     markup.push(
-      `<path d="M${(cx - w * 0.3).toFixed(1)},${(cy + side * 2).toFixed(1)}Q${(cx - w * 1.1).toFixed(1)},${(cy + side * w * 0.1).toFixed(1)} ${(cx - w * 1.5).toFixed(1)},${(cy + side * w * 0.34).toFixed(1)}" fill="none" stroke="${WATER_STREAK}" stroke-opacity="0.8" stroke-width="2.4" stroke-linecap="round"/>`,
-      `<path d="M${(cx - w * 0.5).toFixed(1)},${(cy + side * 1).toFixed(1)}Q${(cx - w * 1).toFixed(1)},${(cy + side * w * 0.04).toFixed(1)} ${(cx - w * 1.2).toFixed(1)},${(cy + side * w * 0.14).toFixed(1)}" fill="none" stroke="${WATER_STREAK}" stroke-opacity="0.5" stroke-width="2" stroke-linecap="round"/>`
+      `<path d="M${(cx - w * 0.3).toFixed(1)},${(cy + side * 2).toFixed(1)}Q${(cx - w * 1.6).toFixed(1)},${(cy + side * w * 0.14).toFixed(1)} ${(cx - w * 2.3).toFixed(1)},${(cy + side * w * 0.46).toFixed(1)}" fill="none" stroke="${WATER_STREAK}" stroke-opacity="0.8" stroke-width="2.4" stroke-linecap="round"/>`,
+      `<path d="M${(cx - w * 0.5).toFixed(1)},${(cy + side * 1).toFixed(1)}Q${(cx - w * 1.4).toFixed(1)},${(cy + side * w * 0.06).toFixed(1)} ${(cx - w * 1.8).toFixed(1)},${(cy + side * w * 0.2).toFixed(1)}" fill="none" stroke="${WATER_STREAK}" stroke-opacity="0.5" stroke-width="2" stroke-linecap="round"/>`
     )
   }
-  for (const back of [0.7, 1, 1.3]) {
+  for (const back of [0.7, 1.05, 1.4, 1.75]) {
     markup.push(
       `<path d="M${(cx - w * back).toFixed(1)},${cy.toFixed(1)}h${(-w * 0.16).toFixed(1)}" stroke="${WATER_STREAK}" stroke-opacity="0.6" stroke-width="2" stroke-linecap="round"/>`
     )

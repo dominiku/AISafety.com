@@ -58,6 +58,7 @@ import {
 } from './realmArtBackdrop'
 import { buildingMarkup } from './hexBuildings'
 import {
+  beaconMarkup,
   canopyMarkup,
   deckMarkup,
   duneMarkup,
@@ -123,6 +124,10 @@ const OASIS = { grass: '#9ccf8f', lush: '#00ae85' }
 // DESIGN REVIEW (Melissa): the foothills' greens, from the oasis's grass and
 // the forest's shade.
 const HILL = { lit: '#9ccf8f', shade: '#008969' }
+// The hot pond a river rises from: how wide it is, and how far back from the
+// middle of its tile it lies (map grid units). How near a dam a lake's shore
+// has to come to be drawn on to it.
+const DAM_REACH = 1.6
 const FOREST = { lit: '#00ae85', shade: '#008969' }
 const VINE = '#2f5650'
 // The peaks that wall a forbidding district in.
@@ -938,6 +943,7 @@ export function hexBackdropMarkup(
       tile =>
         !tile.landmark &&
         tile.state !== 'crater' &&
+        !drowned.has(tile.ref ?? '') &&
         // Nothing stands on an escarpment's top to hide its slope.
         !tile.scarp
     )
@@ -1059,6 +1065,7 @@ export function hexBackdropMarkup(
   }
 
   // The hot spring a river rises from: toward the way the river leaves it.
+  const plateauClip = new Map<string, string>()
   const thermalSpring = (
     spring: HexLayout['springs'][number],
     layer: 'bed' | 'water'
@@ -1069,16 +1076,75 @@ export function hexBackdropMarkup(
     const toward = first
       ? first.points[Math.floor(first.points.length / 2)]
       : ([spring.at[0] - 1, spring.at[1]] as Point)
-    return thermalSpringMarkup(
-      spring.at,
-      toward,
-      // A great pond, whatever the width of the stream that leaves it.
-      Math.max(3.6, spring.width * 2.7),
-      view.squash,
-      g,
-      layer
+    // (map-hex-layout says where the pond lies, and keeps the logos off it.)
+    const pond = spring.pond ?? {
+      x: spring.at[0],
+      y: spring.at[1],
+      rx: spring.width * 1.35,
+      ry: 0,
+    }
+    const clip = plateauClip.get(spring.tile)
+    return (
+      `<g${clip ? ` clip-path="url(#${clip})"` : ''}>` +
+      thermalSpringMarkup(
+        [pond.x, pond.y],
+        toward,
+        pond.rx * 2,
+        view.squash,
+        g,
+        layer
+      ) +
+      '</g>'
     )
   }
+  // A lake's shore as drawn: where it comes near a dam it runs on to the
+  // dam (and past it: the plateau's edge cuts it off there), so that the
+  // water stands against the wall.
+  const lakeOutline = (lake: HexLayout['lakes'][number]): Point[] => {
+    const shore = lakeShore(lake.lobes, 1)
+    const walls = layout.dams.flatMap(dam => {
+      const tile = tileByRef.get(dam.tile)
+      return tile
+        ? [[tile.top[dam.side], tile.top[(dam.side + 1) % 6]] as [Point, Point]]
+        : []
+    })
+    return shore.map(point => {
+      // Straight to the nearest wall it is near, and a little past it.
+      let best: { away: number; to: Point } | null = null
+      for (const [a, b] of walls) {
+        const [wx, wy] = [b[0] - a[0], b[1] - a[1]]
+        const along =
+          ((point[0] - a[0]) * wx + (point[1] - a[1]) * wy) /
+          (wx * wx + wy * wy)
+        // Not past the ends of the wall, where the edge is no dam.
+        if (along < 0.04 || along > 0.96) continue
+        const foot: Point = [a[0] + wx * along, a[1] + wy * along]
+        const away = Math.hypot(point[0] - foot[0], point[1] - foot[1])
+        if (away >= DAM_REACH || (best && best.away <= away)) continue
+        const over = 1 + 0.4 / Math.max(away, 0.05)
+        best = {
+          away,
+          to: [
+            point[0] + (foot[0] - point[0]) * over,
+            point[1] + (foot[1] - point[1]) * over,
+          ],
+        }
+      }
+      return best ? best.to : point
+    })
+  }
+  // A lake as a path: its smooth shore, or, where it covers the whole of its
+  // tiles, their outlines.
+  const lakeShape = (lake: HexLayout['lakes'][number]) =>
+    lake.whole
+      ? lake.whole
+          .flatMap(ref => {
+            const tile = tileByRef.get(ref)
+            return tile ? [outline(tile.top)] : []
+          })
+          .join('')
+      : smoothClosedPath(lakeOutline(lake), g)
+  const drowned = new Set(layout.lakes.flatMap(lake => lake.whole ?? []))
   // A district's places for scenery (map-hex-layout keeps the logos off them).
   const sceneryOn = (plateau: { tiles: HexLaidTile[] }) =>
     layout.scenery.filter(site => site.district === plateau.tiles[0].district)
@@ -1604,6 +1670,12 @@ export function hexBackdropMarkup(
   const heights = [...new Set(plateaus.map(plateau => plateau.height))]
   for (const height of heights) {
     const level = plateaus.filter(plateau => plateau.height === height)
+    level.forEach((plateau, n) => {
+      const id = `hex-plateau-${height}-${n}`.replace('.', '_')
+      for (const tile of plateau.tiles) {
+        if (tile.ref) plateauClip.set(tile.ref, id)
+      }
+    })
     // Cliff faces, then the ground with its cover, rim and border.
     for (const plateau of level) {
       for (const tile of plateau.tiles) {
@@ -1704,7 +1776,7 @@ export function hexBackdropMarkup(
       const id = `hex-plateau-${height}-${n}`.replace('.', '_')
       for (const lake of layout.lakes) {
         if (!plateau.tiles.some(tile => tile.ref === lake.tile)) continue
-        const shore = smoothClosedPath(lakeShore(lake.lobes, 1), g)
+        const shore = lakeShape(lake)
         out.push(
           `<g clip-path="url(#${id})">`,
           `<path d="${shore}" fill="${WATER}" stroke="${SHALLOWS}" stroke-width="${BANK * 2}"/>`,
@@ -1748,10 +1820,11 @@ export function hexBackdropMarkup(
         if (!plateau.tiles.some(tile => tile.ref === lake.tile)) continue
         // The lake's water again, over the river: no river bank shows in
         // it, and the river runs into it and out of it at its shore.
-        const shore = lakeShore(lake.lobes, 1)
+        const shore = lakeOutline(lake)
+        const water = lakeShape(lake)
         out.push(
           `<g clip-path="url(#${id})">`,
-          `<path d="${smoothClosedPath(shore, g)}" fill="${WATER}"/>`,
+          `<path d="${water}" fill="${WATER}"/>`,
           ...scaledAbout(shore, 0.55)
             .filter((_, k) => k % 24 === 6)
             .map(
@@ -1808,14 +1881,25 @@ export function hexBackdropMarkup(
       const [cx, cy] = [(mark.x + dx) * g, (mark.y + dy) * g]
       return `<use href="#${symbol}" x="${(cx - w / 2).toFixed(1)}" y="${(cy - h / 2).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}"${tilt ? ` transform="rotate(${tilt} ${cx.toFixed(1)} ${cy.toFixed(1)})" opacity="0.8"` : ''}/>`
     }
+    // A lit landmark throws its light at the ship coming in, picking it out
+    // of the dark water; without a ship it only glows.
+    const lantern: Point | null = mark.lit
+      ? [
+          mark.x + (mark.lit[0] - 0.5) * mark.width,
+          mark.y + (mark.lit[1] - 0.5) * mark.height,
+        ]
+      : null
     stand(
       mark.y + mark.height / 2,
       tile.height,
-      tile.sunken
-        ? // Wrecks: the art heeled over, half under.
-          stamp(mark.symbol, -0.7, 0, 1, -28) +
+      (lantern && layout.arrivals.length > 0
+        ? beaconMarkup(lantern, layout.arrivals[0], g)
+        : '') +
+        (tile.sunken
+          ? // Wrecks: the art heeled over, half under.
+            stamp(mark.symbol, -0.7, 0, 1, -28) +
             stamp(mark.symbol, 0.9, 0.35, 0.7, 152)
-        : stamp(mark.symbol, 0, 0, 1, 0)
+          : stamp(mark.symbol, 0, 0, 1, 0))
     )
   }
   // A ship coming in to the harbor, with its wake behind it: among what

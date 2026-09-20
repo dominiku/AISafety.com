@@ -94,7 +94,7 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
     { code: 'Pa', district: 'Professional advocacy and communication', realm: 'Advocacy and public engagement', height: 1.5, pier: true },
     // The landing: the arms of a sheltered harbor, where the road starts.
     { code: 'In', district: 'Introductory learning', realm: 'Talent pipeline', height: 0.5,
-      landmark: { symbol: 'lighthouse', width: 1, height: 1.8 } },
+      landmark: { symbol: 'lighthouse', width: 1, height: 1.8, lit: [0.48, 0.13] } },
     { code: 'Fb', district: 'Field-building and local groups', realm: 'Talent pipeline', height: 1.5 },
     { code: 'Pp', district: 'Policy and governance programs', realm: 'Talent pipeline', height: 2, building: 'school' },
     { code: 'Tp', district: 'Technical research programs', realm: 'Talent pipeline', height: 2.5, cover: 'fields' },
@@ -131,7 +131,7 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
     // beach, the escarpment: one long leaning slope of banded rock.
     { code: 'Al', district: 'Alignment and control', realm: 'Technical research', height: 4 },
     { code: 'Ev', district: 'Evaluations and threat research', realm: 'Technical research', height: 4, onSlopesOf: 'Al' },
-    { code: 'Co', district: 'Conceptual and foundations research', realm: 'Technical research', height: 5, cover: 'thermals', scenery: 4,
+    { code: 'Co', district: 'Conceptual and foundations research', realm: 'Technical research', height: 5, cover: 'thermals', scenery: 3,
       landmark: { symbol: 'cave', width: 1.7, height: 1.63 } },
     { code: 'Ip', district: 'Interpretability and model understanding', realm: 'Technical research', height: 6.5, cone: true,
       landmark: { symbol: 'range', width: 2.8, height: 1.98 } },
@@ -165,16 +165,12 @@ export const MAP_35_HEX_SPEC: HexMapSpec = {
   // valley, into the oasis's pool.
   lakes: [
     {
-      // Two rough ovals run together: the larger under the stream's fall,
-      // the smaller behind the dam.
+      // It fills both tiles, edge to edge, up against the dam.
       cells: [
         [12, 7],
         [11, 7],
       ],
-      ovals: [
-        { shift: [-0.3, 0], size: [0.9, 0.66] },
-        { shift: [0.16, -0.06], size: [0.78, 0.6] },
-      ],
+      whole: true,
       dam: [
         [12, 7, 'S'],
         [11, 7, 'SE'],

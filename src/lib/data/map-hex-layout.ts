@@ -60,6 +60,9 @@ export interface HexLandmarkArt {
   height: number
   // Moved this far from its usual place on its tile (map grid units).
   shift?: [number, number]
+  // A light that burns in the art (a lighthouse's lantern): where it sits
+  // inside the symbol's box, as a share of its width and its height.
+  lit?: [number, number]
 }
 
 export type HexCover =
@@ -170,6 +173,9 @@ export interface HexMapSpec {
     // middle lies from the cell's (across, down) and how large it is (across,
     // deep), in tile sizes. Without it a cell's oval is worked out.
     ovals?: { shift: [number, number]; size: [number, number] }[]
+    // The lake covers the whole of its cells, edge to edge: no logo stands
+    // on them, and its shore is their outline.
+    whole?: boolean
     dam: [number, number, HexDirection][]
   }[]
   // Every painted tile is land, needed or not: the coast is exactly as it is
@@ -328,7 +334,15 @@ export interface HexLayout {
   drops: HexPathDrop[]
   ends: HexPathEnd[]
   // Where the river rises.
-  springs: { tile: string; at: Point; width: number }[]
+  // `pond`: where a district with scenery of its own has the great pond its
+  // river rises from: back from the middle of the tile, away from the side
+  // the stream leaves by. Logos keep off it.
+  springs: {
+    tile: string
+    at: Point
+    width: number
+    pond?: { x: number; y: number; rx: number; ry: number }
+  }[]
   // Planks where the road crosses the moat, drawn once `tile` is.
   bridges: { tile: string; a: Point; b: Point; width: number }[]
   // Districts' own buildings: the middle of the foot, the width, and the
@@ -348,13 +362,15 @@ export interface HexLayout {
     tile: string
     height: number
     lobes: { x: number; y: number; rx: number; ry: number }[]
+    // For a lake that covers the whole of its tiles: those tiles.
+    whole: string[] | null
   }[]
   dams: { tile: string; side: number }[]
   // Places kept for scenery (see HexDistrictSpec.scenery): every second
   // one is for something tall (a geyser), with clear air above it.
   scenery: { district: string; x: number; y: number; tall: boolean }[]
   // Where a ship is coming in (see HexFeatureSpec.arrival): the middle of
-  // its waterline, on the open sea just west of the harbor.
+  // its waterline, in the middle of the harbor's water.
   arrivals: Point[]
   // Footpaths from a building to another district's landmark.
   paths: { points: Point[]; width: number }[]
@@ -466,6 +482,12 @@ const SIDES: HexDirection[] = ['SE', 'S', 'SW', 'NW', 'N', 'NE']
 // ground): an escarpment's, and a volcano's.
 const SCARP_RUN = 0.45
 const CONE_RUN = 0.35
+
+// The great pond a river rises from: how wide, and how far back from the
+// middle of its tile (map grid units).
+const POND_SIZE = 3
+const POND_BACK = 1
+const POND_CLEAR = 0.72
 
 // The clear ground a piece of scenery needs, and how far apart pieces keep
 // (map grid units).
@@ -829,6 +851,8 @@ export function layoutHexMap(
   // lake, or toward a dam where the cell has one.
   const damSides = new Set<string>()
   const lakeCells = new Set<string>()
+  // Tiles wholly under a lake: no logo stands on them.
+  const drowned = new Set<string>()
   // The tile below each dam, and the lake tile whose water comes down to it.
   const damFed = new Map<string, string>()
   const lakes: HexLayout['lakes'] = []
@@ -897,11 +921,20 @@ export function layoutHexMap(
       }
     })
     cells.forEach(tile => lakeCells.add(hexKey(tile)))
-    lakes.push({ tile: cells[0].ref, height: cells[0].height, lobes })
-    lakeAreas.set(cells[0].code!, [
-      ...(lakeAreas.get(cells[0].code!) ?? []),
-      ...lobes,
-    ])
+    lakes.push({
+      tile: cells[0].ref,
+      height: cells[0].height,
+      lobes,
+      whole: lake.whole ? cells.map(tile => tile.ref) : null,
+    })
+    if (lake.whole) {
+      cells.forEach(tile => drowned.add(tile.ref))
+    } else {
+      lakeAreas.set(cells[0].code!, [
+        ...(lakeAreas.get(cells[0].code!) ?? []),
+        ...lobes,
+      ])
+    }
   }
 
   // The river and the road, joined up tile by tile.
@@ -1341,7 +1374,9 @@ export function layoutHexMap(
     if (!districtByName.has(logo.district)) unplaced.push(logo.id)
   }
   const plateauOf = (tiles: PlannedTile[], overWater = false): Plateau => {
-    const open = tiles.filter(tile => !landmarkOn.has(tile.ref))
+    const open = tiles.filter(
+      tile => !landmarkOn.has(tile.ref) && !drowned.has(tile.ref)
+    )
     const within = new Set(open.map(tile => hexKey(tile)))
     const refs = new Set(open.map(tile => tile.ref))
     return {
@@ -1435,12 +1470,18 @@ export function layoutHexMap(
         ...(sceneryOf.has(tiles[0]?.code ?? '')
           ? springs
               .filter(spring => refs.has(spring.tile))
-              .map(spring => ({
-                x: spring.at[0],
-                y: spring.at[1],
-                rx: spring.width * 0.8,
-                ry: spring.width * 0.8 * view.squash + 0.1,
-              }))
+              // (Off its water; its crust of sulphur may run under them.)
+              .flatMap(spring =>
+                spring.pond
+                  ? [
+                      {
+                        ...spring.pond,
+                        rx: spring.pond.rx * POND_CLEAR,
+                        ry: spring.pond.ry * POND_CLEAR,
+                      },
+                    ]
+                  : []
+              )
           : []),
         // Logos stand clear of scenery: of all of something tall.
         ...(sceneryOf.get(tiles[0]?.code ?? '') ?? []).map(site =>
@@ -1539,6 +1580,26 @@ export function layoutHexMap(
     areas: [],
   })
 
+  // The great pond a river rises from, in a district with scenery of its own.
+  for (const spring of springs) {
+    const tile = [...planned.values()].find(at => at.ref === spring.tile)
+    if (!tile || !districtByCode.get(tile.code!)?.scenery) continue
+    const first = pieces.find(
+      piece => piece.kind === 'river' && piece.tile === spring.tile
+    )
+    const toward = first
+      ? first.points[Math.floor(first.points.length / 2)]
+      : ([spring.at[0] - 1, spring.at[1]] as Point)
+    const [dx, dy] = [toward[0] - spring.at[0], toward[1] - spring.at[1]]
+    const length = Math.hypot(dx, dy) || 1
+    spring.pond = {
+      x: spring.at[0] - (dx / length) * POND_BACK,
+      y: spring.at[1] - (dy / length) * POND_BACK * 0.35 + 0.32,
+      rx: POND_SIZE / 2,
+      ry: (POND_SIZE / 2) * view.squash,
+    }
+  }
+
   // Scenery: places spread as far from each other (and from the spring a
   // river rises at) as the district's ground allows, each with room round it.
   const scenery: HexLayout['scenery'] = []
@@ -1551,7 +1612,9 @@ export function layoutHexMap(
     )
     const taken: Point[] = springs
       .filter(spring => refs.has(spring.tile))
-      .map(spring => spring.at)
+      .map(spring =>
+        spring.pond ? ([spring.pond.x, spring.pond.y] as Point) : spring.at
+      )
     const apart = (at: Point) =>
       Math.min(
         ...taken.map(other =>
@@ -1850,10 +1913,18 @@ export function layoutHexMap(
           tile => tile.code === feature.code
         )
         if (water.length === 0) return []
-        const west = water.reduce((a, b) => (b.col < a.col ? b : a))
-        const [x, y] = projectPoint(view, flatCenter(west), 0)
-        // In the harbor's mouth, its wake trailing out to sea.
-        return [[x - view.size * 0.3, y + 0.2] as Point]
+        // Well inside the harbor, making for the road's end, so that it
+        // reads as coming in and not as a boat on the open sea: the middle
+        // of the water, its wake trailing back out through the mouth.
+        const middles = water.map(tile =>
+          projectPoint(view, flatCenter(tile), 0)
+        )
+        return [
+          [
+            middles.reduce((sum, point) => sum + point[0], 0) / middles.length,
+            middles.reduce((sum, point) => sum + point[1], 0) / middles.length,
+          ] as Point,
+        ]
       }),
     lakes,
     dams: [...damSides].map(key => {
