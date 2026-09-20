@@ -1049,6 +1049,87 @@ export function hexBackdropMarkup(
     out.push('</g>')
   }
 
+  // Where a thermal district's hot springs and geysers go, worked out
+  // together so that they are spread out: none touches another, a logo, or
+  // the spring the river rises from; and a geyser's jet, which stands tall,
+  // has clear air above it, with no logo behind it.
+  interface ThermalSite {
+    x: number
+    y: number
+    size: number
+    seed: number
+  }
+  const thermalPlans = new Map<
+    string,
+    { pools: ThermalSite[]; geysers: ThermalSite[] }
+  >()
+  const thermalPlan = (plateau: { tiles: HexLaidTile[] }) => {
+    const key = plateau.tiles[0].ref ?? ''
+    const known = thermalPlans.get(key)
+    if (known) return known
+    const { inside, logos, fixed } = canvasOf(plateau)
+    const extent = { width: width / g, height: height / g }
+    const refs = new Set(plateau.tiles.map(tile => tile.ref))
+    // What is taken already, as circles: the river's spring, then each site
+    // as it is chosen.
+    const taken = layout.springs
+      .filter(spring => refs.has(spring.tile))
+      .map(spring => ({
+        x: spring.at[0],
+        y: spring.at[1],
+        radius: spring.width * 1.6,
+      }))
+    const free = (x: number, y: number, radius: number) =>
+      taken.every(
+        other => Math.hypot(other.x - x, other.y - y) > other.radius + radius
+      )
+    const geysers: ThermalSite[] = []
+    scatterSpots(inside, [...logos, ...fixed], extent, {
+      spacing: 0.9,
+      minRoom: 0.2,
+      maxRoom: 0.8,
+    })
+      // The roomiest first.
+      .sort((a, b) => b.room - a.room)
+      .forEach((spot, n) => {
+        const size = 1 + spot.roll * 0.35
+        const foot = spot.y + 0.2
+        // Clear air for the jet and its spray: no logo up the column.
+        // (The spray at the top is wider than the jet; the river counts too.)
+        const inTheWay = [
+          ...logos,
+          ...fixed.map(point => ({ ...point, radius: 0.45 })),
+        ]
+        const clear = [0, 0.3, 0.55, 0.8, 1, 1.25, 1.5].every(up =>
+          inTheWay.every(
+            thing =>
+              Math.hypot(thing.x - spot.x, thing.y - (foot - size * up)) >
+              thing.radius + size * (up > 0.5 ? 0.3 : 0.14)
+          )
+        )
+        if (!clear || !free(spot.x, foot - size * 0.4, 0.9)) return
+        taken.push({ x: spot.x, y: foot - size * 0.4, radius: 0.9 })
+        geysers.push({ x: spot.x, y: foot, size, seed: n })
+      })
+    const pools: ThermalSite[] = []
+    scatterSpots(inside, [...logos, ...fixed], extent, {
+      spacing: 0.9,
+      minRoom: 0.32,
+      maxRoom: 0.9,
+    })
+      .sort((a, b) => b.room - a.room)
+      .forEach((spot, n) => {
+        // A pool fills the room it has, crust and all, and no more.
+        const size = Math.min(1.5, spot.room * 1.55)
+        if (!free(spot.x, spot.y, size * 0.6 + 0.35)) return
+        taken.push({ x: spot.x, y: spot.y, radius: size * 0.6 + 0.35 })
+        pools.push({ x: spot.x, y: spot.y, size, seed: n })
+      })
+    const plan = { pools, geysers }
+    thermalPlans.set(key, plan)
+    return plan
+  }
+
   // What lies under the logos, so that it reads however crowded the
   // district: a forest's canopy, or hot springs.
   const drawRelief = (
@@ -1106,44 +1187,45 @@ export function hexBackdropMarkup(
       }
       out.push('</g>')
     }
-    if ((cover === 'forest' || cover === 'thermals') && pins) {
-      // A forest's canopy, seen from above, over all its ground; or hot
-      // springs wherever the river and the road leave room.
+    if (cover === 'thermals' && pins) {
+      out.push(`<g clip-path="url(#${clip})">`)
+      for (const pool of thermalPlan(plateau).pools) {
+        out.push(
+          sulphurPoolMarkup(
+            pool.x,
+            pool.y,
+            pool.size,
+            view.squash,
+            g,
+            pool.seed,
+            false
+          )
+        )
+      }
+      out.push('</g>')
+    }
+    if (cover === 'forest' && pins) {
+      // A forest's canopy, seen from above, over all its ground.
       const { inside, fixed } = canvasOf(plateau)
       const extent = { width: width / g, height: height / g }
       out.push(`<g clip-path="url(#${clip})">`)
-      scatterSpots(
-        inside,
-        // A canopy runs on under the logos; a hot spring lies only where the
-        // logos leave it room, or the district reads as crowded.
-        cover === 'forest' ? fixed : [...(pins ?? []), ...fixed],
-        extent,
-        cover === 'forest'
-          ? { spacing: 0.42, minRoom: 0.05, maxRoom: 0.4 }
-          : { spacing: 1.2, minRoom: 0.3, maxRoom: 0.9 }
-      )
+      scatterSpots(inside, fixed, extent, {
+        spacing: 0.42,
+        minRoom: 0.05,
+        maxRoom: 0.4,
+      })
         .sort((a, b) => a.y - b.y)
-        .forEach((spot, n) =>
+        .forEach(spot =>
           out.push(
-            cover === 'forest'
-              ? canopyMarkup(
-                  spot.x,
-                  spot.y,
-                  0.5 + spot.roll * 0.25,
-                  view.squash,
-                  g,
-                  mixHex(tone, FOREST.lit, 0.8),
-                  FOREST.shade
-                )
-              : sulphurPoolMarkup(
-                  spot.x,
-                  spot.y,
-                  0.75 + spot.room * 0.9,
-                  view.squash,
-                  g,
-                  n,
-                  false
-                )
+            canopyMarkup(
+              spot.x,
+              spot.y,
+              0.5 + spot.roll * 0.25,
+              view.squash,
+              g,
+              mixHex(tone, FOREST.lit, 0.8),
+              FOREST.shade
+            )
           )
         )
       out.push('</g>')
@@ -1285,25 +1367,21 @@ export function hexBackdropMarkup(
       return
     }
     if (cover === 'thermals') {
-      // A geyser going off here and there, where there is a good gap.
-      scatterSpots(inside, [...logos, ...fixed], extent, {
-        spacing: 1.25,
-        minRoom: 0.17,
-        maxRoom: 0.8,
-      }).forEach((spot, n) =>
+      // Geysers going off, where the plan found them clear air.
+      for (const geyser of thermalPlan(plateau).geysers) {
         stand(
-          spot.y + 0.25,
+          geyser.y,
           level,
           geyserMarkup(
-            spot.x,
-            spot.y + 0.25,
-            1.3 + spot.roll * 0.7,
+            geyser.x,
+            geyser.y,
+            geyser.size,
             g,
             theme.cliff.foot,
-            seed * 97 + n
+            seed * 97 + geyser.seed
           )
         )
-      )
+      }
       return
     }
     if (cover === 'meadow') {
