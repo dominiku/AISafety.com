@@ -1,6 +1,13 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
+import {
+  Suspense,
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useState,
+} from 'react'
 import ModeToggle from '@/components/ModeToggle'
 import MapExplorer from './MapExplorer'
 import { isPlacedOnMap } from '@/lib/map-images'
@@ -41,6 +48,60 @@ interface MapClientProps {
 
 type DataSource = 'production' | 'ia' | 'art' | 'hex'
 
+// The map's views, in the order the switch shows them; the first one there is
+// for is the default. Each is linkable by its slug: /map?view=hex. To add a
+// view, add it here and teach the layout code below what it draws. A view of
+// the forked base is only there where the fork's credentials are.
+interface MapView {
+  id: DataSource
+  slug: string
+  label: string
+  icon: string
+  fork: boolean
+}
+const MAP_VIEWS: MapView[] = [
+  {
+    id: 'hex',
+    slug: 'hex',
+    label: 'Hex work',
+    icon: '/images/icons/map.svg',
+    fork: true,
+  },
+  {
+    id: 'production',
+    slug: 'ui',
+    label: 'UI work',
+    icon: '/images/icons/map.svg',
+    fork: false,
+  },
+  {
+    id: 'ia',
+    slug: 'ia',
+    label: 'IA work',
+    icon: '/images/icons/table.svg',
+    fork: true,
+  },
+  {
+    id: 'art',
+    slug: 'art',
+    label: 'Art work',
+    icon: '/images/icons/map.svg',
+    fork: true,
+  },
+]
+const VIEW_PARAM = 'view'
+
+// useSearchParams lives in its own null-rendering leaf behind a Suspense
+// boundary so it doesn't bail the statically-generated page out to client
+// rendering (the explorer reads its own params the same way).
+function ViewParamSync({ onView }: { onView: (slug: string | null) => void }) {
+  const slug = useSearchParams().get(VIEW_PARAM)
+  useLayoutEffect(() => {
+    onView(slug)
+  }, [slug, onView])
+  return null
+}
+
 // PROTOTYPE Map 3.5: an org placed by its District goes by that as its
 // category, on the map and in the explorer, the way the classic map goes by
 // the first Category. The explorer's Category chip then offers the districts.
@@ -59,7 +120,32 @@ export default function MapClient({
   // 'ia' and 'art' are the same forked data and the same computed layout;
   // they differ only in how the backdrop is drawn (schematic or classic-style).
   // 'hex' is the same forked data on a board of hexagonal tiles.
-  const [dataSource, setDataSource] = useState<DataSource>('production')
+  const views = useMemo(
+    () => MAP_VIEWS.filter(view => !view.fork || iaWork !== null),
+    [iaWork]
+  )
+  const defaultView = views[0]
+  const [dataSource, setDataSource] = useState<DataSource>(defaultView.id)
+  // The address names the view (?view=hex); a slug for a view not here, or
+  // none, means the default. The default is left out of the address, so the
+  // bare /map keeps its bare URL.
+  const readView = useCallback(
+    (slug: string | null) => {
+      const view = views.find(v => v.slug === slug) ?? defaultView
+      setDataSource(view.id)
+    },
+    [views, defaultView]
+  )
+  const chooseView = (id: DataSource) => {
+    setDataSource(id)
+    const view = views.find(v => v.id === id) ?? defaultView
+    const url = new URL(window.location.href)
+    if (view === defaultView) url.searchParams.delete(VIEW_PARAM)
+    else url.searchParams.set(VIEW_PARAM, view.slug)
+    // In place, as the explorer writes its own params: history.state is
+    // passed through, since Next.js keeps its routing state there.
+    window.history.replaceState(window.history.state, '', url)
+  }
   const { orgs, suggestEntryLink, suggestCorrectionLink } =
     dataSource !== 'production' && iaWork ? iaWork : production
   const isIaWork = dataSource !== 'production' && iaWork !== null
@@ -190,53 +276,42 @@ export default function MapClient({
     [prototype]
   )
 
-  const dataToggle = iaWork && (
+  // One view alone (no fork) needs no switch.
+  const dataToggle = views.length > 1 && (
     <div className={styles['map-data-toggle']}>
       <ModeToggle
         mode={dataSource}
-        onChange={setDataSource}
-        ariaLabel="Map data source"
-        tabs={[
-          {
-            value: 'production',
-            icon: '/images/icons/map.svg',
-            label: 'UI work',
-          },
-          {
-            value: 'ia',
-            icon: '/images/icons/table.svg',
-            label: 'IA work',
-          },
-          {
-            value: 'art',
-            icon: '/images/icons/map.svg',
-            label: 'Art work',
-          },
-          {
-            value: 'hex',
-            icon: '/images/icons/map.svg',
-            label: 'Hex work',
-          },
-        ]}
+        onChange={chooseView}
+        ariaLabel="Map view"
+        tabs={views.map(view => ({
+          value: view.id,
+          icon: view.icon,
+          label: view.label,
+        }))}
       />
     </div>
   )
 
   return (
-    <MapExplorer
-      // A fresh explorer per data source: its filters, selection and map start
-      // over, since the layouts share neither areas nor categories.
-      key={dataSource}
-      orgs={prototype?.orgs ?? orgs}
-      scheme={prototype?.scheme ?? CLASSIC_MAP_SCHEME}
-      categoryOptions={categoryOptions}
-      realmBackdrop={realmMap?.backdrop}
-      realmBackdropStyle={dataSource === 'art' ? 'art' : 'schematic'}
-      hexBackdrop={hexMap?.layout}
-      lastUpdatedIso={lastUpdatedIso}
-      suggestEntryLink={suggestEntryLink}
-      suggestCorrectionLink={suggestCorrectionLink}
-      dataToggle={dataToggle}
-    />
+    <>
+      <Suspense fallback={null}>
+        <ViewParamSync onView={readView} />
+      </Suspense>
+      <MapExplorer
+        // A fresh explorer per data source: its filters, selection and map start
+        // over, since the layouts share neither areas nor categories.
+        key={dataSource}
+        orgs={prototype?.orgs ?? orgs}
+        scheme={prototype?.scheme ?? CLASSIC_MAP_SCHEME}
+        categoryOptions={categoryOptions}
+        realmBackdrop={realmMap?.backdrop}
+        realmBackdropStyle={dataSource === 'art' ? 'art' : 'schematic'}
+        hexBackdrop={hexMap?.layout}
+        lastUpdatedIso={lastUpdatedIso}
+        suggestEntryLink={suggestEntryLink}
+        suggestCorrectionLink={suggestCorrectionLink}
+        dataToggle={dataToggle}
+      />
+    </>
   )
 }
