@@ -6,7 +6,7 @@ import {
   mapAreaPath,
   searchMapAreas,
 } from './map-areas'
-import { buildRealmScheme } from './map-realms'
+import { buildRealmScheme, renameAreas } from './map-realms'
 
 const pin = (realm: string, district: string, x: number, y: number) => ({
   realm,
@@ -62,6 +62,29 @@ describe('buildRealmScheme', () => {
       'News and commentary',
       'No longer active',
     ])
+  })
+
+  it('can show areas under other names without touching the data names', () => {
+    const named = renameAreas(scheme, {
+      'Media and discourse': 'Discourse Delta',
+      'News and commentary': 'Commentary Coast',
+      'No longer active': 'Gone Graveyard',
+    })
+    expect(named.areas.map(a => a.label).sort()).toEqual([
+      'Commentary Coast',
+      'Discourse Delta',
+      'Forums',
+      'Gone Graveyard',
+    ])
+    // Orgs are still placed by their data District.
+    expect(mapAreaPath('News and commentary', named)).toEqual([
+      'Discourse Delta',
+      'Commentary Coast',
+    ])
+    expect(isInQuietMapArea('No longer active', named)).toBe(true)
+    expect(() =>
+      renameAreas(scheme, { Forums: 'News and commentary' })
+    ).toThrow(/both named/)
   })
 
   it('is searchable like the classic areas', () => {

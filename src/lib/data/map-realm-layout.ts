@@ -41,6 +41,9 @@
 // Everything is deterministic: the same records give the same map. Pure
 // module with no dependencies, so it can be unit tested.
 
+import { jogSharedBorders } from './map-realm-borders'
+import { splitByHalves } from './map-realm-split'
+
 export interface LayoutPin {
   id: string
   realm: string
@@ -95,15 +98,22 @@ export interface RealmMapSpec {
     settleFrom?: boolean
     settleTo?: boolean
     // How far (grid units) the road swings to either side of the straight
-    // line between its ends. Not given, it runs straight.
+    // line between its ends, as one easy wave. Not given, it runs straight.
     wander?: number
+    // Or the road's own bends, in order: each `at` a share of the way along
+    // (0 to 1) and `swing` grid units to the left of the straight line. The
+    // road runs straight from one bend to the next, as the classic map's
+    // roads do. Given, `wander` is not used.
+    bends?: { at: number; swing: number }[]
     left: string[]
     right: string[]
   }[]
   // Districts that are a town: a block, not a share of the open land. It
-  // grows as a square around `seed`. Put the seed on a corner or an edge of
-  // the realm and the town fills that corner or end of it.
-  blocks?: Record<string, { seed: Point }>
+  // grows around `seed` as a square, or as the `outline` given: a polygon
+  // around (0, 0), about one unit across, that is scaled up until the town
+  // holds its share. Put the seed on a corner or an edge of the realm and the
+  // town fills that corner or end of it.
+  blocks?: Record<string, { seed: Point; outline?: Point[] }>
   // Footpaths, each as the districts it calls at, in order. The first is
   // where it sets out from, which it does not run through the middle of.
   trails?: string[][]
@@ -191,6 +201,14 @@ export function pinFootprint(scale: string | null): number {
   const size = (scale ?? 'Medium').toLowerCase()
   return size === 'large' ? 4 : size === 'small' ? 1 : 2
 }
+
+// A town with no outline of its own: a square one unit across.
+const SQUARE_TOWN: Point[] = [
+  [-0.5, -0.5],
+  [0.5, -0.5],
+  [0.5, 0.5],
+  [-0.5, 0.5],
+]
 
 const snapTo = (value: number, grid: number) => Math.round(value / grid) * grid
 
@@ -941,49 +959,41 @@ export function layoutRealmMap(
     const byDistrict = groupBy(inRealm, pin => pin.district)
     const realmFootprint = footprintOf(inRealm)
 
-    // The towns first: each a square grown around its seed until it holds
-    // the district's share of the realm. What they take is no longer open to
-    // the other districts, and they are drawn over them.
+    // The towns first: each its outline (a square, if the spec gives none)
+    // grown around its seed until it holds the district's share of the realm.
+    // What they take is no longer open to the other districts, and they are
+    // drawn over them.
     let open = room
     const towns: typeof planned = []
     for (const [district, inDistrict] of byDistrict) {
       const block = spec.blocks?.[district]
       if (!block) continue
       const target = (footprintOf(inDistrict) / realmFootprint) * room.length
-      const squareOf = (side: number) => {
-        const x0 = block.seed[0] - side / 2
-        const y0 = block.seed[1] - side / 2
-        return { x0, y0, x1: x0 + side, y1: y0 + side }
-      }
-      const inSquare = (side: number) => {
-        const { x0, y0, x1, y1 } = squareOf(side)
-        return open.filter(
-          i => xs[i] >= x0 && xs[i] < x1 && ys[i] >= y0 && ys[i] < y1
-        )
+      const unit = block.outline ?? SQUARE_TOWN
+      const outlineAt = (scale: number): Point[] =>
+        unit.map(([x, y]) => [
+          block.seed[0] + x * scale,
+          block.seed[1] + y * scale,
+        ])
+      const within = (scale: number) => {
+        const outline = outlineAt(scale)
+        return open.filter(i => insidePolygon(xs[i], ys[i], outline))
       }
       let low = 0
       let high = 48
       for (let round = 0; round < 20; round++) {
-        const side = (low + high) / 2
-        if (inSquare(side).length < target) low = side
-        else high = side
+        const scale = (low + high) / 2
+        if (within(scale).length < target) low = scale
+        else high = scale
       }
-      const { x0, y0, x1, y1 } = squareOf(high)
-      const taken = new Set(inSquare(high))
+      const taken = new Set(within(high))
       open = open.filter(i => !taken.has(i))
       towns.push({
         district,
         realm,
         pins: inDistrict,
         block: true,
-        pieces: [
-          [
-            [x0, y0],
-            [x1, y0],
-            [x1, y1],
-            [x0, y1],
-          ],
-        ],
+        pieces: [outlineAt(high)],
       })
     }
 
@@ -1061,23 +1071,36 @@ export function layoutRealmMap(
         else roadEnd = settled
       }
     }
-    // The road's line: straight, or swinging to one side and then the other
-    // and easing back to the straight line at both ends.
+    // The road's line: straight, or through the bends the spec gives it, or
+    // swinging to one side and then the other and easing back to the straight
+    // line at both ends.
     const along: Point = [roadEnd[0] - roadStart[0], roadEnd[1] - roadStart[1]]
     const length = Math.hypot(along[0], along[1]) || 1
     // To the left of the way the road runs (north, for a road running east).
     const left: Point = [along[1] / length, -along[0] / length]
+    const roadAt = (t: number, swing: number): Point => [
+      roadStart[0] + along[0] * t + left[0] * swing,
+      roadStart[1] + along[1] * t + left[1] * swing,
+    ]
     const roadLine: Point[] = []
-    for (let step = 0; step <= ROAD_STEPS; step++) {
-      const t = step / ROAD_STEPS
-      const swing =
-        (road?.wander ?? 0) *
-        Math.sin(2 * Math.PI * 1.25 * t) *
-        Math.sin(Math.PI * t)
-      roadLine.push([
-        roadStart[0] + along[0] * t + left[0] * swing,
-        roadStart[1] + along[1] * t + left[1] * swing,
-      ])
+    if (road?.bends) {
+      roadLine.push(
+        roadAt(0, 0),
+        ...road.bends.map(bend => roadAt(bend.at, bend.swing)),
+        roadAt(1, 0)
+      )
+    } else {
+      for (let step = 0; step <= ROAD_STEPS; step++) {
+        const t = step / ROAD_STEPS
+        roadLine.push(
+          roadAt(
+            t,
+            (road?.wander ?? 0) *
+              Math.sin(2 * Math.PI * 1.25 * t) *
+              Math.sin(Math.PI * t)
+          )
+        )
+      }
     }
     if (road) laid.set(realm, roadLine)
     // Everything to one side of the road, as a polygon: the road's line, run
@@ -1125,18 +1148,73 @@ export function layoutRealmMap(
       )
       return cellOf(there, there.indexOf(sites[index]), sideOfRoad(side))
     }
+    // Beside a road or round the cove a district is its cell of the power
+    // diagram. Any other realm is divided by halving (map-realm-split.ts),
+    // which gives chunkier districts: a cell there is often a strip right
+    // across the realm, or a wedge in a corner of it.
+    const halved =
+      road || harbour
+        ? null
+        : splitByHalves(
+            open.map((i): Point => [xs[i], ys[i]]),
+            sites.map(site => ({
+              share: site.share,
+              anchor: [site.homeX, site.homeY],
+            })),
+            frame,
+            STEP * STEP
+          )
+    const cells = shared.map((_, index) =>
+      halved
+        ? [halved[index]]
+        : road
+          ? ([-1, 1] as const)
+              .filter(side => [0, side].includes(sideOfSite[index]))
+              .map(side => pieceOn(index, side))
+              .filter(piece => piece.length > 0)
+          : [cellOf(sites, index, frame)]
+    )
+    // A border that is the road stays with the road.
+    const alongRoad = (x: number, y: number) =>
+      road !== null &&
+      roadLine.some((from, n) => {
+        const to = roadLine[n + 1]
+        if (!to) return false
+        const dx = to[0] - from[0]
+        const dy = to[1] - from[1]
+        const t = Math.max(
+          0,
+          Math.min(
+            1,
+            ((x - from[0]) * dx + (y - from[1]) * dy) / (dx * dx + dy * dy || 1)
+          )
+        )
+        return Math.hypot(x - from[0] - dx * t, y - from[1] - dy * t) < 0.5
+      })
+    // The long straight borders between them get a jog (map-realm-borders.ts)
+    // where they can be seen: on this realm's land, and not under a town. On
+    // land only: the line between the harbour realm's halves runs mostly under
+    // the cove, and stays straight for the causeway along it.
+    const seen = (x: number, y: number) => {
+      const col = Math.floor(x / STEP)
+      const row = Math.floor(y / STEP)
+      if (col < 0 || col >= cols || row < 0 || row >= rows) return false
+      return (
+        isLand[row * cols + col] === 1 &&
+        insidePolygon(x, y, polygon) &&
+        !towns.some(town => insidePolygon(x, y, town.pieces[0])) &&
+        !alongRoad(x, y)
+      )
+    }
+    const jogged = jogSharedBorders(cells.flat(), seen)
+    let next = 0
     shared.forEach(([district, inDistrict], index) => {
       planned.push({
         district,
         realm,
         pins: inDistrict,
         block: false,
-        pieces: road
-          ? ([-1, 1] as const)
-              .filter(side => [0, side].includes(sideOfSite[index]))
-              .map(side => pieceOn(index, side))
-              .filter(piece => piece.length > 0)
-          : [cellOf(sites, index, frame)],
+        pieces: cells[index].map(() => jogged[next++]),
       })
     })
     planned.push(...towns)

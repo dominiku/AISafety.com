@@ -1,0 +1,310 @@
+// PROTOTYPE Map 3.5, "Hex work" view: the geography, as a board of hexagonal
+// tiles. This file is meant to be edited by hand.
+//
+// HOW TO READ THE TILE MAP
+// Each token is one tile, and the tiles lie as the tokens do, with one thing
+// to keep in mind: every second column (the 2nd, 4th, 6th... token of a row)
+// sits half a tile LOWER than the ones beside it, as the columns of a
+// honeycomb do.
+//   ..    open sea
+//   Gm    a tile of the district with the letters Gm (see the districts
+//         below). Lower-case letters are features, not districts: cv the
+//         cove, hb the harbor, cr the crater, kp the castle's keep.
+// Every painted tile is land (takeAllTiles below), so the coast is exactly
+// what is painted here: keep it smooth, with no single tile sticking out, and
+// paint each district about as many tiles as its logos need (a tile holds
+// about one large logo, two medium or four small; the render script's need
+// report gives the count). The two rows at the top are left to the sea for
+// the map's title (but to the right of it, where Think-Tank Town has a tile). Logos fill a
+// district from its most inland tile (the one nearest the castle) outward.
+// With takeAllTiles off, a district takes only as many tiles as its logos
+// need and the rest stay sea until the day they are needed.
+// A sign after the letters marks the tile:
+//   Gm~   the RIVER runs through the tile. The river is every tile marked ~,
+//         joined up from the highest one downhill; where marked tiles branch,
+//         the river parts (the delta); where a marked tile is on the coast,
+//         the river runs out to sea. It may never run uphill.
+//   Gm=   the ROAD runs through the tile, joined up the same way.
+//   Gm!   the district's LANDMARK stands here, and no logos.
+//   Al^   an ESCARPMENT: the tile's sides toward the viewer lean out as
+//         slopes of bare rock. A district with no tiles of its own may have
+//         its logos on those slopes (onSlopesOf).
+//   Al#   a CROSSING: the river and the road both run through the tile, and
+//         the road goes over the river by a plank bridge.
+//   Gm+   a DECK: the tile is water with a pier's planks over it. A pier runs
+//         straight out from a tile of its district's solid ground.
+// River, road and landmark tiles are always land.
+//
+// HEIGHTS belong to districts, not to tiles: a district is one plateau, all
+// its tiles at one height and with no border between them, so districts are
+// told apart by the step between them, their rim and their tone. Give
+// neighboring districts different heights. In levels: 1 is low ground (the
+// delta, the beaches), 2 to 3 ordinary land, 4 and up the mountains; halves
+// are fine. The board is seen from the south, so high ground hides some of
+// the tile behind it (to the north), and a logo cannot stand there: keep the
+// north edge of high country modest, and let cliffs that are to be seen (the
+// escarpment, a valley's walls) face south, with low ground in front of them.
+//
+// THE SCALE comes from the castle: Career support is the keep and the six
+// tiles round it, which between them hold its 13 logos. That sets the size of
+// a tile (about one large logo, two medium or four small ones), and the rest
+// of the map follows from it.
+//
+// The arrangement follows Rob's second sketch (see map-realm-spec.ts): the
+// castle in the very middle, and a realm out from each of its six sides: the
+// Advocacy cove to the north, Policy and strategy to the north-east,
+// Technical research (the mountains) to the south-east, Field infrastructure
+// to the south and along under everything, the Talent pipeline with its road
+// to the south-west, and Media and discourse with the delta to the
+// north-west. The closed orgs have an islet of their own in the south-west
+// corner.
+
+import type { HexMapSpec } from './map-hex-layout'
+import { QUIET_REALM } from './map-realms'
+
+// prettier-ignore
+const TILES = `
+# 0   1   2   3   4   5   6   7   8   9   10  11  12  13  14  15  16  17  18
+  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..
+  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  Th  ..  ..  ..
+  ..  ..  Ne  Ne~ Ne  Fo~ Fo  Fo  Fo  Gr  cv  cv  Go  Go  Th  Th= Th  ..  ..
+  ..  ..  Ne  Ne~ Ne~ Fo~ Fo! Fo  Fr  Gr  cv  Pa  Ma  Go= Th= Th! Lo  Lo  ..
+  ..  ..  Ne~ Ne  Ne  Fo  Fo~ Fo~ Fr  Gr  Pa= Pa= Ma  Ma= Ma  St  Lo  ..  ..
+  ..  In! In  In  Fb  Pp  Pp  Tp  Fr~ Ca~ Ca  Ca= Ma= Ma  St  Co  Co  cr  ..
+  ..  hb  hb  In= Fb= Pp= Pp= Tp= Tp= Ca= kp  Ca~ Al= Al= Al  Co  Ip  Ip  ..
+  ..  In  hb  In  Fb  Tp  Tp  Tp  Tp  Hu  Ca  Al~ Al~ Al# Co~ Co  Co  Cp  ..
+  ..  ..  In  Tp  Tp  Tp  Tp  Hu  Hu  Gm  Gm  Vc  Vc~ Al= Co= Co! Cp  Cp! ..
+  Gy  Gy  ..  ..  Op  Op  Op  Op  Gm  Gm  Gm  Gm  Vc  Al^ Al^ Gm  Cp  ..  ..
+  Gy  Gy! Gy  ..  ..  ..  ..  To  To  To  Gm  Gm  Gm  Gm  Gm  ..  ..  ..  ..
+  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..  ..
+`
+
+export const MAP_35_HEX_SPEC: HexMapSpec = {
+  // Sizes are in map grid units (the map is 60 wide).
+  view: { size: 2.05, squash: 0.66, lift: 0.4, origin: [2.33, 2.6] },
+  tiles: TILES,
+  // prettier-ignore
+  districts: [
+    // Woodland along the river, inland of the delta's coast.
+    { code: 'Fo', district: 'Foundational and explanatory', realm: 'Media and discourse', height: 1.5, cover: 'forest',
+      landmark: { symbol: 'forest', width: 2.6, height: 2.15 } },
+    // The delta's coast: the river's mouths and a working estuary shore of
+    // reed beds, a fishing village, drying nets and boats out on the water.
+    // It is a beach, so its sides to the sea are wet sand and not a rim; the
+    // damp band is mixed from its own mint, and comes out cool, which is
+    // what tells this coast from the tropical sands in the south. It has no
+    // landmark: the village is the thing to look at.
+    { code: 'Ne', district: 'News and commentary', realm: 'Media and discourse', height: 1, beach: true, cover: 'reeds' },
+    { code: 'Fr', district: 'Forums and online communities', realm: 'Media and discourse', height: 2.5, building: 'forum' },
+    { code: 'Gr', district: 'Grassroots campaigns', realm: 'Advocacy and public engagement', height: 1 },
+    { code: 'Pa', district: 'Professional advocacy and communication', realm: 'Advocacy and public engagement', height: 2.5, pier: true },
+    // The landing: the arms of a sheltered harbor, where the road starts.
+    { code: 'In', district: 'Introductory learning', realm: 'Talent pipeline', height: 0.5,
+      landmark: { symbol: 'lighthouse', width: 1, height: 1.8, lit: [0.48, 0.13] } },
+    { code: 'Fb', district: 'Field-building and local groups', realm: 'Talent pipeline', height: 1.5 },
+    { code: 'Pp', district: 'Policy and governance programs', realm: 'Talent pipeline', height: 2, building: 'school' },
+    { code: 'Tp', district: 'Technical research programs', realm: 'Talent pipeline', height: 2.5, cover: 'fields' },
+    // The castle: the six tiles round the keep, whatever its logos need.
+    { code: 'Ca', district: 'Career support and placement', realm: 'Talent pipeline', height: 3, minTiles: 6, overWater: true },
+    // Support Shoreline is one beach on ONE level (a shore has no steps in
+    // it), so its districts are told apart by what is on them, not by height:
+    // the tropical sands with their palms and beach huts, the fishing hamlet
+    // behind them, the toolsheds as a village on stilts (a deck of planks on
+    // posts, tile for tile like any other ground) out in the water,
+    // and the dunes, which run on under the escarpment. The valley runs down
+    // to the beach from under the castle, between two arms of the Range: its
+    // walls are the Control Dam's high ground to the west and north and the
+    // escarpment to the east, and it is open to the south, where the viewer
+    // looks in.
+    { code: 'Op', district: 'Operations and services', realm: 'Field infrastructure', height: 1, beach: true, cover: 'tropical' },
+    { code: 'Hu', district: 'Hubs and coworking', realm: 'Field infrastructure', height: 1, cover: 'hamlet' },
+    { code: 'To', district: 'Tools, databases and research infrastructure', realm: 'Field infrastructure', height: 1.4, stilts: true, cover: 'huts', ground: '#d98a5a' },
+    { code: 'Gm', district: 'Grantmakers and donor advisory', realm: 'Field infrastructure', height: 1, cover: 'dunes', beach: true },
+    { code: 'Vc', district: 'Venture capital and incubators', realm: 'Field infrastructure', height: 2, cover: 'oasis', ground: '#ffd9b5' },
+    { code: 'Go', district: 'Governments and multi-stakeholder bodies', realm: 'Policy and strategy', height: 3, building: 'capitol' },
+    // Foothills: the ground rising toward the Range, in low green hills (and
+    // no peaks: the mountains are the Range's).
+    { code: 'Ma', district: 'Macrostrategy and forecasting', realm: 'Policy and strategy', height: 3.5, cover: 'hills' },
+    { code: 'Th', district: 'Policy research and think tanks', realm: 'Policy and strategy', height: 2.5,
+      // The road from the castle is the town's main street, as on the classic
+      // map: it comes in from the north and runs down the gap between the
+      // church and the house east of it, and the art's own two streets come
+      // off it to either side.
+      landmark: { symbol: 'training-town', width: 3, height: 2.54, shift: [-0.45, 0], door: [0.65, 0.78], doorFrom: 'above' } },
+    { code: 'St', district: 'Standards, assurance and verification', realm: 'Policy and strategy', height: 3 },
+    { code: 'Lo', district: 'Policy advocacy and lobbying', realm: 'Policy and strategy', height: 2, pier: true },
+    // The Range, from its back corner to its front: the crater on top of the
+    // volcano, its lake shut in by the rim; Circuit Crater on the volcano's
+    // sloping shoulder; the heights, with the tarn (a mountain lake) the
+    // river rises in; the Control Dam's basin, which the river falls into and
+    // leaves for the castle over a dam; and along the front, over the
+    // beach, the escarpment: one long leaning slope of banded rock.
+    { code: 'Al', district: 'Alignment and control', realm: 'Technical research', height: 4 },
+    { code: 'Ev', district: 'Evaluations and threat research', realm: 'Technical research', height: 4, onSlopesOf: 'Al' },
+    { code: 'Co', district: 'Conceptual and foundations research', realm: 'Technical research', height: 5, cover: 'thermals', scenery: 2,
+      // The road from the castle ends at the cave's mouth.
+      landmark: { symbol: 'cave', width: 1.7, height: 1.63, door: [0.61, 0.6] } },
+    { code: 'Ip', district: 'Interpretability and model understanding', realm: 'Technical research', height: 6.5, cone: true,
+      landmark: { symbol: 'range', width: 2.8, height: 1.98 } },
+    { code: 'Cp', district: 'Capabilities research', realm: 'Technical research', height: 6, walled: true,
+      // The art has a ship at its foot from the days the crag stood by the
+      // sea; it is inland now, so that strip is cut off.
+      landmark: { symbol: 'skull-mountain', width: 2.6, height: 2.25, crop: 0.26 } },
+    // The closed orgs: a ships' graveyard on open water off the south-west
+    // coast. The gravestones are the original map's own art for them; the
+    // wrecks are scattered over the rest of its water.
+    { code: 'Gy', district: QUIET_REALM, realm: QUIET_REALM, height: 0, sunken: true,
+      landmark: { symbol: 'gravestones', width: 4.6, height: 2.2 } },
+  ],
+  // prettier-ignore
+  features: [
+    // Advocacy Anchorage: water inside the coast, between the two arms of
+    // Advocacy, open to the north. Her own boats lie at moorings spread
+    // about her; one ship is standing out for the rest
+    // of the world. The sailboat art is sideways-on and cannot be turned to
+    // point out of the bay, so she lies up and to the east of the mouth, and
+    // her wake curves: straight out of the bay, then a turn to the right
+    // along the coast.
+    { code: 'cv', kind: 'water', height: 0,
+      // Her own boats lie at moorings spread about the anchorage rather than
+      // all in one row, and the layout keeps each of them off Persuasion
+      // Pier, wherever the pier runs.
+      moorings: [
+        { at: [10, 2], shift: [-0.78, 0.11], kind: 'sailboat', size: 1.15 },
+        { at: [10, 2], shift: [1.82, 0.31], kind: 'rowboat', size: 0.85 },
+        { at: [11, 2], shift: [0.15, 0.24], kind: 'sailboat', size: 1.1 },
+        { at: [10, 3], shift: [0.92, -0.23], kind: 'rowboat', size: 0.85 },
+      ],
+      departs: [{ at: [11, 1], shift: [0.3, -0.52], size: 1.35 }] },
+    // The harbor the road starts from: a bay between the arms of the landing.
+    { code: 'hb', kind: 'water', height: 0, arrival: true },
+    // The top of the volcano, in the Range's back corner, with only sea
+    // behind it to hide.
+    { code: 'cr', kind: 'crater', realm: 'Technical research', height: 6.5 },
+    // The castle's keep, level with the six tiles of Career support round it.
+    // The castle is larger than the keep's tile; the river circles it as a
+    // moat through the middles of those six tiles, and the road ends at its
+    // bridge. Career support's logos may stand over the moat.
+    { code: 'kp', kind: 'keep', realm: 'Talent pipeline', height: 3,
+      landmark: { symbol: 'castle', width: 5, height: 3.12 } },
+  ],
+  // The Control Dam's reservoir, on the Dam's own ground at the head of
+  // Venture Valley (after Robert's sketch): a stream from the great hot pond
+  // of the Thermals falls into it, and it empties two ways: north to the
+  // castle's moat, and over the dam's spillway, at the top edge of the
+  // valley, into the oasis's pool.
+  lakes: [
+    {
+      // It fills both tiles, edge to edge, up against the dam.
+      cells: [
+        [12, 7],
+        [11, 7],
+      ],
+      whole: true,
+      dam: [
+        [12, 7, 'S'],
+        [11, 7, 'SE'],
+        [11, 7, 'S'],
+        [11, 7, 'SW'],
+      ],
+    },
+  ],
+  // The compass rose, at the same size the original map draws it. It goes
+  // round the four buttons of map furniture, wherever they stand.
+  compass: { width: 5.2, height: 5.3 },
+  river: { width: 0.85, branch: 0.78, headwater: 0.5 },
+  // The road to the cave crosses the stream beside the reservoir and runs on
+  // south onto the top of the escarpment (a tile marked ^, which it runs
+  // over as well) before it turns north and climbs to the cave's plateau: it
+  // cuts no corners on the way.
+  road: {
+    width: 0.4,
+    over: [[14, 9]],
+    apart: [
+      [
+        [13, 7],
+        [14, 8],
+      ],
+      [
+        [13, 8],
+        [14, 8],
+      ],
+    ],
+  },
+  // For now every painted tile is land, so the coast is as smooth as it is
+  // painted. To give a district room to grow, paint more tiles for it.
+  takeAllTiles: true,
+}
+
+// District codes whose tiles are an island of their own, not part of the
+// main land.
+export const MAP_35_HEX_ISLETS = ['Gy']
+
+// How far a logo reaches from its middle, in map grid units, by its Scale
+// field: the pin sizes D3Map draws (64 px times 0.4, 0.6 or 0.8, on a grid of
+// about 41.4 px).
+export function hexLogoRadius(scale: string | null): number {
+  const size = (scale ?? 'Medium').toLowerCase()
+  return size === 'large' ? 0.62 : size === 'small' ? 0.31 : 0.46
+}
+
+// WORKING NAMES, not final: what the map calls each realm and district. The
+// data fields keep their plain names (Realm "Technical research", District
+// "Alignment and control"); these labels are separate and can change without
+// touching the data. Names that describe a position (Landing, Pier,
+// Escarpment) only hold while the layout does, so they are frozen last.
+// prettier-ignore
+export const MAP_35_HEX_NAMES: Record<string, string> = {
+  'Talent pipeline': 'Pipeline Path',
+  'Field infrastructure': 'Support Shoreline',
+  // Or "Media Moor"; this map draws a delta.
+  'Media and discourse': 'Discourse Delta',
+  'Advocacy and public engagement': 'Advocacy Anchorage',
+  'Policy and strategy': 'Policy Plains',
+  'Technical research': 'Research Range',
+  [QUIET_REALM]: 'Gone Graveyard',
+
+  'Field-building and local groups': 'Community Commons',
+  'Introductory learning': 'Learning Landing',
+  'Technical research programs': 'Fellowship Fields',
+  'Policy and governance programs': 'Statecraft School',
+  // Or "Career Crossing".
+  'Career support and placement': 'Career Castle',
+
+  'Tools, databases and research infrastructure': 'Toolshed Terrace',
+  // Was "Service Station", which reads as a petrol station in the UK.
+  'Operations and services': 'Service Sands',
+  'Hubs and coworking': 'Hub Hamlet',
+  // Was "Grant Grove": far too large for a grove. Dunes run the length of
+  // a shore. Or "Donor Docks".
+  'Grantmakers and donor advisory': 'Donor Dunes',
+  // A valley between two arms of the Range, open to the south so that the
+  // viewer looks up it; vines grow on its floor.
+  'Venture capital and incubators': 'Venture Valley',
+
+  'Foundational and explanatory': 'Foundation Forest',
+  'News and commentary': 'Commentary Coast',
+  'Forums and online communities': 'The Forum',
+
+  'Grassroots campaigns': 'Campaign Cutters',
+  'Professional advocacy and communication': 'Persuasion Pier',
+
+  'Macrostrategy and forecasting': 'Foresight Foothills',
+  'Policy research and think tanks': 'Think-Tank Town',
+  // Or "Parliament Plaza".
+  'Governments and multi-stakeholder bodies': 'Capitol Court',
+  'Standards, assurance and verification': 'Verification Vale',
+  // Or "Legislation Lookout".
+  'Policy advocacy and lobbying': 'Lobby Landing',
+
+  'Alignment and control': 'Control Dam',
+  'Evaluations and threat research': 'Evaluation Escarpment',
+  // Was "Circuit Cove" (or "Interpretability Inlet"): the shoulder of the
+  // volcano, round the crater and its lake.
+  'Interpretability and model understanding': 'Circuit Crater',
+  // Was "Theory Thicket" (nothing grows so thick that high): hot springs and
+  // geysers beside the volcano, and the river rises among them.
+  'Conceptual and foundations research': 'Theory Thermals',
+  // Was "Capabilities Cove": it is a walled high plateau now.
+  'Capabilities research': 'Capabilities Crag',
+}

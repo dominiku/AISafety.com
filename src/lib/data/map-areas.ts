@@ -253,15 +253,23 @@ export function primaryCategory(category: string): string | null {
   return first || null
 }
 
-/** Field map region an org is drawn in — decided by its first category. */
-export function mapAreaFor(category: string): string | null {
+/** Field map region an org is drawn in — decided by its first category (its
+ *  District under the Map 3.5 prototype's scheme). */
+export function mapAreaFor(
+  category: string,
+  scheme: MapAreaScheme = CLASSIC_MAP_SCHEME
+): string | null {
   const primary = primaryCategory(category)
   if (!primary) return null
-  const area = MAP_AREA_BY_CATEGORY[primary]
+  const area = scheme.areaByCategory[primary]
   if (!area) {
-    console.warn(
-      `[map-areas] No Field map area for category "${primary}" — add it to MAP_AREA_BY_CATEGORY`
-    )
+    // Every classic category must have an area. The prototype's scheme is
+    // built from the data, so an org not yet given a district has none.
+    if (scheme === CLASSIC_MAP_SCHEME) {
+      console.warn(
+        `[map-areas] No Field map area for category "${primary}" — add it to MAP_AREA_BY_CATEGORY`
+      )
+    }
     return null
   }
   return area

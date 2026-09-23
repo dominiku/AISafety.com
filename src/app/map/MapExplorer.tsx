@@ -39,8 +39,14 @@ import {
   type ExplorerSort,
 } from '@/lib/map-explorer'
 import type { MapOrg } from '@/lib/data/map'
+import type { HexLayout } from '@/lib/data/map-hex-layout'
 import type { MapExplorerLink } from './D3Map'
-import { mapAreaFor } from '@/lib/data/map-areas'
+import type { RealmBackdrop } from './realmBackdrop'
+import {
+  CLASSIC_MAP_SCHEME,
+  mapAreaFor,
+  type MapAreaScheme,
+} from '@/lib/data/map-areas'
 import MapListCard from './MapListCard'
 import MapListingDetails from './MapListingDetails'
 import MapResultRow from './MapResultRow'
@@ -144,6 +150,17 @@ interface MapExplorerProps {
   suggestCorrectionLink: string
   // The prototype's UI work / IA work switch, drawn over the map.
   dataToggle: ReactNode
+  // The areas drawn and the rule placing orgs in them: the classic map's
+  // unless the Map 3.5 prototype passes its realms and districts.
+  scheme?: MapAreaScheme
+  // What the Category chip offers: the classic categories, unless the
+  // prototype's scheme places orgs by something else (its districts).
+  categoryOptions?: string[]
+  // PROTOTYPE Map 3.5: the layouts drawn in place of the island art, passed
+  // on to the map (see D3Map's props of the same names).
+  realmBackdrop?: RealmBackdrop
+  realmBackdropStyle?: 'schematic' | 'art'
+  hexBackdrop?: HexLayout
 }
 
 // The /map explorer: the map is the page, and everything else floats over its
@@ -157,6 +174,11 @@ export default function MapExplorer({
   suggestEntryLink,
   suggestCorrectionLink,
   dataToggle,
+  scheme = CLASSIC_MAP_SCHEME,
+  categoryOptions = CATEGORIES,
+  realmBackdrop,
+  realmBackdropStyle,
+  hexBackdrop,
 }: MapExplorerProps) {
   const [query, setQuery] = useState('')
   // What the list is filtered by: the text, once typing has paused.
@@ -253,10 +275,10 @@ export default function MapExplorer({
     () =>
       optionCounts(
         filterItems(listed, basePass, groups, 'category'),
-        CATEGORIES,
+        categoryOptions,
         groups.category.matches
       ),
-    [listed, basePass, groups]
+    [listed, basePass, groups, categoryOptions]
   )
 
   // One way to change the category filter, for the Category pill and the
@@ -311,7 +333,8 @@ export default function MapExplorer({
 
   const hasQuery = settledQuery.trim() !== ''
   // With exactly one category filtered by, the map is fitted to its place.
-  const fitArea = categories.length === 1 ? mapAreaFor(categories[0]) : null
+  const fitArea =
+    categories.length === 1 ? mapAreaFor(categories[0], scheme) : null
 
   // The count is announced once it has stopped changing, never per keystroke.
   const countLabel = resultCountLabel(shown.length, total)
@@ -420,7 +443,7 @@ export default function MapExplorer({
         setLegendOpen(false)
       }
       const linkedCategories = (state.filters.category ?? [])
-        .map(value => categoryFromSlug(value, CATEGORIES))
+        .map(value => categoryFromSlug(value, categoryOptions))
         .filter((c): c is string => c !== null)
       setCategories(linkedCategories)
       // A link to a category shows its list, as picking one here does.
@@ -464,7 +487,7 @@ export default function MapExplorer({
         }
       }
     },
-    [listed]
+    [listed, categoryOptions]
   )
 
   // ── Results drawer ───────────────────────────────────────────────────────
@@ -682,7 +705,7 @@ export default function MapExplorer({
     [listed, selectedId]
   )
   const firstCategory = (org: MapOrg) => org.category.split(',')[0].trim()
-  const selectedPlace = selected ? mapAreaFor(selected.category) : null
+  const selectedPlace = selected ? mapAreaFor(selected.category, scheme) : null
   // The orgs standing in the same place: on the map, by their first category.
   // The same rule as the count in the place name's tooltip (areaCount in
   // D3Map), so "See all 10" and "Blog Beach, 10 organizations" agree.
@@ -716,9 +739,11 @@ export default function MapExplorer({
   const fitted = useMemo(() => {
     if (!fitArea) return null
     const onMap = shown.filter(isPlacedOnMap)
-    const here = onMap.filter(org => mapAreaFor(org.category) === fitArea)
+    const here = onMap.filter(
+      org => mapAreaFor(org.category, scheme) === fitArea
+    )
     return fittedStatus(fitArea, here.length, onMap.length - here.length)
-  }, [fitArea, shown])
+  }, [fitArea, shown, scheme])
   // A search with a handful of hits on the map: the view is fitted to them.
   const fitIds = useMemo(() => {
     if (!hasQuery) return null
@@ -794,7 +819,7 @@ export default function MapExplorer({
   // own, which counts only while they are shown).
   const areaCount = new Set(
     filterItems(listed, () => true, { status: groups.status }).map(org =>
-      mapAreaFor(org.category)
+      mapAreaFor(org.category, scheme)
     )
   ).size
 
@@ -900,12 +925,12 @@ export default function MapExplorer({
             <FilterDropdown
               trackingPage="Map"
               title="Category"
-              options={CATEGORIES}
+              options={categoryOptions}
               selected={categories}
               counts={categoryCounts}
               single
               onToggle={toggleCategory}
-              optionNote={mapAreaFor}
+              optionNote={category => mapAreaFor(category, scheme)}
               onClear={() => setCategories([])}
             />
             <button
@@ -1107,6 +1132,10 @@ export default function MapExplorer({
         <section aria-label="Map" className={styles['explorer-map']}>
           <D3Map
             orgs={mapOrgs}
+            scheme={scheme}
+            realmBackdrop={realmBackdrop}
+            realmBackdropStyle={realmBackdropStyle}
+            hexBackdrop={hexBackdrop}
             suggestEntryUrl={suggestEntryLink}
             tuning={tuning}
             explorer={explorerLink}

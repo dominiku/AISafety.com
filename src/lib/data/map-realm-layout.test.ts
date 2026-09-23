@@ -200,6 +200,32 @@ describe('layoutRealmMap', () => {
     }
   })
 
+  it('runs a road straight from one given bend to the next', () => {
+    const bent = layoutRealmMap(pins, graveyard, {
+      ...spec,
+      roads: [
+        {
+          ...spec.roads![0],
+          bends: [
+            { at: 0.3, swing: 1 },
+            { at: 0.7, swing: -1 },
+          ],
+        },
+      ],
+    })
+    const [road] = bent.roads
+    expect(road).toHaveLength(4)
+    const [start, first, second, end] = road
+    // Each bend stands its swing off the straight line between the ends, on
+    // opposite sides of it.
+    const off = ([x, y]: Point) =>
+      ((end[0] - start[0]) * (y - start[1]) -
+        (end[1] - start[1]) * (x - start[0])) /
+      Math.hypot(end[0] - start[0], end[1] - start[1])
+    expect(Math.abs(off(first))).toBeCloseTo(1, 5)
+    expect(off(first) * off(second)).toBeLessThan(0)
+  })
+
   it('makes a town a square block', () => {
     const town = layout.districts.find(d => d.district === 'East two')!
     expect(town.block).toBe(true)
@@ -210,6 +236,33 @@ describe('layoutRealmMap', () => {
     const height = Math.max(...ys) - Math.min(...ys)
     expect(width / height).toBeGreaterThan(0.75)
     expect(width / height).toBeLessThan(1.33)
+  })
+
+  it('grows a town to the outline the spec gives it', () => {
+    // A lopsided diamond around the seed.
+    const unit: Point[] = [
+      [0, -0.6],
+      [0.5, 0],
+      [0, 0.4],
+      [-0.4, 0],
+    ]
+    const hub = layoutRealmMap(pins, graveyard, {
+      ...spec,
+      blocks: { 'East two': { seed: [44, 22], outline: unit } },
+    })
+    const town = hub.districts.find(d => d.district === 'East two')!
+    const [outline] = town.pieces
+    // The same shape, scaled up about the seed.
+    const scale = (outline[1][0] - 44) / unit[1][0]
+    expect(scale).toBeGreaterThan(1)
+    outline.forEach(([x, y], n) => {
+      expect(x).toBeCloseTo(44 + unit[n][0] * scale, 5)
+      expect(y).toBeCloseTo(22 + unit[n][1] * scale, 5)
+    })
+    for (const pin of pins.filter(p => p.district === 'East two')) {
+      const spot = hub.positions.get(pin.id)!
+      expect(inside([spot.x, spot.y], outline), pin.id).toBe(true)
+    }
   })
 
   it('says which district a spot on the map is in', () => {

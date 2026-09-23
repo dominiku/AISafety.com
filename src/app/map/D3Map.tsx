@@ -41,7 +41,11 @@ import {
   type PinLayout,
   type TierPin,
 } from '@/lib/data/map-zoom-tiers'
+import { pinFootprint } from '@/lib/data/map-realm-layout'
+import { drawRealmArtBackdrop } from './realmArtBackdrop'
 import { drawRealmBackdrop, type RealmBackdrop } from './realmBackdrop'
+import { drawHexBackdrop } from './hexBackdrop'
+import type { HexLayout } from '@/lib/data/map-hex-layout'
 import styles from './page.module.css'
 
 interface MapOrg {
@@ -68,6 +72,12 @@ interface D3MapProps {
   // PROTOTYPE Map 3.5: the island, realms and districts worked out for that
   // layout. When given, they are drawn in place of the island art.
   realmBackdrop?: RealmBackdrop
+  // PROTOTYPE Map 3.5: the schematic, or the same layout in the classic art's
+  // hand (realmArtBackdrop.ts).
+  realmBackdropStyle?: 'schematic' | 'art'
+  // PROTOTYPE Map 3.5, "Hex work": the board of hexagonal tiles, drawn in
+  // place of the island art (hexBackdrop.ts).
+  hexBackdrop?: HexLayout
   // The zoom-tier tuning panel is a developer's tool: off unless asked for.
   tuning?: boolean
   // The explorer column beside the map (MapExplorer). When given, the map
@@ -209,12 +219,18 @@ const LABEL_NUDGE_GAP = 8
 const LABEL_NUDGE_MAX = 140
 const FIT_SIDE_ROOM = 48
 const FIT_BOTTOM_ROOM = 112
+// The zoom prototype's tuning panel (MapTuningPanel) is set aside for now, not
+// removed: the zoom tiers keep their recommended settings on every view. Flip
+// this to bring the panel back on the classic map behind ?tuning=1.
+const ZOOM_TUNING_PANEL = false as boolean
 
 export default function D3Map({
   orgs,
   suggestEntryUrl,
   scheme = CLASSIC_MAP_SCHEME,
   realmBackdrop,
+  realmBackdropStyle = 'schematic',
+  hexBackdrop,
   tuning = true,
   explorer,
 }: D3MapProps) {
@@ -284,7 +300,7 @@ export default function D3Map({
   // PROTOTYPE Map 3.5: 31 realm and district names do not fit the resting
   // view, so that layout starts with districts named only once zoomed in.
   const [tierConfig, setTierConfig] = useState(() =>
-    realmBackdrop
+    realmBackdrop || hexBackdrop
       ? { ...DEFAULT_ZOOM_TIER_CONFIG, subLabelZoom: REALM_SUB_LABEL_ZOOM }
       : DEFAULT_ZOOM_TIER_CONFIG
   )
@@ -586,7 +602,38 @@ export default function D3Map({
 
     // Add background image. PROTOTYPE Map 3.5: the island art was painted for
     // the classic positions, so the realm layout brings its own schematic.
-    if (realmBackdrop) {
+    const artPins = () =>
+      orgs.flatMap(org =>
+        org.x === null || org.y === null
+          ? []
+          : [
+              {
+                x: org.x,
+                y: org.y,
+                radius: Math.sqrt(pinFootprint(org.scale)) * 0.42,
+                furniture: org.isMagic === true,
+              },
+            ]
+      )
+    if (hexBackdrop) {
+      drawHexBackdrop(
+        svgGroup,
+        hexBackdrop,
+        GRID_SIZE,
+        MAP_WIDTH,
+        MAP_HEIGHT,
+        artPins()
+      )
+    } else if (realmBackdrop && realmBackdropStyle === 'art') {
+      drawRealmArtBackdrop(
+        svgGroup,
+        realmBackdrop,
+        GRID_SIZE,
+        MAP_WIDTH,
+        MAP_HEIGHT,
+        artPins()
+      )
+    } else if (realmBackdrop) {
       drawRealmBackdrop(
         svgGroup,
         defs,
@@ -607,7 +654,9 @@ export default function D3Map({
 
     // Add main title
     const titleX = 30 * GRID_SIZE
-    const titleY = 2.5 * GRID_SIZE
+    // PROTOTYPE Hex work: a little lower, in the room the board leaves along
+    // the middle of its north coast.
+    const titleY = (hexBackdrop ? 3.1 : 2.5) * GRID_SIZE
     // Beside the explorer column the page shows the title as its real <h1>.
     if (!hasExplorer)
       svgGroup
@@ -793,11 +842,12 @@ export default function D3Map({
     // where the layout has borders. A pin standing outside any district
     // (closed orgs, map furniture) is free, as on the classic map.
     const districtGround = (org: MapOrg) => {
-      if (!realmBackdrop || org.x === null || org.y === null) return undefined
-      const district = realmBackdrop.districtAt(org.x, org.y)
+      const ground = hexBackdrop ?? realmBackdrop
+      if (!ground || org.x === null || org.y === null) return undefined
+      const district = ground.districtAt(org.x, org.y)
       if (district === null) return undefined
       return (px: number, py: number) =>
-        realmBackdrop.districtAt(px / GRID_SIZE, py / GRID_SIZE) === district
+        ground.districtAt(px / GRID_SIZE, py / GRID_SIZE) === district
     }
 
     // PROTOTYPE zoom tiers: every pin's group and footprint, so a zoom can
@@ -1305,7 +1355,10 @@ export default function D3Map({
       if (!layout) return
       const config = tierConfigHere()
       const z = zoomOf(k)
-      const s = pinMapScale(z, config)
+      // On the hex board every pin has a spot worked out for its true size,
+      // among buildings and scenery: it keeps that size at every zoom, or it
+      // would cover what stands beside it.
+      const s = hexBackdrop ? 1 : pinMapScale(z, config)
       // Explorer: screen pixels per unit of a pin's own drawing, for the
       // square that keeps it clickable; and which pins carry names here.
       const phone = isMobile()
@@ -2228,7 +2281,14 @@ export default function D3Map({
         d3.select(container).select('svg').remove()
       }
     }
-  }, [orgs, scheme, realmBackdrop, hasExplorer])
+  }, [
+    orgs,
+    scheme,
+    realmBackdrop,
+    realmBackdropStyle,
+    hexBackdrop,
+    hasExplorer,
+  ])
 
   return (
     <>
@@ -2261,7 +2321,10 @@ export default function D3Map({
         onReset={() => controlsRef.current.reset()}
       />
 
-      {tuning && (
+      {/* See ZOOM_TUNING_PANEL. When it is back, the prototype's views (IA
+          work, Art work, Hex work) still keep the zoom tiers at their
+          recommended settings, with no panel to adjust them. */}
+      {ZOOM_TUNING_PANEL && tuning && !realmBackdrop && !hexBackdrop && (
         <MapTuningPanel
           className={styles['map-tuning']}
           config={tierConfig}
